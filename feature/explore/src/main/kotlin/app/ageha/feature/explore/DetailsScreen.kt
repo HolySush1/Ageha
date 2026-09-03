@@ -51,6 +51,8 @@ import coil3.compose.AsyncImage
 fun DetailsScreen(
 	state: DetailsUiState,
 	onOpenChapter: (AgehaChapter) -> Unit,
+	onDownloadChapter: (AgehaChapter) -> Unit,
+	onDownloadAll: () -> Unit,
 	onToggleCategory: (Int) -> Unit,
 	onAddToLibrary: () -> Unit,
 	onRemoveFromLibrary: () -> Unit,
@@ -137,7 +139,7 @@ fun DetailsScreen(
 		}
 
 		Column(Modifier.fillMaxSize()) {
-			ChapterHeader(state, onSelectBranch)
+			ChapterHeader(state, onSelectBranch, onDownloadAll)
 			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 			when {
 				state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -160,7 +162,11 @@ fun DetailsScreen(
 					contentPadding = PaddingValues(vertical = AgehaSpacing.xs),
 				) {
 					items(state.chapters, key = { it.id }) { chapter ->
-						ChapterRow(chapter, onClick = { onOpenChapter(chapter) })
+						ChapterRow(
+							chapter = chapter,
+							onClick = { onOpenChapter(chapter) },
+							onDownload = { onDownloadChapter(chapter) },
+						)
 					}
 				}
 			}
@@ -205,7 +211,11 @@ private fun LibraryActions(
 }
 
 @Composable
-private fun ChapterHeader(state: DetailsUiState, onSelectBranch: (String?) -> Unit) {
+private fun ChapterHeader(
+	state: DetailsUiState,
+	onSelectBranch: (String?) -> Unit,
+	onDownloadAll: () -> Unit,
+) {
 	Row(
 		Modifier.fillMaxWidth().padding(AgehaSpacing.md),
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
@@ -215,6 +225,9 @@ private fun ChapterHeader(state: DetailsUiState, onSelectBranch: (String?) -> Un
 			"${state.chapters.size} chapters",
 			style = MaterialTheme.typography.titleMedium,
 		)
+		if (state.chapters.isNotEmpty()) {
+			androidx.compose.material3.TextButton(onClick = onDownloadAll) { Text("Download all") }
+		}
 		// Branches are the source's scanlation groups or languages. Only offered when there is
 		// more than one -- a single-branch manga does not need a control that does nothing.
 		if (state.branches.size > 1) {
@@ -234,7 +247,7 @@ private fun ChapterHeader(state: DetailsUiState, onSelectBranch: (String?) -> Un
 }
 
 @Composable
-private fun ChapterRow(chapter: AgehaChapter, onClick: () -> Unit) {
+private fun ChapterRow(chapter: AgehaChapter, onClick: () -> Unit, onDownload: () -> Unit) {
 	Row(
 		Modifier
 			.fillMaxWidth()
@@ -262,6 +275,7 @@ private fun ChapterRow(chapter: AgehaChapter, onClick: () -> Unit) {
 				)
 			}
 		}
+		androidx.compose.material3.TextButton(onClick = onDownload) { Text("Download") }
 	}
 }
 

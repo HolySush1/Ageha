@@ -28,6 +28,7 @@ import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.BrandAssets
 import app.ageha.core.designsystem.ThemeGallery
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -136,6 +137,13 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					event.isCtrlPressed && event.key == Key.Two -> {
 						navigator.switchTo(Section.EXPLORE); true
 					}
+					event.isCtrlPressed && event.key == Key.Three -> {
+						navigator.switchTo(Section.DOWNLOADS); true
+					}
+					// Ctrl+comma opens preferences on every desktop platform worth matching.
+					event.isCtrlPressed && event.key == Key.Comma -> {
+						navigator.switchTo(Section.SETTINGS); true
+					}
 					// Ctrl+F focuses whichever search field the current screen owns. Every screen
 					// has exactly one, so there is no ambiguity about which.
 					event.isCtrlPressed && event.key == Key.F -> {
@@ -153,6 +161,8 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 	) {
 		MenuBar {
 			Menu("File", mnemonic = 'F') {
+				Item("Import Android backup...") { importBackup(app, navigator) }
+				Separator()
 				Item("Quit", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Q, ctrl = true), onClick = onExit)
 			}
 			Menu("View", mnemonic = 'V') {
@@ -161,6 +171,12 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				}
 				Item("Explore", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Two, ctrl = true)) {
 					navigator.switchTo(Section.EXPLORE)
+				}
+				Item("Downloads", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Three, ctrl = true)) {
+					navigator.switchTo(Section.DOWNLOADS)
+				}
+				Item("Settings", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Comma, ctrl = true)) {
+					navigator.switchTo(Section.SETTINGS)
 				}
 				Separator()
 				for (mode in AgehaThemeMode.entries) {
@@ -191,6 +207,7 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				},
 				keyRouter = keyRouter,
 				onToggleFullscreen = { isFullscreen = !isFullscreen },
+				onImportBackup = { importBackup(app, navigator) },
 			)
 		}
 	}
@@ -198,3 +215,24 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 
 /** Long enough that dragging a window is one write, short enough to survive a crash. */
 private const val WINDOW_SAVE_DEBOUNCE_MS = 400L
+
+/**
+ * Pick a backup and restore it.
+ *
+ * The picker runs on the calling thread because `FileDialog` is modal and must be -- the user is
+ * choosing a file and nothing else should proceed. The import itself is launched onto the
+ * application scope, since restoring a large library takes long enough to block the UI thread
+ * noticeably.
+ */
+private fun importBackup(app: AgehaApplication, navigator: Navigator) {
+	val file = FilePicker.openFile("Import an Android backup", setOf("zip", "bk")) ?: return
+	app.scope.launch {
+		val result = runCatching { app.backupImporter.import(file) }
+		// The result is printed rather than shown in a dialog for now. The importer already
+		// produces a complete, human-readable account of what it did and did not restore, and
+		// wiring that into a modal is presentation work that does not change the outcome --
+		// but it *is* work still owed, and pretending otherwise would be worse than saying so.
+		println(result.map { it.describe() }.getOrElse { "Backup import failed: ${it.message}" })
+		navigator.switchTo(Section.LIBRARY)
+	}
+}

@@ -10,6 +10,7 @@ import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
+import app.ageha.core.js.RhinoJsRuntime
 import app.ageha.core.parsers.Ageha
 import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.UpdateOutcome
@@ -38,7 +39,7 @@ fun main(args: Array<String>) {
 		printUsage()
 		exitProcess(2)
 	}
-	val stack = Ageha.createSourceStack()
+	val stack = Ageha.createSourceStack(jsRuntime = RhinoJsRuntime())
 	try {
 		runBlocking {
 			when (val command = args[0]) {

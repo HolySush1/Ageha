@@ -27,7 +27,12 @@ fun main(args: Array<String>) {
 	val outDir = File(args.firstOrNull() ?: "build/shell").apply { mkdirs() }
 	val app = AgehaApplication.start()
 	try {
-		for ((name, section) in listOf("library" to Section.LIBRARY, "explore" to Section.EXPLORE)) {
+		for ((name, section) in listOf(
+			"library" to Section.LIBRARY,
+			"explore" to Section.EXPLORE,
+			"downloads" to Section.DOWNLOADS,
+			"settings" to Section.SETTINGS,
+		)) {
 			val navigator = Navigator().apply { switchTo(section) }
 			val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
 				AgehaTheme(mode = AgehaThemeMode.DARK) {

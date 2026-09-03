@@ -42,6 +42,10 @@ coil = "3.4.0"
 # DI. Koin rather than Hilt/Dagger -- no annotation processing, and it is not Android-coupled.
 koin = "4.2.2"
 
+# Rhino for the PLAIN_SCRIPT JavaScript tier. Pure Java: no native library, and therefore no
+# per-platform packaging problem. See docs/ARCHITECTURE.md 5 for why this is not QuickJS.
+rhino = "1.9.1"
+
 # Build-time only: Google's Material colour science (HCT/CAM16), used by :tools:brandkit to
 # derive the tonal palettes from the brand seed. It is NOT a dependency of the app -- the
 # generated tokens are committed as literal hex. See docs/DESIGN.md 2.
@@ -98,3 +102,4 @@ koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
 
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
 compose-material-icons-core = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "compose-material-icons" }
+rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }

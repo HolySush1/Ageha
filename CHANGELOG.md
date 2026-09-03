@@ -130,6 +130,18 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   - CBZ archives are read straight out of the zip, through the same image pipeline as remote
     sources. CBR is refused with a reason the user can act on rather than a generic failure.
 
+- **Milestone 8 -- settings, downloads and the JavaScript engine.**
+  - `:core:js` gains a **real backend**: Rhino, serving the `PLAIN_SCRIPT` tier, sandboxed and
+    time-bounded. This is what makes the ~257 conditionally-JS sources work.
+  - `:feature:settings` -- appearance, reader defaults, backup import, and the first user-facing
+    view of Layer 1: active build, update policy, check, roll back, pin, and what the JavaScript
+    engine can and cannot do.
+  - `:feature:downloads` and `ChapterDownloader` -- offline chapters written as ordinary CBZ, two
+    at a time per source, with a queue that reports what it skipped and why.
+  - A native file picker, `Ctrl+3` for downloads and `Ctrl+,` for settings.
+  - **Tracking is not built.** It needs OAuth clients registered per service; see
+    `docs/ARCHITECTURE.md` 7b.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
@@ -160,3 +172,11 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   REVERSED is 3, VERTICAL is 4.
 - Webtoon mode uses a lazy list. That was flagged as a risk in ARCHITECTURE 1.4 and the risk is
   not yet closed: it has not been profiled against a real 200-page strip.
+- The JavaScript engine is **Rhino, not QuickJS**. The tier it serves is pure ES5 computation, and
+  Rhino removes six native binaries from the packaging problem. `JsRuntime` is unchanged, so the
+  choice is reversible.
+- Scripts run with no Java bridge and a wall-clock deadline, because the script is served by the
+  site being scraped.
+- Downloads are limited to **two at a time per source**. The cost of being impolite to a small site
+  is not a slow download; it is a block affecting every Ageha user of that source.
+- A `.cbz` on disk is always complete: downloads are written to `.part` and renamed on success.

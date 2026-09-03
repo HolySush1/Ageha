@@ -7,8 +7,13 @@ import app.ageha.core.data.SourceRepository
 import app.ageha.core.database.AgehaDatabase
 import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.image.AgehaImages
+import app.ageha.core.js.JsRuntime
+import app.ageha.core.js.RhinoJsRuntime
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.parsers.Ageha
+import app.ageha.core.backup.BackupImporter
+import app.ageha.core.data.ChapterDownloader
+import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.SourceStack
 import app.ageha.core.source.MangaSourceRegistry
 import coil3.ImageLoader
@@ -33,10 +38,21 @@ import java.io.File
 val agehaModule = module {
 	single { PreferencesStore() }
 
+	/*
+	 * The JavaScript engine. Rhino, serving the PLAIN_SCRIPT tier.
+	 *
+	 * This is what makes the ~257 conditionally-JS sources work: they are ordinary sources until
+	 * the site decides to serve an anti-bot interstitial, at which point the parser needs a script
+	 * evaluated or it fails. Without a runtime those sources work most days and mysteriously do
+	 * not on others. The remaining ~20 that need a real browser still refuse, with an actionable
+	 * message rather than a generic error -- see FailureNotice.
+	 */
+	single<JsRuntime> { RhinoJsRuntime() }
+
 	// One source stack for the process. It owns the OkHttp client, the cookie jar and the
 	// classloader holding the parsers build, and it is the only thing allowed to close them --
 	// see the single-owner note on SourceStack.
-	single { Ageha.createSourceStack() }
+	single { Ageha.createSourceStack(jsRuntime = get()) }
 	single<MangaSourceRegistry> { get<SourceStack>().registry }
 
 	single { AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db")) }
@@ -49,6 +65,31 @@ val agehaModule = module {
 	single { LibraryRepository(get<AgehaDatabase>()) }
 	single { SourceRepository(get<AgehaDatabase>().sourcesDao(), get<MangaSourceRegistry>()) }
 	single { CatalogRepository(get<MangaSourceRegistry>()) }
+	single {
+		ParsersUpdateService(
+			httpClient = get<SourceStack>().httpClient,
+			installation = get<SourceStack>().installation,
+			cookieJar = get<SourceStack>().cookieJar,
+			jsRuntime = get(),
+		)
+	}
+	single { BackupImporter(get<AgehaDatabase>()) }
+	single {
+		ChapterDownloader(
+			catalog = get(),
+			root = File(AgehaPaths.dataDir, "downloads"),
+			// The downloader fetches images through the *source stack's* client, so a page request
+			// carries the same cookies and User-Agent the chapter listing did. A separate client
+			// would be a separate identity to the site, and several sources gate images on it.
+			fetchImage = { url, headers ->
+				val request = okhttp3.Request.Builder().url(url).apply {
+					headers.forEach { (name, value) -> header(name, value) }
+				}.build()
+				val response = get<SourceStack>().httpClient.newCall(request).execute()
+				if (response.isSuccessful) response.body.byteStream() else { response.close(); null }
+			},
+		)
+	}
 	single {
 		ReaderRepository(
 			catalog = get(),
@@ -78,6 +119,10 @@ class AgehaApplication private constructor(
 	val reader: ReaderRepository get() = koin.get()
 	val imageLoader: ImageLoader get() = koin.get()
 	val sourceStack: SourceStack get() = koin.get()
+	val parsersUpdates: ParsersUpdateService get() = koin.get()
+	val backupImporter: BackupImporter get() = koin.get()
+	val downloader: ChapterDownloader get() = koin.get()
+	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()
 
 	fun close() {

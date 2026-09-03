@@ -40,9 +40,14 @@ import app.ageha.feature.explore.BrowseViewModel
 import app.ageha.feature.explore.DetailsScreen
 import app.ageha.feature.explore.DetailsViewModel
 import app.ageha.feature.explore.ExploreViewModel
+import app.ageha.feature.downloads.DownloadQueue
+import app.ageha.feature.downloads.DownloadsScreen
 import app.ageha.feature.explore.SourcePickerScreen
 import app.ageha.feature.library.LibraryScreen
+import app.ageha.core.parsers.Ageha
 import app.ageha.feature.library.LibraryViewModel
+import app.ageha.feature.settings.ParsersViewModel
+import app.ageha.feature.settings.SettingsScreen
 import app.ageha.feature.reader.AutoHideChrome
 import app.ageha.feature.reader.ReaderActions
 import app.ageha.feature.reader.ReaderKeys
@@ -68,6 +73,7 @@ fun AgehaShell(
 	onPreferencesChange: (Preferences) -> Unit = {},
 	keyRouter: KeyRouter = remember { KeyRouter() },
 	onToggleFullscreen: () -> Unit = {},
+	onImportBackup: () -> Unit = {},
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember { LibraryViewModel(application.library, application.catalog, scope) }
@@ -77,6 +83,17 @@ fun AgehaShell(
 		DetailsViewModel(application.catalog, application.library, scope)
 	}
 	val readerViewModel = remember { ReaderViewModel(application.reader, scope) }
+	val downloadQueue = remember { DownloadQueue(application.downloader, scope) }
+	val parsersViewModel = remember {
+		ParsersViewModel(
+			installation = application.sourceStack.installation,
+			updates = application.parsersUpdates,
+			bundledVersion = Ageha.BUNDLED_PARSERS_VERSION,
+			activeVersion = application.sourceStack.parsersVersion,
+			sourceCount = application.sources.allDescriptors().size,
+			scope = scope,
+		)
+	}
 
 	Row(modifier.fillMaxSize()) {
 		// The reader takes the whole window. Chrome around a page is chrome over somebody's
@@ -98,6 +115,39 @@ fun AgehaShell(
 							onNeedHeaders = libraryViewModel::ensureHeaders,
 							onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
 							searchFocus = searchFocus,
+						)
+					}
+
+					Destination.Downloads -> {
+						val queued by downloadQueue.jobs.collectAsState()
+						DownloadsScreen(
+							jobs = queued,
+							onCancel = downloadQueue::cancel,
+							onRetry = downloadQueue::retry,
+							onCancelAll = downloadQueue::cancelAll,
+							onClearFinished = downloadQueue::clearFinished,
+						)
+					}
+
+					Destination.Settings -> {
+						val parsersState by parsersViewModel.state.collectAsState()
+						SettingsScreen(
+							theme = preferences.theme,
+							readerBackground = preferences.readerBackground,
+							doublePage = preferences.doublePage,
+							coverOffset = preferences.coverOffset,
+							parsers = parsersState,
+							jsRuntime = application.jsRuntime,
+							parsersDescription = parsersViewModel::describe,
+							onTheme = { onPreferencesChange(preferences.copy(theme = it)) },
+							onReaderBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+							onDoublePage = { onPreferencesChange(preferences.copy(doublePage = it)) },
+							onCoverOffset = { onPreferencesChange(preferences.copy(coverOffset = it)) },
+							onUpdatePolicy = parsersViewModel::setPolicy,
+							onCheckForUpdate = parsersViewModel::checkForUpdate,
+							onRollBack = parsersViewModel::rollBack,
+							onPin = parsersViewModel::pin,
+							onImportBackup = onImportBackup,
 						)
 					}
 
@@ -211,6 +261,12 @@ fun AgehaShell(
 								state = state,
 								onOpenChapter = { chapter ->
 									state.manga?.let { navigator.read(it, chapter) }
+								},
+								onDownloadChapter = { chapter ->
+									state.manga?.let { downloadQueue.enqueue(it, listOf(chapter)) }
+								},
+								onDownloadAll = {
+									state.manga?.let { downloadQueue.enqueue(it, state.chapters) }
 								},
 								onToggleCategory = detailsViewModel::toggleCategory,
 								onAddToLibrary = detailsViewModel::addToDefaultCategory,

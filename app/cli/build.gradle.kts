@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
 	implementation(project(":core:parsers"))
+	implementation(project(":core:js"))
 	implementation(project(":core:model"))
 	implementation(project(":core:backup"))
 	implementation(project(":core:database"))

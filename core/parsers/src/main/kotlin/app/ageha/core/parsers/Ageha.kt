@@ -95,7 +95,12 @@ class SourceStack internal constructor(
 	val httpClient: OkHttpClient,
 	private val bridge: ParserBridge,
 	private val loader: ParsersClassLoader,
-	private val cookieJar: PersistentCookieJar,
+	/**
+	 * Shared with the update service, which needs it to fetch candidate builds through the same
+	 * session the app already has. Exposed rather than duplicated: a second cookie jar would mean
+	 * JitPack and the sources disagreeing about who Ageha is.
+	 */
+	val cookieJar: PersistentCookieJar,
 	private val jsRuntime: JsRuntime,
 ) {
 

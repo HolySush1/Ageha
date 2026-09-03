@@ -36,9 +36,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "ageha"
 
-// Modules arrive at their milestone. The remaining feature modules (:feature:downloads,
-// :feature:tracking, :feature:settings, :feature:updates) land at milestones 8-9; they are
-// documented in docs/ARCHITECTURE.md 2 but not declared here until they contain something.
+// Modules arrive at their milestone. :feature:tracking is the last one outstanding -- it needs
+// OAuth clients registered with Shikimori, AniList, MyAnimeList and Kitsu, which is the project
+// owner's to do; see docs/ARCHITECTURE.md 9. :feature:updates was folded into :feature:settings,
+// because the update engine lives in :core:parsers and needed a screen rather than a module.
 include(
 	":core:model",
 	":core:network",
@@ -53,6 +54,8 @@ include(
 	":feature:library",
 	":feature:explore",
 	":feature:reader",
+	":feature:settings",
+	":feature:downloads",
 	":app:cli",
 	":app:desktop",
 	// Not shipped. Build-time asset and token generation; see docs/DESIGN.md 2.

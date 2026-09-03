@@ -12,6 +12,8 @@ import app.ageha.core.model.AgehaManga
 enum class Section(val label: String, val shortcutHint: String) {
 	LIBRARY("Library", "Ctrl+1"),
 	EXPLORE("Explore", "Ctrl+2"),
+	DOWNLOADS("Downloads", "Ctrl+3"),
+	SETTINGS("Settings", "Ctrl+,"),
 }
 
 /** A screen within a section. */
@@ -19,6 +21,8 @@ enum class Section(val label: String, val shortcutHint: String) {
 sealed interface Destination {
 	data object Library : Destination
 	data object Sources : Destination
+	data object Downloads : Destination
+	data object Settings : Destination
 	data class Browse(val sourceName: String) : Destination
 	data class Details(val manga: AgehaManga) : Destination
 
@@ -51,8 +55,15 @@ class Navigator {
 
 	private val libraryStack = mutableStateListOf<Destination>(Destination.Library)
 	private val exploreStack = mutableStateListOf<Destination>(Destination.Sources)
+	private val downloadsStack = mutableStateListOf<Destination>(Destination.Downloads)
+	private val settingsStack = mutableStateListOf<Destination>(Destination.Settings)
 
-	private val stack get() = if (section == Section.LIBRARY) libraryStack else exploreStack
+	private val stack get() = when (section) {
+		Section.LIBRARY -> libraryStack
+		Section.EXPLORE -> exploreStack
+		Section.DOWNLOADS -> downloadsStack
+		Section.SETTINGS -> settingsStack
+	}
 
 	val current: Destination get() = stack.last()
 

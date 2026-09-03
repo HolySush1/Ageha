@@ -2,7 +2,7 @@
 
 Companion to `FINDINGS.md`. Read that first; this document assumes its conclusions.
 
-Status: **Milestone 7 built and green.** String-based source persistence (§3) was approved and
+Status: **Milestone 8 built and green, except tracking.** String-based source persistence (§3) was approved and
 holds. The parent-first API allowlist described in §4.1 was approved but **did not survive
 contact with the library** — §4.1 now records why, and what replaced it. The four stack decisions
 are in `FINDINGS.md` §8.
@@ -476,8 +476,60 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list; the §1.4 risk is open until it is profiled |
-| 8 | Downloads, tracking, settings | **+ `:core:js` real backends**: QuickJS, then optional on-demand Playwright |
+| 8 | Downloads, tracking, settings | **mostly done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). Tracking is **not built** -- it needs OAuth clients only the project owner can register |
 | 9 | Layer 2 + 3 packaging and CI | `parsers-watch.yml` polls the org repo, resolves SHAs |
+
+---
+
+## 7b. Two milestone-8 decisions worth stating
+
+### The JavaScript engine is Rhino, not QuickJS
+
+QuickJS was chosen at the start of the project, before the workload had been read. Having now read
+it, Rhino is the better answer, and the difference is entirely packaging:
+
+- **QuickJS is native.** Six binaries -- `.dll`, `.so`, `.dylib`, each for x64 and arm64 -- to
+  obtain, verify, bundle and keep in step. Each is a thing that can be missing or blocked, and a
+  load failure degrades a source to "broken" with no useful error.
+- **Rhino is a 1.6MB jar.** It jlinks cleanly, needs nothing per platform, and cross-compiles for
+  free because there is nothing to cross-compile.
+
+The workload does not need what QuickJS is better at. The `PLAIN_SCRIPT` tier is the NetShield /
+slowAES path in `MangaReaderParser`: a site's `min.js` plus an inline script, doing AES in pure ES5
+with no DOM, no network and no timers. Rhino runs it, and ES6 besides.
+
+**This is a swap, not a lock-in.** `JsRuntime` is unchanged and a QuickJS backend would be another
+implementation of it. If the native cost is judged worth paying, nothing above that class moves.
+
+Two details that are not obvious, and are tested:
+
+- The contract is a **function body**, not an expression. Parsers rewrite `document.cookie = <expr>`
+  into `return <expr>`, so what arrives has a top-level `return` -- meaningful only inside a
+  function.
+- The script comes **from the site being scraped** and is hostile input. Rhino's ordinary scope
+  would hand it `java.lang.Runtime`. The sandbox is `initSafeStandardObjects`, a deny-everything
+  `ClassShutter`, and a wall-clock deadline enforced through the instruction observer, all applied
+  at `Context` creation because that is the only place Rhino honours them.
+
+### Tracking is not built, and this is why
+
+Shikimori, AniList, MyAnimeList and Kitsu all require an **OAuth client registered by the
+application's owner** -- a client id and secret issued per service, tied to a redirect URI. Those
+credentials cannot be invented, cannot be checked into a public GPL repository, and cannot be
+tested without being real.
+
+Writing the four integrations blind would produce four untested network clients that look finished
+and work for nobody. What is needed first, and is the project owner's to do:
+
+1. Register an OAuth application with each service, with a loopback redirect URI
+   (`http://127.0.0.1:<port>`), since Ageha is a desktop app and has no web callback.
+2. Decide how the client secret ships. A desktop app cannot keep a secret, so the correct shape is
+   PKCE with a public client, which all four support to varying degrees.
+3. Then the seam is small: a `Tracker` interface with search, bind and push-progress, one
+   implementation per service, and the three tracking tables from the Android schema by migration.
+
+The reader's own progress is already recorded and already survives a backup round trip, so nothing
+about tracking's absence loses data.
 
 ---
 
