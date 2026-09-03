@@ -37,8 +37,8 @@ dependencyResolutionManagement {
 rootProject.name = "ageha"
 
 // Modules arrive at their milestone. Feature modules (:feature:library, :feature:explore,
-// :feature:reader, ...) and :core:designsystem land at milestones 5-8; they are documented
-// in docs/ARCHITECTURE.md 2 but not declared here until they contain something.
+// :feature:reader, ...) land at milestones 6-8; they are documented in docs/ARCHITECTURE.md 2
+// but not declared here until they contain something.
 include(
 	":core:model",
 	":core:network",
@@ -47,5 +47,9 @@ include(
 	":core:backup",
 	":core:database",
 	":core:parsers",
+	":core:designsystem",
 	":app:cli",
+	":app:desktop",
+	// Not shipped. Build-time asset and token generation; see docs/DESIGN.md 2.
+	":tools:brandkit",
 )

@@ -2,7 +2,7 @@
 
 Companion to `FINDINGS.md`. Read that first; this document assumes its conclusions.
 
-Status: **Milestone 3 built and green.** String-based source persistence (§3) was approved and
+Status: **Milestone 5 built and green.** String-based source persistence (§3) was approved and
 holds. The parent-first API allowlist described in §4.1 was approved but **did not survive
 contact with the library** — §4.1 now records why, and what replaced it. The four stack decisions
 are in `FINDINGS.md` §8.
@@ -473,7 +473,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 3 | Layer 1 dynamic loading + tests | **done.** Bridge-based isolation (§4.1), SHA-based updates, gate with a designed rejection path, two builds proven to coexist in one JVM |
 | 4 | Database + library/history persistence | **done.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
 | 4b | **Android backup import** | **done.** History, favourites, categories and sources restore from a real archive; unsupported sections and dropped rows are reported, not hidden |
-| 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | unchanged |
+| 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | surface `isBroken` from the descriptor |
 | 7 | Reader | webtoon scroll surface flagged as a risk (§1.4) |
 | 8 | Downloads, tracking, settings | **+ `:core:js` real backends**: QuickJS, then optional on-demand Playwright |

@@ -86,6 +86,23 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - `selfCheck` no longer swallows `LinkageError`. `runCatching` catches `Error` too, which reported
   a wholesale version mismatch as "25 sources are broken" and pointed at the wrong thing entirely.
 
+- **Milestone 5 -- the design system.**
+  - `:core:designsystem` -- one Material 3 theme in light, dark and AMOLED, a desktop-tuned type
+    scale, a 4dp spacing scale, shape and motion tokens, and the reader's brand-free backgrounds.
+  - `:tools:brandkit` -- build-time only. Derives the tonal palettes from the brand seed using
+    Google's colour science and writes them out as literal hex, and rebuilds every icon and logo
+    asset from `brand/ageha-logo-source.jpg`.
+  - `:app:desktop` -- the theme gallery, showing every token in all three themes side by side.
+    `renderGallery` writes the same view to a PNG with no window, so review does not require this
+    machine.
+  - `docs/DESIGN.md` with the resolved token values and the reasoning behind each departure from
+    stock Material 3.
+  - The vermillion accent is exposed as three components rather than as a colour, so it cannot
+    become a general-purpose highlight.
+  - 117 new tests: 66 WCAG contrast pairs across the three themes, the palette's structural rules,
+    the reader's freedom from brand colour, and the hand-written `.ico`/`.icns` writers parsed back
+    byte by byte.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
@@ -97,3 +114,11 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   longer imply it. `evaluateJs` gaining a third parameter upstream is proof the host contract
   moves. The promise is narrower and honest: routine source updates never need one, and when the
   contract does move, the running build keeps working and the user is told once.
+- The colour tokens are **generated and committed**, not hand-picked. Google's colour-science
+  library is a build-time dependency of `:tools:brandkit` and is not on the application's
+  classpath.
+- All three themes pass WCAG AA on body text, asserted on every build rather than checked once.
+- Nothing brand-coloured reaches the reader, and a test enforces it: reader colours carry under 6%
+  chroma and are never a design-system token.
+- Fonts are **not** bundled yet. The families are an explicit preference chain resolved against
+  what is installed, and the gallery reports per-script CJK coverage so the gap is visible.

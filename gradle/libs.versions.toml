@@ -16,6 +16,15 @@ ksp = "2.2.10-2.0.2"
 room = "2.8.4"
 sqlite = "2.7.0"
 
+# Compose Multiplatform 1.12.0 is the current stable (2026-08-25). The Compose compiler is a
+# Kotlin compiler plugin now, so its version tracks `kotlin` above, not `compose`.
+compose = "1.12.0"
+
+# Build-time only: Google's Material colour science (HCT/CAM16), used by :tools:brandkit to
+# derive the tonal palettes from the brand seed. It is NOT a dependency of the app -- the
+# generated tokens are committed as literal hex. See docs/DESIGN.md 2.
+material-color-utilities = "0.1.2"
+
 # The parsers library. There are no version tags upstream: this is a commit SHA on
 # Kotatsu-Redo/kotatsu-parsers-redo master. See docs/FINDINGS.md 1 before bumping it.
 parsers = "434030d481"
@@ -25,6 +34,8 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
+compose = { id = "org.jetbrains.compose", version.ref = "compose" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -53,3 +64,5 @@ junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+
+material-color-utilities = { module = "me.tatarka.google.material:material-color-utilities", version.ref = "material-color-utilities" }
