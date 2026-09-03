@@ -1,0 +1,127 @@
+# Watches the parsers library for new builds.
+#
+# This is the automation the whole update design exists to serve: sources break weekly, the fix is
+# almost always upstream, and a human should not be in that loop. When a new build appears this
+# bumps the pin, runs the full suite, and opens a PR that merges itself on green.
+#
+# It cannot merge a build that fails, and it never force-pushes. A red run opens an issue instead,
+# because a parsers build that does not pass the gate is exactly the case docs/ARCHITECTURE.md 4.3
+# treats as a designed outcome rather than an emergency.
+name: parsers-watch
+
+on:
+  schedule:
+    # Every six hours. Upstream lands several commits a day when sources break in bulk, and any
+    # longer means a source stays broken for most of a day after the fix exists.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # One at a time. Two runs bumping the same pin would race on the branch.
+  group: parsers-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve upstream HEAD
+        id: upstream
+        run: |
+          # The parsers repo has no version tags, so the pin is a commit SHA. This is the same
+          # resolution ParsersUpdateService does at runtime; see docs/FINDINGS.md 1.
+          sha=$(git ls-remote https://github.com/Kotatsu-Redo/kotatsu-parsers-redo.git HEAD | cut -c1-10)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          current=$(grep -oP '^parsers = "\K[^"]+' gradle/libs.versions.toml)
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          if [ "$sha" = "$current" ]; then echo "changed=false" >> "$GITHUB_OUTPUT";
+          else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Bump the pin
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          sed -i "s/^parsers = \".*\"/parsers = \"${{ steps.upstream.outputs.sha }}\"/" gradle/libs.versions.toml
+
+      # JitPack builds on demand and rate-limits anonymous callers with 429 rather than waiting,
+      # which is how this project's very first build failed. The retry is not optional.
+      - name: Build and test against the new build
+        if: steps.upstream.outputs.changed == 'true'
+        id: verify
+        continue-on-error: true
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if ./gradlew build --no-daemon; then exit 0; fi
+            echo "attempt $attempt failed; JitPack may still be building. Waiting."
+            sleep 120
+          done
+          exit 1
+
+      # A live check against real sources. The unit suite proves Ageha still compiles and behaves;
+      # only this proves the new parsers build can still reach a website.
+      - name: Smoke test a sample of sources
+        if: steps.upstream.outputs.changed == 'true' && steps.verify.outcome == 'success'
+        id: smoke
+        continue-on-error: true
+        run: ./gradlew :app:cli:run --args="smoke --sample 15" --no-daemon
+
+      - name: Open a pull request
+        if: steps.upstream.outputs.changed == 'true' && steps.verify.outcome == 'success'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: parsers/${{ steps.upstream.outputs.sha }}
+          commit-message: "chore(parsers): bump to ${{ steps.upstream.outputs.sha }}"
+          title: "chore(parsers): bump to ${{ steps.upstream.outputs.sha }}"
+          body: |
+            Automated bump of the parsers pin.
+
+            - Was: `${{ steps.upstream.outputs.current }}`
+            - Now: `${{ steps.upstream.outputs.sha }}`
+            - Full test suite: passed
+            - Live source smoke test: ${{ steps.smoke.outcome }}
+
+            The smoke test result is reported rather than gating, because a single dead source is
+            a normal Tuesday and is not a reason to hold back a build that fixes ten others.
+          labels: parsers, automated
+
+      - name: Report a failure
+        if: steps.upstream.outputs.changed == 'true' && steps.verify.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = "${{ steps.upstream.outputs.sha }}";
+            const title = `Parsers build ${sha} does not work with Ageha`;
+            // One issue per bad build, not one per run. Six runs a day against the same broken
+            // upstream would otherwise be twenty-four issues by tomorrow.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "parsers",
+            });
+            if (existing.data.some(i => i.title === title)) return;
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title,
+              labels: ["parsers", "automated"],
+              body: [
+                `Parsers build \`${sha}\` failed Ageha's build or test suite, so the pin was not bumped.`,
+                ``,
+                `Ageha is still on \`${{ steps.upstream.outputs.current }}\` and is unaffected -- this`,
+                `is the compatibility gate doing its job, not an outage.`,
+                ``,
+                `The usual cause is a change to \`MangaLoaderContext\`, which is the one part of the`,
+                `parsers API that does move (docs/FINDINGS.md 5). Check \`:core:jvmcontext\` first.`,
+              ].join("\n"),
+            });

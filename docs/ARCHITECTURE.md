@@ -2,7 +2,7 @@
 
 Companion to `FINDINGS.md`. Read that first; this document assumes its conclusions.
 
-Status: **Milestone 8 built and green, except tracking.** String-based source persistence (§3) was approved and
+Status: **All nine milestones built and green, except tracking.** String-based source persistence (§3) was approved and
 holds. The parent-first API allowlist described in §4.1 was approved but **did not survive
 contact with the library** — §4.1 now records why, and what replaced it. The four stack decisions
 are in `FINDINGS.md` §8.
@@ -477,7 +477,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list; the §1.4 risk is open until it is profiled |
 | 8 | Downloads, tracking, settings | **mostly done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). Tracking is **not built** -- it needs OAuth clients only the project owner can register |
-| 9 | Layer 2 + 3 packaging and CI | `parsers-watch.yml` polls the org repo, resolves SHAs |
+| 9 | Layer 2 + 3 packaging and CI | **done, one caveat.** Conveyor config, four workflows, `UPDATING.md` and `RELEASING.md`. Conveyor itself is not installed on this machine, so the config is written and syntax-checked but has not built an installer |
 
 ---
 

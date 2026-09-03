@@ -1,0 +1,48 @@
+# The ordinary build. Runs on every push and pull request.
+#
+# Hermetic: no network-tagged tests, no live sources. Those live in source-smoke.yml, once a night,
+# where being slow and occasionally red for reasons outside the repository does not block anyone.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        # All three, because the parts most likely to differ are the ones this project leans on:
+        # file locking and renaming on Windows, path handling everywhere, and the bundled SQLite
+        # and Skia natives. A Linux-only CI would have missed every Windows bug found so far.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        run: ./gradlew build --no-daemon
+
+      # Proves the application actually composes against the real graph -- the real parsers build
+      # through the classloader boundary, the real database, the real screens -- without a display.
+      # A green unit suite does not catch a shell that opens blank.
+      - name: Render the shell headlessly
+        run: ./gradlew :app:desktop:renderShell --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shell-${{ matrix.os }}
+          path: app/desktop/build/shell/

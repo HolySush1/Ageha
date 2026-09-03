@@ -47,6 +47,13 @@ fun main(args: Array<String>) {
 				"parsers" -> parsers(stack, args.getOrNull(1))
 				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
 				"library" -> library()
+				"smoke" -> smokeTest(
+					stack = stack,
+					sampleSize = flag(args, "--sample")?.toIntOrNull() ?: 15,
+					// Seeded so a failing nightly run can be reproduced exactly. Without a seed
+					// the sample differs every time and a failure cannot be looked at twice.
+					seed = flag(args, "--seed")?.toLongOrNull() ?: System.currentTimeMillis(),
+				)
 				"search" -> requireArgs(args, 3) { search(stack, args[1], args[2]) }
 				"details" -> requireArgs(args, 3) {
 					details(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
@@ -425,10 +432,18 @@ private fun printUsage() {
 		  search  <SOURCE> <query>      search one source
 		  details <SOURCE> <query> [n]  details and chapters for search result n (default 0)
 		  pages   <SOURCE> <query> [n]  page image urls for the first chapter of result n
+		  smoke   [--sample n] [--seed s]
+		                                exercise a random sample of sources end to end
 
 		SOURCE is a source name from 'sources', for example MANGADEX.
 
 		Every command except 'sources' hits the live internet.
 		""".trimIndent(),
 	)
+}
+
+/** Reads `--name value` from the argument list. The CLI has too few options to need a parser. */
+private fun flag(args: Array<String>, name: String): String? {
+	val index = args.indexOf(name)
+	return if (index >= 0 && index + 1 < args.size) args[index + 1] else null
 }

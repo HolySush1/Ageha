@@ -2,6 +2,9 @@ plugins {
 	alias(libs.plugins.compose)
 	alias(libs.plugins.compose.compiler)
 	alias(libs.plugins.kotlin.serialization)
+	// Packaging. Generates the Conveyor config fragment describing this module's classpath and
+	// JVM, so conveyor.conf does not have to restate anything the build already knows.
+	alias(libs.plugins.conveyor)
 }
 
 dependencies {
@@ -24,6 +27,17 @@ dependencies {
 	implementation(libs.kotlinx.coroutines.core)
 	implementation(libs.kotlinx.serialization.json)
 	runtimeOnly(libs.sqlite.bundled)
+
+	// Skia is native, so Compose Desktop ships a different artifact per platform. `currentOS`
+	// above is right for running and testing here; these are what Conveyor needs to build an
+	// installer for a machine that is not this one. Without them, a Linux build made on Windows
+	// would carry Windows Skia and fail at first paint.
+	"linuxAmd64"(compose.desktop.linux_x64)
+	"linuxAarch64"(compose.desktop.linux_arm64)
+	"macAmd64"(compose.desktop.macos_x64)
+	"macAarch64"(compose.desktop.macos_arm64)
+	"windowsAmd64"(compose.desktop.windows_x64)
+	"windowsAarch64"(compose.desktop.windows_arm64)
 }
 
 compose.desktop {

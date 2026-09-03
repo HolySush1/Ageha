@@ -142,6 +142,16 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   - **Tracking is not built.** It needs OAuth clients registered per service; see
     `docs/ARCHITECTURE.md` 7b.
 
+- **Milestone 9 -- packaging and CI.**
+  - `conveyor.conf` -- signed, self-updating installers for six targets from one machine. The
+    icon ladder is handed over explicitly rather than generated, so the simplified small-size mark
+    survives.
+  - `.github/workflows/` -- `ci.yml` on all three operating systems, `parsers-watch.yml` every six
+    hours, `source-smoke.yml` nightly, `release.yml` on a tag.
+  - `cli smoke` -- exercises a random sample of real sources end to end, seeded so a failing run
+    can be reproduced exactly.
+  - `docs/UPDATING.md` and `docs/RELEASING.md`.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
@@ -180,3 +190,10 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - Downloads are limited to **two at a time per source**. The cost of being impolite to a small site
   is not a slow download; it is a block affecting every Ageha user of that source.
 - A `.cbz` on disk is always complete: downloads are written to `.part` and renamed on success.
+- The nightly smoke test fails only when failures are numerous **and alike**. A rate-only gate was
+  tried first and tripped on an ordinary night: 9 of 12 sources failed, across three unrelated
+  causes, which is simply the state of the scanlation web.
+- CI runs on Linux, Windows **and** macOS. Every platform-specific bug found in this project so far
+  has been a Windows file-handle problem, which a Linux-only CI would have missed.
+- Releases are **unsigned**. Certificates are a separate paid cost; `docs/RELEASING.md` lists the
+  routes and the workarounds users need meanwhile.

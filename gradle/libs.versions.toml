@@ -46,6 +46,11 @@ koin = "4.2.2"
 # per-platform packaging problem. See docs/ARCHITECTURE.md 5 for why this is not QuickJS.
 rhino = "1.9.1"
 
+# Hydraulic Conveyor. Free for OSS under an OSI-approved licence, which GPL-3.0 is; the licence is
+# activated by setting `app.vcs-url` in conveyor.conf and carries one obligation, which the README
+# discharges. See docs/RELEASING.md.
+conveyor = "2.0"
+
 # Build-time only: Google's Material colour science (HCT/CAM16), used by :tools:brandkit to
 # derive the tonal palettes from the brand seed. It is NOT a dependency of the app -- the
 # generated tokens are committed as literal hex. See docs/DESIGN.md 2.
@@ -62,6 +67,7 @@ ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
