@@ -10,6 +10,7 @@ import app.ageha.core.model.ReaderMode
 import app.ageha.core.model.SourceFailure
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -206,7 +207,12 @@ class ReaderViewModel(
 	/** Flush the position immediately. Called when the reader closes, where a debounce would lose it. */
 	fun savePositionNow() {
 		saveJob?.cancel()
-		scope.launch { writePosition() }
+		// NonCancellable, because this runs when the reader is being torn down -- often because
+		// the window is closing, which cancels the scope a moment later. A cancellable write
+		// would lose exactly the page turn the reader most wants remembered: the last one.
+		// `AgehaApplication.close` joins the scope after cancelling it, so this still completes
+		// before the database is closed underneath it.
+		scope.launch(NonCancellable) { writePosition() }
 	}
 
 	/**

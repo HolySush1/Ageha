@@ -152,6 +152,32 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     can be reproduced exactly.
   - `docs/UPDATING.md` and `docs/RELEASING.md`.
 
+- **Local comic archives, end to end.** File > Open comic archive reads a CBZ straight into the
+  reader, through the same image pipeline as a remote source. Reading position persists for local
+  files too, since the archive's id is derived from its absolute path.
+- **Application notices.** Backup import and archive opening now report their outcome *in the
+  window* instead of on stdout, which a windowed application does not have. The backup importer's
+  full account -- restored, unsupported, unrecognised, and every dropped row with its reason --
+  is shown monospaced and stays until dismissed.
+
+### Fixed
+
+- **Cover and page images used Coil's default loader, not Ageha's.** The configured loader was
+  registered in DI and handed to Compose nowhere, so every `AsyncImage` silently fell back to a
+  default with neither the archive fetcher nor Ageha's OkHttp client -- meaning no cookie jar, no
+  User-Agent and no per-source `Referer` on any image request. Found by rendering the reader
+  against a real CBZ and getting a blank page.
+- **The archive fetcher never matched.** Coil runs its mappers before consulting fetchers, so the
+  `cbz://` model had already become a `coil3.Uri` and a factory matching only `String` declined
+  every request.
+- **Reading anything not already favourited saved no history.** `history.manga_id` is an enforced
+  foreign key and the manga row was only ever written by favouriting, so reading from search, from
+  a listing, or from a local file failed the constraint and recorded nothing.
+- **Shutdown raced the database.** Cancelling the application scope does not wait for work already
+  inside a query, so closing could throw `connection is closed` from a background thread. Shutdown
+  now joins the cancelled scope with a bounded grace period, and the reader's final position write
+  is `NonCancellable` so the last page turn survives quitting.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.

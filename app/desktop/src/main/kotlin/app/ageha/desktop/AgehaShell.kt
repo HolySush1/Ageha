@@ -95,190 +95,203 @@ fun AgehaShell(
 		)
 	}
 
-	Row(modifier.fillMaxSize()) {
-		// The reader takes the whole window. Chrome around a page is chrome over somebody's
-		// manga, and the rail is the app talking about itself while they are trying to read.
-		if (!navigator.isImmersive) NavigationRail(navigator)
-		Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-			Column(Modifier.fillMaxSize()) {
-				when (val destination = navigator.current) {
-					Destination.Library -> {
-						val state by libraryViewModel.state.collectAsState()
-						val headers by libraryViewModel.imageHeaders.collectAsState()
-						LibraryScreen(
-							state = state,
-							imageHeaders = headers,
-							onOpenManga = navigator::openManga,
-							onSelectCategory = libraryViewModel::selectCategory,
-							onSearch = libraryViewModel::search,
-							onSort = libraryViewModel::setSort,
-							onNeedHeaders = libraryViewModel::ensureHeaders,
-							onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
-							searchFocus = searchFocus,
-						)
-					}
+	val notices by application.notices.notices.collectAsState()
 
-					Destination.Downloads -> {
-						val queued by downloadQueue.jobs.collectAsState()
-						DownloadsScreen(
-							jobs = queued,
-							onCancel = downloadQueue::cancel,
-							onRetry = downloadQueue::retry,
-							onCancelAll = downloadQueue::cancelAll,
-							onClearFinished = downloadQueue::clearFinished,
-						)
-					}
-
-					Destination.Settings -> {
-						val parsersState by parsersViewModel.state.collectAsState()
-						SettingsScreen(
-							theme = preferences.theme,
-							readerBackground = preferences.readerBackground,
-							doublePage = preferences.doublePage,
-							coverOffset = preferences.coverOffset,
-							parsers = parsersState,
-							jsRuntime = application.jsRuntime,
-							parsersDescription = parsersViewModel::describe,
-							onTheme = { onPreferencesChange(preferences.copy(theme = it)) },
-							onReaderBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
-							onDoublePage = { onPreferencesChange(preferences.copy(doublePage = it)) },
-							onCoverOffset = { onPreferencesChange(preferences.copy(coverOffset = it)) },
-							onUpdatePolicy = parsersViewModel::setPolicy,
-							onCheckForUpdate = parsersViewModel::checkForUpdate,
-							onRollBack = parsersViewModel::rollBack,
-							onPin = parsersViewModel::pin,
-							onImportBackup = onImportBackup,
-						)
-					}
-
-					Destination.Sources -> {
-						val state by exploreViewModel.state.collectAsState()
-						SourcePickerScreen(
-							state = state,
-							onOpenSource = navigator::openSource,
-							onSearch = exploreViewModel::search,
-							onFilter = exploreViewModel::setFilter,
-							onLocale = exploreViewModel::setLocale,
-							onSetEnabled = exploreViewModel::setEnabled,
-							searchFocus = searchFocus,
-						)
-					}
-
-					is Destination.Browse -> {
-						// Keyed on the source name so switching sources restarts the listing
-						// rather than appending one source's results to another's.
-						LaunchedEffect(destination.sourceName) { browseViewModel.open(destination.sourceName) }
-						val state by browseViewModel.state.collectAsState()
-						Column(Modifier.fillMaxSize()) {
-							BreadcrumbBar(navigator, state.sourceTitle)
-							BrowseScreen(
+	// Boxed so notices can float over whatever screen is current. They are application-level --
+	// a backup import's report outlives the screen that started it -- so they are anchored to the
+	// window rather than owned by a screen.
+	Box(modifier.fillMaxSize()) {
+		Row(Modifier.fillMaxSize()) {
+			// The reader takes the whole window. Chrome around a page is chrome over somebody's
+			// manga, and the rail is the app talking about itself while they are trying to read.
+			if (!navigator.isImmersive) NavigationRail(navigator)
+			Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+				Column(Modifier.fillMaxSize()) {
+					when (val destination = navigator.current) {
+						Destination.Library -> {
+							val state by libraryViewModel.state.collectAsState()
+							val headers by libraryViewModel.imageHeaders.collectAsState()
+							LibraryScreen(
 								state = state,
+								imageHeaders = headers,
 								onOpenManga = navigator::openManga,
-								onSort = browseViewModel::setSort,
-								onSearch = browseViewModel::search,
-								onSubmitSearch = browseViewModel::submitSearch,
-								onLoadMore = { browseViewModel.loadMore() },
-								onRetry = browseViewModel::retry,
+								onSelectCategory = libraryViewModel::selectCategory,
+								onSearch = libraryViewModel::search,
+								onSort = libraryViewModel::setSort,
+								onNeedHeaders = libraryViewModel::ensureHeaders,
+								onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
 								searchFocus = searchFocus,
 							)
 						}
-					}
 
-					is Destination.Read -> {
-						LaunchedEffect(destination.chapter.id) {
-							readerViewModel.open(destination.manga, destination.chapter)
+						Destination.Downloads -> {
+							val queued by downloadQueue.jobs.collectAsState()
+							DownloadsScreen(
+								jobs = queued,
+								onCancel = downloadQueue::cancel,
+								onRetry = downloadQueue::retry,
+								onCancelAll = downloadQueue::cancelAll,
+								onClearFinished = downloadQueue::clearFinished,
+							)
 						}
-						val state by readerViewModel.state.collectAsState()
-						// The reader owns the keyboard while it is open. Registering the handler
-						// here rather than in the window means the bindings live with the screen
-						// that defines them, and unregister themselves when it goes away.
-						androidx.compose.runtime.DisposableEffect(state.mode, state.pageCount) {
-							keyRouter.install { event ->
-								ReaderKeys.handle(
-									event = event,
-									mode = state.mode,
-									pageCount = state.pageCount,
-									actions = object : ReaderActions {
-										override fun nextPage() = readerViewModel.nextPage()
-										override fun previousPage() = readerViewModel.previousPage()
-										override fun nextChapter() = readerViewModel.nextChapter()
-										override fun previousChapter() = readerViewModel.previousChapter()
-										override fun goToPage(index: Int) = readerViewModel.goToPage(index)
-										override fun setScale(scale: app.ageha.core.model.PageScale) =
-											readerViewModel.setScale(scale)
-										override fun toggleChrome() = readerViewModel.toggleChrome()
-										override fun toggleFullscreen() = onToggleFullscreen()
-										override fun close() {
-											navigator.back()
-										}
-									},
+
+						Destination.Settings -> {
+							val parsersState by parsersViewModel.state.collectAsState()
+							SettingsScreen(
+								theme = preferences.theme,
+								readerBackground = preferences.readerBackground,
+								doublePage = preferences.doublePage,
+								coverOffset = preferences.coverOffset,
+								parsers = parsersState,
+								jsRuntime = application.jsRuntime,
+								parsersDescription = parsersViewModel::describe,
+								onTheme = { onPreferencesChange(preferences.copy(theme = it)) },
+								onReaderBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+								onDoublePage = { onPreferencesChange(preferences.copy(doublePage = it)) },
+								onCoverOffset = { onPreferencesChange(preferences.copy(coverOffset = it)) },
+								onUpdatePolicy = parsersViewModel::setPolicy,
+								onCheckForUpdate = parsersViewModel::checkForUpdate,
+								onRollBack = parsersViewModel::rollBack,
+								onPin = parsersViewModel::pin,
+								onImportBackup = onImportBackup,
+							)
+						}
+
+						Destination.Sources -> {
+							val state by exploreViewModel.state.collectAsState()
+							SourcePickerScreen(
+								state = state,
+								onOpenSource = navigator::openSource,
+								onSearch = exploreViewModel::search,
+								onFilter = exploreViewModel::setFilter,
+								onLocale = exploreViewModel::setLocale,
+								onSetEnabled = exploreViewModel::setEnabled,
+								searchFocus = searchFocus,
+							)
+						}
+
+						is Destination.Browse -> {
+							// Keyed on the source name so switching sources restarts the listing
+							// rather than appending one source's results to another's.
+							LaunchedEffect(destination.sourceName) { browseViewModel.open(destination.sourceName) }
+							val state by browseViewModel.state.collectAsState()
+							Column(Modifier.fillMaxSize()) {
+								BreadcrumbBar(navigator, state.sourceTitle)
+								BrowseScreen(
+									state = state,
+									onOpenManga = navigator::openManga,
+									onSort = browseViewModel::setSort,
+									onSearch = browseViewModel::search,
+									onSubmitSearch = browseViewModel::submitSearch,
+									onLoadMore = { browseViewModel.loadMore() },
+									onRetry = browseViewModel::retry,
+									searchFocus = searchFocus,
 								)
 							}
-							onDispose { keyRouter.clear() }
 						}
-						// Flush the position when the reader goes away. The debounce that keeps
-						// page turns from being one write each would otherwise lose the last one.
-						androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
-							onDispose { readerViewModel.savePositionNow() }
-						}
-						AutoHideChrome(
-							activity = state.currentPage to state.chapter?.id,
-							isVisible = state.isChromeVisible,
-							onHide = { readerViewModel.setChromeVisible(false) },
-						)
-						ReaderScreen(
-							state = state,
-							background = preferences.readerBackground,
-							doublePage = preferences.doublePage,
-							coverOffset = preferences.coverOffset,
-							onPageChange = readerViewModel::goToPage,
-							onScroll = readerViewModel::recordScroll,
-							onNextPage = readerViewModel::nextPage,
-							onPreviousPage = readerViewModel::previousPage,
-							onSetMode = readerViewModel::setMode,
-							onSetScale = readerViewModel::setScale,
-							onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
-							onToggleDoublePage = {
-								onPreferencesChange(preferences.copy(doublePage = !preferences.doublePage))
-							},
-							onToggleCoverOffset = {
-								onPreferencesChange(preferences.copy(coverOffset = !preferences.coverOffset))
-							},
-							onToggleChrome = readerViewModel::toggleChrome,
-							onRetry = readerViewModel::retry,
-							onClose = { navigator.back() },
-						)
-					}
 
-					is Destination.Details -> {
-						LaunchedEffect(destination.manga.id, destination.manga.sourceName) {
-							detailsViewModel.open(destination.manga)
-						}
-						val state by detailsViewModel.state.collectAsState()
-						Column(Modifier.fillMaxSize()) {
-							BreadcrumbBar(navigator, state.manga?.title ?: destination.manga.title)
-							DetailsScreen(
-								state = state,
-								onOpenChapter = { chapter ->
-									state.manga?.let { navigator.read(it, chapter) }
-								},
-								onDownloadChapter = { chapter ->
-									state.manga?.let { downloadQueue.enqueue(it, listOf(chapter)) }
-								},
-								onDownloadAll = {
-									state.manga?.let { downloadQueue.enqueue(it, state.chapters) }
-								},
-								onToggleCategory = detailsViewModel::toggleCategory,
-								onAddToLibrary = detailsViewModel::addToDefaultCategory,
-								onRemoveFromLibrary = detailsViewModel::removeFromLibrary,
-								onSelectBranch = detailsViewModel::selectBranch,
-								onRetry = detailsViewModel::retry,
+						is Destination.Read -> {
+							LaunchedEffect(destination.chapter.id) {
+								readerViewModel.open(destination.manga, destination.chapter)
+							}
+							val state by readerViewModel.state.collectAsState()
+							// The reader owns the keyboard while it is open. Registering the handler
+							// here rather than in the window means the bindings live with the screen
+							// that defines them, and unregister themselves when it goes away.
+							androidx.compose.runtime.DisposableEffect(state.mode, state.pageCount) {
+								keyRouter.install { event ->
+									ReaderKeys.handle(
+										event = event,
+										mode = state.mode,
+										pageCount = state.pageCount,
+										actions = object : ReaderActions {
+											override fun nextPage() = readerViewModel.nextPage()
+											override fun previousPage() = readerViewModel.previousPage()
+											override fun nextChapter() = readerViewModel.nextChapter()
+											override fun previousChapter() = readerViewModel.previousChapter()
+											override fun goToPage(index: Int) = readerViewModel.goToPage(index)
+											override fun setScale(scale: app.ageha.core.model.PageScale) =
+												readerViewModel.setScale(scale)
+											override fun toggleChrome() = readerViewModel.toggleChrome()
+											override fun toggleFullscreen() = onToggleFullscreen()
+											override fun close() {
+												navigator.back()
+											}
+										},
+									)
+								}
+								onDispose { keyRouter.clear() }
+							}
+							// Flush the position when the reader goes away. The debounce that keeps
+							// page turns from being one write each would otherwise lose the last one.
+							androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
+								onDispose { readerViewModel.savePositionNow() }
+							}
+							AutoHideChrome(
+								activity = state.currentPage to state.chapter?.id,
+								isVisible = state.isChromeVisible,
+								onHide = { readerViewModel.setChromeVisible(false) },
 							)
+							ReaderScreen(
+								state = state,
+								background = preferences.readerBackground,
+								doublePage = preferences.doublePage,
+								coverOffset = preferences.coverOffset,
+								onPageChange = readerViewModel::goToPage,
+								onScroll = readerViewModel::recordScroll,
+								onNextPage = readerViewModel::nextPage,
+								onPreviousPage = readerViewModel::previousPage,
+								onSetMode = readerViewModel::setMode,
+								onSetScale = readerViewModel::setScale,
+								onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+								onToggleDoublePage = {
+									onPreferencesChange(preferences.copy(doublePage = !preferences.doublePage))
+								},
+								onToggleCoverOffset = {
+									onPreferencesChange(preferences.copy(coverOffset = !preferences.coverOffset))
+								},
+								onToggleChrome = readerViewModel::toggleChrome,
+								onRetry = readerViewModel::retry,
+								onClose = { navigator.back() },
+							)
+						}
+
+						is Destination.Details -> {
+							LaunchedEffect(destination.manga.id, destination.manga.sourceName) {
+								detailsViewModel.open(destination.manga)
+							}
+							val state by detailsViewModel.state.collectAsState()
+							Column(Modifier.fillMaxSize()) {
+								BreadcrumbBar(navigator, state.manga?.title ?: destination.manga.title)
+								DetailsScreen(
+									state = state,
+									onOpenChapter = { chapter ->
+										state.manga?.let { navigator.read(it, chapter) }
+									},
+									onDownloadChapter = { chapter ->
+										state.manga?.let { downloadQueue.enqueue(it, listOf(chapter)) }
+									},
+									onDownloadAll = {
+										state.manga?.let { downloadQueue.enqueue(it, state.chapters) }
+									},
+									onToggleCategory = detailsViewModel::toggleCategory,
+									onAddToLibrary = detailsViewModel::addToDefaultCategory,
+									onRemoveFromLibrary = detailsViewModel::removeFromLibrary,
+									onSelectBranch = detailsViewModel::selectBranch,
+									onRetry = detailsViewModel::retry,
+								)
+							}
 						}
 					}
 				}
 			}
 		}
+
+		NoticeOverlay(
+			notices = notices,
+			onDismiss = application.notices::dismiss,
+			modifier = Modifier.align(Alignment.BottomEnd),
+		)
 	}
 }
 

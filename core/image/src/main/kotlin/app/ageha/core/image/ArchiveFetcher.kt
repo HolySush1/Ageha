@@ -2,6 +2,7 @@ package app.ageha.core.image
 
 import app.ageha.core.model.ArchiveUrl
 import coil3.ImageLoader
+import coil3.Uri
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
 import coil3.fetch.FetchResult
@@ -48,8 +49,21 @@ class ArchiveFetcher(private val url: String) : Fetcher {
 	}
 
 	class Factory : Fetcher.Factory<Any> {
+		/**
+		 * Accepts a `coil3.Uri` as well as a `String`.
+		 *
+		 * Coil runs its mappers before consulting fetchers, and the built-in string mapper has
+		 * already turned the model into a `Uri` by the time this is asked. Matching only on
+		 * `String` therefore never matched anything, and Coil reported it as "unable to create a
+		 * fetcher that supports cbz://..." -- a message that reads like the url is malformed
+		 * rather than like the factory declined it.
+		 */
 		override fun create(data: Any, options: Options, imageLoader: ImageLoader): Fetcher? {
-			val url = data as? String ?: return null
+			val url = when (data) {
+				is String -> data
+				is Uri -> data.toString()
+				else -> return null
+			}
 			return if (ArchiveUrl.isArchiveUrl(url)) ArchiveFetcher(url) else null
 		}
 	}

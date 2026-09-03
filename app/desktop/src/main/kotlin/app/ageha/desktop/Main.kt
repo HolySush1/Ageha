@@ -27,6 +27,7 @@ import androidx.compose.ui.window.rememberWindowState
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.BrandAssets
+import app.ageha.core.data.LocalArchive
 import app.ageha.core.designsystem.ThemeGallery
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.debounce
@@ -161,6 +162,10 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 	) {
 		MenuBar {
 			Menu("File", mnemonic = 'F') {
+				Item("Open comic archive...", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.O, ctrl = true)) {
+					openLocalArchive(app, navigator)
+				}
+				Separator()
 				Item("Import Android backup...") { importBackup(app, navigator) }
 				Separator()
 				Item("Quit", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Q, ctrl = true), onClick = onExit)
@@ -227,12 +232,42 @@ private const val WINDOW_SAVE_DEBOUNCE_MS = 400L
 private fun importBackup(app: AgehaApplication, navigator: Navigator) {
 	val file = FilePicker.openFile("Import an Android backup", setOf("zip", "bk")) ?: return
 	app.scope.launch {
-		val result = runCatching { app.backupImporter.import(file) }
-		// The result is printed rather than shown in a dialog for now. The importer already
-		// produces a complete, human-readable account of what it did and did not restore, and
-		// wiring that into a modal is presentation work that does not change the outcome --
-		// but it *is* work still owed, and pretending otherwise would be worse than saying so.
-		println(result.map { it.describe() }.getOrElse { "Backup import failed: ${it.message}" })
-		navigator.switchTo(Section.LIBRARY)
+		runCatching { app.backupImporter.import(file) }
+			.onSuccess { result ->
+				// The importer's own account, in full. It names what was restored, what it does
+				// not support yet, what a newer Android app wrote that it did not recognise, and
+				// every row it dropped with the reason -- so a partial import is legible rather
+				// than looking like success.
+				app.notices.post("Imported ${file.name}", result.describe())
+				navigator.switchTo(Section.LIBRARY)
+			}
+			.onFailure { failure ->
+				app.notices.post(
+					title = "Could not import ${file.name}",
+					detail = failure.message,
+					isError = true,
+				)
+			}
 	}
+}
+
+/**
+ * Open a CBZ from disk, straight into the reader.
+ *
+ * A local file is not added to the library and does not become a source -- it is opened, read and
+ * closed, which is what someone double-clicking a file wants. Reading position still persists,
+ * because the archive's id is derived from its absolute path and is stable across runs.
+ */
+private fun openLocalArchive(app: AgehaApplication, navigator: Navigator) {
+	val file = FilePicker.openFile("Open a comic archive", setOf("cbz", "zip")) ?: return
+	val reason = LocalArchive.unsupportedReason(file)
+	if (reason != null) {
+		// Named rather than swallowed. Someone whose file is a .cbr needs to be told it is a RAR
+		// and that repackaging as CBZ works -- "could not open archive" sends them looking for a
+		// bug in Ageha instead.
+		app.notices.post("Cannot open ${file.name}", reason, isError = true)
+		return
+	}
+	val (manga, chapter) = app.reader.localManga(file)
+	navigator.read(manga, chapter)
 }

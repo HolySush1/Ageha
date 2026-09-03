@@ -5,6 +5,7 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.Density
+import app.ageha.core.data.LocalArchive
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
 import kotlinx.coroutines.delay
@@ -54,6 +55,7 @@ fun main(args: Array<String>) {
 				scene.close()
 			}
 		}
+		renderReader(app, outDir)
 		println("sources visible to the UI: ${app.sources.allDescriptors().size}")
 	} finally {
 		app.close()
@@ -62,3 +64,64 @@ fun main(args: Array<String>) {
 
 /** Long enough for the parsers bridge and the first Room emission. */
 private const val RENDER_SETTLE_MS = 2_500L
+
+/** Frames to draw while waiting for asynchronous image loads to land. */
+private const val RENDER_FRAMES = 30
+private const val RENDER_FRAME_GAP_MS = 100L
+
+/**
+ * Renders the reader against a real CBZ built on the spot.
+ *
+ * End to end and with nothing mocked: LocalArchive lists the zip, ReaderRepository serves the
+ * pages, the view model resolves them, `:core:image`'s archive fetcher pulls the bytes back out of
+ * the zip, Coil decodes them and Compose draws them. A unit test covers each of those in
+ * isolation; only this proves they are connected.
+ */
+private fun renderReader(app: AgehaApplication, outDir: File) {
+	val archive = File(outDir, "sample.cbz")
+	writeSampleArchive(archive)
+	val (manga, chapter) = app.reader.localManga(archive)
+	val navigator = Navigator().apply { read(manga, chapter) }
+
+	val scene = ImageComposeScene(width = 1000, height = 720, density = Density(1f)) {
+		AgehaTheme(mode = AgehaThemeMode.DARK) {
+			AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
+		}
+	}
+	try {
+		// Rendered repeatedly rather than once after a sleep. Coil loads asynchronously and the
+		// composition only advances when the scene is rendered, so a single frame after a delay
+		// captures the placeholder no matter how long the delay is.
+		var image = scene.render()
+		repeat(RENDER_FRAMES) {
+			runBlocking { delay(RENDER_FRAME_GAP_MS) }
+			image = scene.render()
+		}
+		File(outDir, "shell-reader.png").writeBytes(
+			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
+		)
+		println("wrote shell-reader.png (from a real CBZ of ${LocalArchive.pages(archive).size} pages)")
+	} finally {
+		scene.close()
+	}
+}
+
+/** Four numbered pages, each a distinct flat colour, so page order is visible in the render. */
+private fun writeSampleArchive(target: File) {
+	val colours = listOf(0xFF3A3A3A.toInt(), 0xFF5A5A5A.toInt(), 0xFF7A7A7A.toInt(), 0xFF9A9A9A.toInt())
+	java.util.zip.ZipOutputStream(target.outputStream()).use { zip ->
+		colours.forEachIndexed { index, colour ->
+			val page = java.awt.image.BufferedImage(600, 900, java.awt.image.BufferedImage.TYPE_INT_RGB)
+			val g = page.createGraphics()
+			g.color = java.awt.Color(colour)
+			g.fillRect(0, 0, 600, 900)
+			g.color = java.awt.Color.WHITE
+			g.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 96)
+			g.drawString("${index + 1}", 260, 480)
+			g.dispose()
+			zip.putNextEntry(java.util.zip.ZipEntry("%03d.png".format(index + 1)))
+			javax.imageio.ImageIO.write(page, "png", zip)
+			zip.closeEntry()
+		}
+	}
+}

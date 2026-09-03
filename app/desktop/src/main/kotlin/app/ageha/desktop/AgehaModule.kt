@@ -17,9 +17,12 @@ import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.SourceStack
 import app.ageha.core.source.MangaSourceRegistry
 import coil3.ImageLoader
+import coil3.SingletonImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
@@ -37,6 +40,7 @@ import java.io.File
  */
 val agehaModule = module {
 	single { PreferencesStore() }
+	single { NoticeCenter() }
 
 	/*
 	 * The JavaScript engine. Rhino, serving the PLAIN_SCRIPT tier.
@@ -93,6 +97,10 @@ val agehaModule = module {
 	single {
 		ReaderRepository(
 			catalog = get(),
+			// The manga DAO is here because `history.manga_id` is an enforced foreign key: a
+			// reading position cannot be recorded for a manga the database has never seen, which
+			// is every manga opened from search, from a listing, or from a local file.
+			manga = get<AgehaDatabase>().mangaDao(),
 			history = get<AgehaDatabase>().historyDao(),
 			prefs = get<AgehaDatabase>().mangaPrefsDao(),
 		)
@@ -113,6 +121,7 @@ class AgehaApplication private constructor(
 ) {
 
 	val preferencesStore: PreferencesStore get() = koin.get()
+	val notices: NoticeCenter get() = koin.get()
 	val library: LibraryRepository get() = koin.get()
 	val sources: SourceRepository get() = koin.get()
 	val catalog: CatalogRepository get() = koin.get()
@@ -126,20 +135,55 @@ class AgehaApplication private constructor(
 	val database: AgehaDatabase get() = koin.get()
 
 	fun close() {
-		// Cancel first: in-flight source calls are cancellable and cancelling them is what lets
+		// Cancel first: in-flight source calls are cancellable, and cancelling them is what lets
 		// the stack close without waiting on a request to somebody else's slow server.
 		scope.cancel()
+		// Then *wait* for the cancellation to finish unwinding, with a bound.
+		//
+		// Cancelling only asks. A coroutine already inside a database call keeps running until it
+		// suspends, and anything the reader launched as NonCancellable -- the final reading
+		// position -- runs to completion regardless. Closing the database while either is in
+		// flight throws "connection is closed" from a background thread, which is what happened
+		// before this join existed. The timeout is the backstop: a wedged write costs a slightly
+		// slower quit rather than a process that will not exit.
+		runBlocking {
+			withTimeoutOrNull(SHUTDOWN_GRACE_MS) { scope.coroutineContext.job.join() }
+		}
 		runBlocking { runCatching { sourceStack.close() } }
 		runCatching { database.close() }
 		stopKoin()
 	}
 
 	companion object {
+		/**
+		 * How long shutdown waits for cancelled work to unwind.
+		 *
+		 * Long enough for a final position write, short enough that a stuck coroutine cannot hold
+		 * the window open.
+		 */
+		private const val SHUTDOWN_GRACE_MS = 3_000L
+
 		fun start(declaration: KoinAppDeclaration = {}): AgehaApplication {
 			val koinApplication = startKoin {
 				modules(agehaModule)
 				declaration()
 			}
+			// Hand Ageha's image loader to Coil's singleton, which is what every `AsyncImage`
+			// call resolves against.
+			//
+			// Without this the loader built above is registered in Koin and used by nothing:
+			// Compose quietly falls back to Coil's own default loader, which has neither the
+			// archive fetcher nor Ageha's OkHttp client. The visible symptom was a reader showing
+			// a blank page for a local CBZ; the invisible one was every remote cover being
+			// fetched without our cookie jar, User-Agent or per-source Referer, which is exactly
+			// what sources that gate images check for.
+			//
+			// Global rather than a CompositionLocal because the `AsyncImage` overload the screens
+			// use reads the singleton. Providing a local instead would mean passing an
+			// `imageLoader` argument at every call site, and missing one would reintroduce this
+			// bug silently.
+			SingletonImageLoader.setSafe { koinApplication.koin.get<ImageLoader>() }
+
 			// SupervisorJob so one screen's failed coroutine does not cancel every other screen's.
 			// A source blowing up while browsing must not take the library's database subscription
 			// down with it.

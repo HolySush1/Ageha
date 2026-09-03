@@ -1,6 +1,7 @@
 package app.ageha.core.data
 
 import app.ageha.core.database.dao.HistoryDao
+import app.ageha.core.database.dao.MangaDao
 import app.ageha.core.database.dao.MangaPrefsDao
 import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.database.entity.MangaPrefsEntity
@@ -31,16 +32,83 @@ data class ReadingPosition(
  */
 class ReaderRepository(
 	private val catalog: CatalogRepository,
+	private val manga: MangaDao,
 	private val history: HistoryDao,
 	private val prefs: MangaPrefsDao,
 ) {
 
+	/**
+	 * The pages of a chapter, from a source or from a local archive.
+	 *
+	 * The local branch is here rather than behind a fake `MangaSourceClient` because a CBZ is not
+	 * a source: it has no listing, no search, no filters and no domain, and implementing eleven
+	 * methods that all throw in order to reach the one that does not would be worse than a branch
+	 * that says what it is.
+	 */
 	suspend fun pages(chapter: AgehaChapter): CatalogResult<List<AgehaPage>> =
-		catalog.pages(chapter)
+		if (chapter.sourceName == LocalArchive.LOCAL_SOURCE) {
+			val file = java.io.File(chapter.url)
+			when {
+				!file.isFile -> CatalogResult.Failure(
+					app.ageha.core.model.SourceFailure.NotFound(LocalArchive.LOCAL_SOURCE),
+				)
+				!LocalArchive.isSupported(file) -> CatalogResult.Failure(
+					app.ageha.core.model.SourceFailure.ContentUnavailable(
+						LocalArchive.LOCAL_SOURCE,
+						LocalArchive.unsupportedReason(file),
+					),
+				)
+				else -> CatalogResult.Success(LocalArchive.pages(file))
+			}
+		} else {
+			catalog.pages(chapter)
+		}
 
-	suspend fun pageUrl(page: AgehaPage): CatalogResult<String> = catalog.pageUrl(page)
+	/**
+	 * A page's image url.
+	 *
+	 * Archive pages are already addressable -- `LocalArchive` gives them a `cbz://` url that
+	 * `:core:image`'s fetcher understands -- so there is nothing to resolve and no request to
+	 * make. Sending them through the catalog would ask a source registry about a source that
+	 * does not exist.
+	 */
+	suspend fun pageUrl(page: AgehaPage): CatalogResult<String> =
+		if (page.sourceName == LocalArchive.LOCAL_SOURCE) {
+			CatalogResult.Success(page.url)
+		} else {
+			catalog.pageUrl(page)
+		}
 
-	fun imageHeaders(sourceName: String): Map<String, String> = catalog.imageHeaders(sourceName)
+	fun imageHeaders(sourceName: String): Map<String, String> =
+		if (sourceName == LocalArchive.LOCAL_SOURCE) emptyMap() else catalog.imageHeaders(sourceName)
+
+	/**
+	 * A manga standing for one archive file, so the reader can open it like anything else.
+	 *
+	 * Reading position works for these too: the id is derived from the absolute path and is
+	 * stable, so closing and reopening a local file resumes where it left off.
+	 */
+	fun localManga(file: java.io.File): Pair<AgehaManga, AgehaChapter> {
+		val chapter = LocalArchive.chapterFor(file)
+		val manga = AgehaManga(
+			id = chapter.id,
+			title = file.nameWithoutExtension,
+			altTitles = emptySet(),
+			url = file.absolutePath,
+			publicUrl = file.toURI().toString(),
+			rating = null,
+			contentRating = null,
+			coverUrl = null,
+			largeCoverUrl = null,
+			tags = emptySet(),
+			state = null,
+			authors = emptySet(),
+			description = null,
+			chapters = listOf(chapter),
+			sourceName = LocalArchive.LOCAL_SOURCE,
+		)
+		return manga to chapter
+	}
 
 	suspend fun positionFor(mangaId: Long): ReadingPosition? =
 		history.find(mangaId)?.let { row ->
@@ -63,6 +131,13 @@ class ReaderRepository(
 	 * `deleted_at` is cleared, because reading something again un-deletes it. A user who removed
 	 * a manga and then opened it from search has resumed it, and a tombstone left in place would
 	 * have the next sync delete it out from under them.
+	 *
+	 * **The manga row is written first, and that is not optional.** `history.manga_id` is a real,
+	 * enforced foreign key, and until this was added, recording a position for anything that was
+	 * not already *favourited* failed with a constraint violation -- reading from search, reading
+	 * from a browse listing, and opening a local file all wrote no history at all. Favouriting was
+	 * the only path that happened to insert the row. Found by rendering the reader against a real
+	 * CBZ, which is exactly the case with no library entry behind it.
 	 */
 	suspend fun savePosition(
 		manga: AgehaManga,
@@ -72,6 +147,10 @@ class ReaderRepository(
 		percent: Float,
 		now: Long = System.currentTimeMillis(),
 	) {
+		this.manga.upsertWithTags(
+			MangaMapping.toEntity(manga),
+			manga.tags.map { MangaMapping.toEntity(it) },
+		)
 		val existing = history.find(manga.id)
 		history.upsert(
 			HistoryEntity(
