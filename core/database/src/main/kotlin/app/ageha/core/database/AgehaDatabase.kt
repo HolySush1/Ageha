@@ -1,10 +1,12 @@
 package app.ageha.core.database
 
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import app.ageha.core.database.dao.FavouritesDao
 import app.ageha.core.database.dao.HistoryDao
 import app.ageha.core.database.dao.MangaDao
+import app.ageha.core.database.dao.MangaPrefsDao
 import app.ageha.core.database.dao.RestoreDao
 import app.ageha.core.database.dao.SourcesDao
 import app.ageha.core.database.entity.ChapterEntity
@@ -12,6 +14,7 @@ import app.ageha.core.database.entity.FavouriteCategoryEntity
 import app.ageha.core.database.entity.FavouriteEntity
 import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.database.entity.MangaEntity
+import app.ageha.core.database.entity.MangaPrefsEntity
 import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.database.entity.MangaTagsEntity
 import app.ageha.core.database.entity.TagEntity
@@ -38,9 +41,14 @@ import app.ageha.core.database.entity.TagEntity
 		FavouriteEntity::class,
 		FavouriteCategoryEntity::class,
 		MangaSourceEntity::class,
+		MangaPrefsEntity::class,
 	],
 	version = AGEHA_DATABASE_VERSION,
 	exportSchema = true,
+	// Adding a table is a change Room can derive a migration for on its own, and a derived
+	// migration is safer than a hand-written one -- it cannot disagree with the schema it was
+	// generated from. Anything that renames or retypes a column will need a spec here instead.
+	autoMigrations = [AutoMigration(from = 28, to = 29)],
 )
 abstract class AgehaDatabase : RoomDatabase() {
 
@@ -51,6 +59,8 @@ abstract class AgehaDatabase : RoomDatabase() {
 	abstract fun favouritesDao(): FavouritesDao
 
 	abstract fun sourcesDao(): SourcesDao
+
+	abstract fun mangaPrefsDao(): MangaPrefsDao
 
 	abstract fun restoreDao(): RestoreDao
 }

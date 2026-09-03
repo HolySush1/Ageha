@@ -13,6 +13,7 @@ dependencies {
 	implementation(project(":core:database"))
 	implementation(project(":feature:library"))
 	implementation(project(":feature:explore"))
+	implementation(project(":feature:reader"))
 	implementation(compose.desktop.currentOs)
 	implementation(libs.koin.core)
 	implementation(libs.kotlinx.coroutines.core)

@@ -5,6 +5,7 @@ import app.ageha.core.database.entity.FavouriteCategoryEntity
 import app.ageha.core.database.entity.FavouriteEntity
 import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.database.entity.MangaEntity
+import app.ageha.core.database.entity.MangaPrefsEntity
 import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.database.entity.TagEntity
 import kotlinx.coroutines.flow.first
@@ -207,10 +208,55 @@ class AgehaDatabaseTest {
 	}
 
 	@Test
-	@DisplayName("the schema baseline is the Android app's version 28")
-	fun schemaVersionMatchesTheAndroidApp() {
-		// Backup import depends on this, and a drift would only show up as a half-succeeded
-		// import in front of a user who was trying to migrate.
-		assertEquals(28, AGEHA_DATABASE_VERSION)
+	@DisplayName("the schema starts at the Android app's version 28 and only moves forward")
+	fun schemaVersionBaseline() {
+		// 28 is the Android app's version and the floor Ageha started from, not a number to
+		// return to. Backup import depends on the *tables* matching; the version number only has
+		// to be at or above the baseline so a migration path exists from an Android-shaped
+		// database. Starting at 1 would have made that impossible, which is what this guards.
+		assertTrue(AGEHA_DATABASE_VERSION >= 28) {
+			"the schema must never fall below the Android baseline of 28"
+		}
+		val schemas = File("schemas/app.ageha.core.database.AgehaDatabase")
+		assertTrue(File(schemas, "28.json").exists()) {
+			"the 28 baseline schema must stay exported; migrations are derived from it"
+		}
+		assertTrue(File(schemas, "$AGEHA_DATABASE_VERSION.json").exists()) {
+			"the current schema must be exported, or Room cannot derive the next migration"
+		}
+	}
+
+	/**
+	 * Version 29 adds the `preferences` table by auto-migration.
+	 *
+	 * Opening the database is what runs the migration, so a broken one fails here rather than on
+	 * a user's machine holding their library.
+	 */
+	@Test
+	@DisplayName("per-manga reader preferences round trip")
+	fun mangaPreferencesRoundTrip() = runBlocking {
+		val manga = manga(id = 501)
+		db.mangaDao().upsert(manga)
+		db.mangaPrefsDao().upsert(
+			MangaPrefsEntity(
+				mangaId = manga.id,
+				// 2 is WEBTOON in the Android app's ReaderMode. The ids are not ordinals -- see
+				// the note on MangaPrefsEntity -- so this asserts the *id* survives.
+				mode = 2,
+				cfBrightness = 0f,
+				cfContrast = 0f,
+				cfInvert = false,
+				cfGrayscale = false,
+				cfBookEffect = false,
+				titleOverride = null,
+				coverUrlOverride = null,
+				contentRatingOverride = null,
+			),
+		)
+		assertEquals(2, db.mangaPrefsDao().find(manga.id)?.mode)
+
+		// The foreign key cascades, so removing a manga must not leave its reader settings behind.
+		db.mangaDao().delete(manga.id)
+		assertNull(db.mangaPrefsDao().find(manga.id))
 	}
 }

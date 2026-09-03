@@ -118,6 +118,18 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   - `renderShell` draws the real application headlessly against the real graph, so a build that
     would open a blank window fails in CI instead.
 
+- **Milestone 7 -- the reader.**
+  - `:feature:reader` -- paged mode left-to-right and right-to-left, double-page spreads with
+    cover-offset handling, continuous vertical webtoon mode, zoom and pan about the pointer, four
+    fit modes, auto-hiding chrome, and full keyboard control.
+  - Reading position is persisted per manga and restored exactly, including the webtoon strip's
+    scroll fraction -- a page index alone is not a position when a page is twelve thousand pixels
+    tall.
+  - Schema **v29** adds the Android app's `preferences` table, by auto-migration, so per-manga
+    reader mode survives a backup round trip.
+  - CBZ archives are read straight out of the zip, through the same image pipeline as remote
+    sources. CBR is refused with a reason the user can act on rather than a generic failure.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
@@ -142,3 +154,9 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   desktop window, not a phone.
 - A source failure never clears results already on screen, and a non-transient failure stops the
   pager rather than retrying into a block.
+- The reader's arrow keys follow the **reading direction**: in right-to-left mode Left advances.
+  Space and Page Down always mean forward, as they do in any document.
+- `ReaderMode` ids are the Android app's and are **not** ordinals -- STANDARD is 1, WEBTOON is 2,
+  REVERSED is 3, VERTICAL is 4.
+- Webtoon mode uses a lazy list. That was flagged as a risk in ARCHITECTURE 1.4 and the risk is
+  not yet closed: it has not been profiled against a real 200-page strip.

@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaManga
 
 /** The two top-level places in Ageha. Reached by the rail, or by Ctrl+1 and Ctrl+2. */
@@ -20,6 +21,15 @@ sealed interface Destination {
 	data object Sources : Destination
 	data class Browse(val sourceName: String) : Destination
 	data class Details(val manga: AgehaManga) : Destination
+
+	/**
+	 * The reader.
+	 *
+	 * Carries the chapter as well as the manga because a chapter list is not addressable by index
+	 * across branches -- the same manga read on a different scanlation branch has a different
+	 * chapter at position 5.
+	 */
+	data class Read(val manga: AgehaManga, val chapter: AgehaChapter) : Destination
 }
 
 /**
@@ -75,6 +85,14 @@ class Navigator {
 	fun openManga(manga: AgehaManga) {
 		push(Destination.Details(manga))
 	}
+
+	/** Open a chapter in the reader, keeping the details screen underneath to come back to. */
+	fun read(manga: AgehaManga, chapter: AgehaChapter) {
+		push(Destination.Read(manga, chapter))
+	}
+
+	/** True when the current destination wants the whole window -- no rail, no chrome. */
+	val isImmersive: Boolean get() = current is Destination.Read
 
 	fun resetToRoot() {
 		while (stack.size > 1) stack.removeAt(stack.lastIndex)

@@ -5,6 +5,7 @@ import app.ageha.core.model.AgehaFilter
 import app.ageha.core.model.AgehaFilterCapabilities
 import app.ageha.core.model.AgehaFilterOptions
 import app.ageha.core.model.AgehaManga
+import app.ageha.core.model.AgehaPage
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceFailure
 import app.ageha.core.source.MangaSourceRegistry
@@ -83,6 +84,19 @@ class CatalogRepository(private val registry: MangaSourceRegistry) {
 			is CatalogResult.Failure -> result
 			is CatalogResult.Success -> CatalogResult.Success(result.value.chapters.orEmpty())
 		}
+
+	suspend fun pages(chapter: AgehaChapter): CatalogResult<List<AgehaPage>> =
+		attempt(chapter.sourceName) { registry.clientFor(chapter.sourceName).pages(chapter) }
+
+	/**
+	 * Resolve a page to a direct image url.
+	 *
+	 * Separate from [pages] because some sources need a request *per page* to do it -- the page
+	 * list they hand back holds interstitial urls, not images. The reader therefore resolves
+	 * lazily, as pages come into view, rather than firing one request per page up front.
+	 */
+	suspend fun pageUrl(page: AgehaPage): CatalogResult<String> =
+		attempt(page.sourceName) { registry.clientFor(page.sourceName).pageUrl(page) }
 
 	suspend fun filterOptions(sourceName: String): CatalogResult<AgehaFilterOptions> =
 		attempt(sourceName) { registry.clientFor(sourceName).filterOptions() }

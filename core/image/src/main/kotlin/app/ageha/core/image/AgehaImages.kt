@@ -40,6 +40,10 @@ object AgehaImages {
 	fun create(httpClient: OkHttpClient, cacheDir: File): ImageLoader =
 		ImageLoader.Builder(PlatformContext.INSTANCE)
 			.components {
+				// Local archives first: the fetcher factories are tried in order and the archive
+				// one declines anything that is not a cbz url, so putting it ahead of the network
+				// costs nothing and keeps a `cbz://` url from being handed to OkHttp.
+				add(ArchiveFetcher.Factory())
 				add(OkHttpNetworkFetcherFactory(callFactory = { httpClient }))
 			}
 			.memoryCache {

@@ -43,6 +43,11 @@ import app.ageha.feature.explore.ExploreViewModel
 import app.ageha.feature.explore.SourcePickerScreen
 import app.ageha.feature.library.LibraryScreen
 import app.ageha.feature.library.LibraryViewModel
+import app.ageha.feature.reader.AutoHideChrome
+import app.ageha.feature.reader.ReaderActions
+import app.ageha.feature.reader.ReaderKeys
+import app.ageha.feature.reader.ReaderScreen
+import app.ageha.feature.reader.ReaderViewModel
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -59,6 +64,10 @@ fun AgehaShell(
 	navigator: Navigator,
 	searchFocus: FocusRequester,
 	modifier: Modifier = Modifier,
+	preferences: Preferences = Preferences(),
+	onPreferencesChange: (Preferences) -> Unit = {},
+	keyRouter: KeyRouter = remember { KeyRouter() },
+	onToggleFullscreen: () -> Unit = {},
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember { LibraryViewModel(application.library, application.catalog, scope) }
@@ -67,9 +76,12 @@ fun AgehaShell(
 	val detailsViewModel = remember {
 		DetailsViewModel(application.catalog, application.library, scope)
 	}
+	val readerViewModel = remember { ReaderViewModel(application.reader, scope) }
 
 	Row(modifier.fillMaxSize()) {
-		NavigationRail(navigator)
+		// The reader takes the whole window. Chrome around a page is chrome over somebody's
+		// manga, and the rail is the app talking about itself while they are trying to read.
+		if (!navigator.isImmersive) NavigationRail(navigator)
 		Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
 			Column(Modifier.fillMaxSize()) {
 				when (val destination = navigator.current) {
@@ -122,6 +134,72 @@ fun AgehaShell(
 						}
 					}
 
+					is Destination.Read -> {
+						LaunchedEffect(destination.chapter.id) {
+							readerViewModel.open(destination.manga, destination.chapter)
+						}
+						val state by readerViewModel.state.collectAsState()
+						// The reader owns the keyboard while it is open. Registering the handler
+						// here rather than in the window means the bindings live with the screen
+						// that defines them, and unregister themselves when it goes away.
+						androidx.compose.runtime.DisposableEffect(state.mode, state.pageCount) {
+							keyRouter.install { event ->
+								ReaderKeys.handle(
+									event = event,
+									mode = state.mode,
+									pageCount = state.pageCount,
+									actions = object : ReaderActions {
+										override fun nextPage() = readerViewModel.nextPage()
+										override fun previousPage() = readerViewModel.previousPage()
+										override fun nextChapter() = readerViewModel.nextChapter()
+										override fun previousChapter() = readerViewModel.previousChapter()
+										override fun goToPage(index: Int) = readerViewModel.goToPage(index)
+										override fun setScale(scale: app.ageha.core.model.PageScale) =
+											readerViewModel.setScale(scale)
+										override fun toggleChrome() = readerViewModel.toggleChrome()
+										override fun toggleFullscreen() = onToggleFullscreen()
+										override fun close() {
+											navigator.back()
+										}
+									},
+								)
+							}
+							onDispose { keyRouter.clear() }
+						}
+						// Flush the position when the reader goes away. The debounce that keeps
+						// page turns from being one write each would otherwise lose the last one.
+						androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
+							onDispose { readerViewModel.savePositionNow() }
+						}
+						AutoHideChrome(
+							activity = state.currentPage to state.chapter?.id,
+							isVisible = state.isChromeVisible,
+							onHide = { readerViewModel.setChromeVisible(false) },
+						)
+						ReaderScreen(
+							state = state,
+							background = preferences.readerBackground,
+							doublePage = preferences.doublePage,
+							coverOffset = preferences.coverOffset,
+							onPageChange = readerViewModel::goToPage,
+							onScroll = readerViewModel::recordScroll,
+							onNextPage = readerViewModel::nextPage,
+							onPreviousPage = readerViewModel::previousPage,
+							onSetMode = readerViewModel::setMode,
+							onSetScale = readerViewModel::setScale,
+							onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+							onToggleDoublePage = {
+								onPreferencesChange(preferences.copy(doublePage = !preferences.doublePage))
+							},
+							onToggleCoverOffset = {
+								onPreferencesChange(preferences.copy(coverOffset = !preferences.coverOffset))
+							},
+							onToggleChrome = readerViewModel::toggleChrome,
+							onRetry = readerViewModel::retry,
+							onClose = { navigator.back() },
+						)
+					}
+
 					is Destination.Details -> {
 						LaunchedEffect(destination.manga.id, destination.manga.sourceName) {
 							detailsViewModel.open(destination.manga)
@@ -131,10 +209,9 @@ fun AgehaShell(
 							BreadcrumbBar(navigator, state.manga?.title ?: destination.manga.title)
 							DetailsScreen(
 								state = state,
-								// The reader is milestone 7. Until it exists, opening a chapter
-								// does nothing rather than pretending to -- see the note in
-								// docs/ARCHITECTURE.md 7.
-								onOpenChapter = {},
+								onOpenChapter = { chapter ->
+									state.manga?.let { navigator.read(it, chapter) }
+								},
 								onToggleCategory = detailsViewModel::toggleCategory,
 								onAddToLibrary = detailsViewModel::addToDefaultCategory,
 								onRemoveFromLibrary = detailsViewModel::removeFromLibrary,

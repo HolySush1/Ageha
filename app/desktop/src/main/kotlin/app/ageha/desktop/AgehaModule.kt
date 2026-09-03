@@ -2,6 +2,7 @@ package app.ageha.desktop
 
 import app.ageha.core.data.CatalogRepository
 import app.ageha.core.data.LibraryRepository
+import app.ageha.core.data.ReaderRepository
 import app.ageha.core.data.SourceRepository
 import app.ageha.core.database.AgehaDatabase
 import app.ageha.core.database.AgehaDatabaseFactory
@@ -48,6 +49,13 @@ val agehaModule = module {
 	single { LibraryRepository(get<AgehaDatabase>()) }
 	single { SourceRepository(get<AgehaDatabase>().sourcesDao(), get<MangaSourceRegistry>()) }
 	single { CatalogRepository(get<MangaSourceRegistry>()) }
+	single {
+		ReaderRepository(
+			catalog = get(),
+			history = get<AgehaDatabase>().historyDao(),
+			prefs = get<AgehaDatabase>().mangaPrefsDao(),
+		)
+	}
 }
 
 /**
@@ -67,6 +75,7 @@ class AgehaApplication private constructor(
 	val library: LibraryRepository get() = koin.get()
 	val sources: SourceRepository get() = koin.get()
 	val catalog: CatalogRepository get() = koin.get()
+	val reader: ReaderRepository get() = koin.get()
 	val imageLoader: ImageLoader get() = koin.get()
 	val sourceStack: SourceStack get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()

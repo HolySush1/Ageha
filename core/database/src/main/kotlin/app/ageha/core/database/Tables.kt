@@ -16,6 +16,9 @@ internal const val TABLE_FAVOURITES = "favourites"
 internal const val TABLE_FAVOURITE_CATEGORIES = "favourite_categories"
 internal const val TABLE_SOURCES = "sources"
 
+/** Per-manga reader settings. Named `preferences` to match the Android app's table. */
+internal const val TABLE_PREFERENCES = "preferences"
+
 /**
  * Ageha starts where the Android app currently is, rather than at 1.
  *
@@ -27,4 +30,12 @@ internal const val TABLE_SOURCES = "sources"
  * A user whose backup predates 28 upgrades it by opening the Android app, which is that app's job
  * and not ours.
  */
-const val AGEHA_DATABASE_VERSION = 28
+/**
+ * Version 29: adds the Android app's `preferences` table, which carries per-manga reader mode.
+ *
+ * Ageha started at 28 to match the Android schema and moves forward from there by migration
+ * rather than by editing 28 in place -- an already-shipped version that changes shape is a
+ * version that cannot be migrated *from*. Each of the nine entities still missing lands the same
+ * way, with the feature that needs it.
+ */
+const val AGEHA_DATABASE_VERSION = 29

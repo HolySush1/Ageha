@@ -10,6 +10,7 @@ import app.ageha.core.database.TABLE_FAVOURITE_CATEGORIES
 import app.ageha.core.database.TABLE_HISTORY
 import app.ageha.core.database.TABLE_MANGA
 import app.ageha.core.database.TABLE_MANGA_TAGS
+import app.ageha.core.database.TABLE_PREFERENCES
 import app.ageha.core.database.TABLE_SOURCES
 import app.ageha.core.database.TABLE_TAGS
 
@@ -189,4 +190,42 @@ data class MangaSourceEntity(
 	@ColumnInfo(name = "used_at") val lastUsedAt: Long,
 	@ColumnInfo(name = "pinned") val isPinned: Boolean,
 	@ColumnInfo(name = "cf_state") val cfState: Int,
+)
+
+/**
+ * Per-manga reader settings.
+ *
+ * A column-for-column port of the Android app's `MangaPrefsEntity`, including the colour-filter
+ * fields Ageha does not use yet. Porting the unused columns costs nothing and keeps the schemas
+ * identical, which is the whole reason backup import works; adding them later would mean another
+ * migration for no gain.
+ *
+ * `mode` holds the Android app's `ReaderMode` **id**, not an ordinal: STANDARD is 1, WEBTOON is 2,
+ * REVERSED is 3, VERTICAL is 4. The ids are deliberately not in declaration order upstream, so
+ * writing an ordinal here would silently give a user a different reader mode after a backup
+ * round trip.
+ */
+@Entity(
+	tableName = TABLE_PREFERENCES,
+	foreignKeys = [
+		ForeignKey(
+			entity = MangaEntity::class,
+			parentColumns = ["manga_id"],
+			childColumns = ["manga_id"],
+			onDelete = ForeignKey.CASCADE,
+		),
+	],
+)
+data class MangaPrefsEntity(
+	@PrimaryKey(autoGenerate = false)
+	@ColumnInfo(name = "manga_id") val mangaId: Long,
+	@ColumnInfo(name = "mode") val mode: Int,
+	@ColumnInfo(name = "cf_brightness") val cfBrightness: Float,
+	@ColumnInfo(name = "cf_contrast") val cfContrast: Float,
+	@ColumnInfo(name = "cf_invert") val cfInvert: Boolean,
+	@ColumnInfo(name = "cf_grayscale") val cfGrayscale: Boolean,
+	@ColumnInfo(name = "cf_book") val cfBookEffect: Boolean,
+	@ColumnInfo(name = "title_override") val titleOverride: String?,
+	@ColumnInfo(name = "cover_override") val coverUrlOverride: String?,
+	@ColumnInfo(name = "content_rating_override") val contentRatingOverride: String?,
 )

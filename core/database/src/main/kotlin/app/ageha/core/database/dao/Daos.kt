@@ -13,6 +13,7 @@ import app.ageha.core.database.entity.FavouriteCategoryEntity
 import app.ageha.core.database.entity.FavouriteEntity
 import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.database.entity.MangaEntity
+import app.ageha.core.database.entity.MangaPrefsEntity
 import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.database.entity.MangaTagsEntity
 import app.ageha.core.database.entity.TagEntity
@@ -248,4 +249,26 @@ interface SourcesDao {
 
 	@Query("SELECT COALESCE(MAX(sort_key), -1) + 1 FROM sources")
 	suspend fun nextSortKey(): Int
+}
+
+/**
+ * Per-manga reader settings.
+ *
+ * Reads are observed rather than fetched once: opening the same manga in a second window, or
+ * changing the mode from a menu, has to reach the reader that is already showing it.
+ */
+@Dao
+interface MangaPrefsDao {
+
+	@Query("SELECT * FROM preferences WHERE manga_id = :mangaId")
+	suspend fun find(mangaId: Long): MangaPrefsEntity?
+
+	@Query("SELECT * FROM preferences WHERE manga_id = :mangaId")
+	fun observe(mangaId: Long): Flow<MangaPrefsEntity?>
+
+	@Upsert
+	suspend fun upsert(prefs: MangaPrefsEntity)
+
+	@Query("DELETE FROM preferences WHERE manga_id = :mangaId")
+	suspend fun delete(mangaId: Long)
 }

@@ -72,6 +72,8 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 	var preferences by remember { mutableStateOf(store.load()) }
 	val navigator = remember { Navigator() }
 	val searchFocus = remember { FocusRequester() }
+	val keyRouter = remember { KeyRouter() }
+	var isFullscreen by remember { mutableStateOf(false) }
 
 	val windowState = rememberWindowState(
 		size = DpSize(preferences.window.width.dp, preferences.window.height.dp),
@@ -80,6 +82,16 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 		} ?: WindowPosition.PlatformDefault,
 		placement = if (preferences.window.isMaximized) WindowPlacement.Maximized else WindowPlacement.Floating,
 	)
+
+	// Fullscreen is a window placement, not a preference: it is a mode you are in right now, and
+	// restoring an app fullscreen because it was fullscreen last week is startling.
+	LaunchedEffect(isFullscreen) {
+		windowState.placement = when {
+			isFullscreen -> WindowPlacement.Fullscreen
+			preferences.window.isMaximized -> WindowPlacement.Maximized
+			else -> WindowPlacement.Floating
+		}
+	}
 
 	// Geometry is saved as it changes rather than only on close, because a crash or a forced
 	// shutdown should not cost the user their window layout. Debounced so a drag across the
@@ -91,6 +103,8 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				height = windowState.size.height.value.toInt(),
 				x = windowState.position.takeIf { it.isSpecified }?.x?.value?.toInt(),
 				y = windowState.position.takeIf { it.isSpecified }?.y?.value?.toInt(),
+				// Fullscreen is transient, so it is never what gets saved -- a window remembered as
+				// fullscreen has no size to come back to.
 				isMaximized = windowState.placement == WindowPlacement.Maximized,
 			)
 		}
@@ -110,6 +124,10 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 		onPreviewKeyEvent = { event ->
 			if (event.type != KeyEventType.KeyDown) {
 				false
+			} else if (keyRouter.dispatch(event)) {
+				// The current screen claimed it. The reader does this while it is open so its
+				// arrow keys can follow the reading direction.
+				true
 			} else {
 				when {
 					event.isCtrlPressed && event.key == Key.One -> {
@@ -161,7 +179,19 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 			mode = preferences.theme,
 			systemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme(),
 		) {
-			AgehaShell(app, navigator, searchFocus, Modifier.fillMaxSize())
+			AgehaShell(
+				application = app,
+				navigator = navigator,
+				searchFocus = searchFocus,
+				modifier = Modifier.fillMaxSize(),
+				preferences = preferences,
+				onPreferencesChange = { updated ->
+					preferences = updated
+					store.save(updated)
+				},
+				keyRouter = keyRouter,
+				onToggleFullscreen = { isFullscreen = !isFullscreen },
+			)
 		}
 	}
 }

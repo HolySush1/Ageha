@@ -20,6 +20,16 @@ import java.io.File
 data class Preferences(
 	val theme: AgehaThemeMode = AgehaThemeMode.SYSTEM,
 	val readerBackground: ReaderBackground = ReaderBackground.BLACK,
+	/**
+	 * Two pages side by side in paged mode.
+	 *
+	 * Off by default. It only helps on a window wide enough for two pages at a readable size, and
+	 * a reader who opens Ageha on a laptop and gets two postage stamps will conclude the app is
+	 * broken rather than that a setting is wrong.
+	 */
+	val doublePage: Boolean = false,
+	/** Whether the first page stands alone in double-page mode. See PageLayout for why. */
+	val coverOffset: Boolean = true,
 	val window: WindowGeometry = WindowGeometry(),
 	val lastCategoryId: Int = -1,
 	val minimiseToTray: Boolean = false,
