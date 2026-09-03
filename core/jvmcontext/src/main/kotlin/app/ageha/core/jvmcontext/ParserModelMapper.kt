@@ -1,4 +1,4 @@
-package app.ageha.core.parsers.internal
+package app.ageha.core.jvmcontext
 
 import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaContentRating

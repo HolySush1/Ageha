@@ -2,9 +2,10 @@
 
 Companion to `FINDINGS.md`. Read that first; this document assumes its conclusions.
 
-Status: **approved 2026-09-03.** Both corrections in this document -- the parent-first API
-allowlist (4.1) and string-based source persistence (3) -- were accepted, along with the four
-stack decisions now recorded in `FINDINGS.md` 8. Milestone 2 is built and green.
+Status: **Milestone 3 built and green.** String-based source persistence (§3) was approved and
+holds. The parent-first API allowlist described in §4.1 was approved but **did not survive
+contact with the library** — §4.1 now records why, and what replaced it. The four stack decisions
+are in `FINDINGS.md` §8.
 
 ---
 
@@ -67,7 +68,8 @@ Unchanged from the brief except for `:core:jvmcontext`.
 
 Rules that make the graph mean something:
 
-- **`:core:parsers` and `:core:jvmcontext` are the only modules that may declare the parsers library as a dependency.** Enforced by a Gradle check, not by discipline — a custom task fails the build if any other module's compile classpath contains the parsers artifact. Discipline does not survive a hurried afternoon.
+- **`:core:jvmcontext` is the only module that may declare the parsers library as a dependency**, and it does so `compileOnly` — it is loaded by `ParsersClassLoader` at runtime, not by the application classloader (§4.1). Enforced by a Gradle check rather than by discipline: a custom task fails the build if any other module's compile classpath contains the parsers artifact. Discipline does not survive a hurried afternoon.
+- The shared modules — `:core:model`, `:core:source` types, `:core:js`, `:core:network` — are the only things both sides of the classloader boundary can see, so they must stay free of parser types.
 - `:core:model` holds *Ageha's* types (`AgehaManga`, `AgehaChapter`, …). It does not depend on the parsers library and never mirrors its field layout (`FINDINGS.md` §5 — `Manga` is mid-migration).
 - `:feature:*` modules never depend on each other. Cross-feature navigation goes through `:app:desktop`.
 - `:core:designsystem` depends on nothing but Compose. Colours live only here (`CLAUDE.md` rule 7).
@@ -120,9 +122,10 @@ is in it — but it never references a *constant* by name, because that is what 
 miss. Every persisted row stores `name: String`. An unknown name renders as "source unavailable in
 this parser version" — never an exception, never a lost favourite.
 
-Milestone 2's registry binds against the compiled artifact, so this needs no reflection yet.
-Milestone 3's loads the enum from a child classloader and does the same reading reflectively.
-Neither the interface nor any caller changes between them, which is the point.
+Since Milestone 3 the enum is read on the child side of the classloader boundary, by
+`RealParserBridge`, which is recompiled and reloaded alongside the parsers jar it talks to — so it
+links against whatever build is loaded and needs no reflection to do it. The parent never sees the
+enum at all. No caller outside `:core:parsers` changed when this moved, which is the point.
 
 **Mapping is one-directional and lives in one file.** `ParserModelMapper` converts library `Manga`/`MangaChapter`/`MangaPage` into Ageha types and back. When upstream deletes `Manga.author` in favour of `authors`, exactly one file fails to compile. That is the whole point of the wall.
 
@@ -150,42 +153,97 @@ the recorded refusal is what gets reported. A coroutine-context element rather t
 
 This is the part the brief cares most about, and the part where the investigation changed the design most.
 
-### 4.1 Classloader delegation — the brief's policy needs inverting
+### 4.1 Classloader delegation — the approved allowlist did not survive Milestone 3
 
-The brief says "parent-last for the parser classes but sharing OkHttp/Kotlin stdlib". **That would not work,** and the reason is worth writing down because it is the failure this whole layer exists to avoid.
+This section previously described a parent-first allowlist: share the parsers library's own API
+types across the classloader boundary and load only the site parsers in the child. **That design
+was abandoned during Milestone 3, before it was built.** What follows is what was found, and what
+replaced it.
 
-`MangaLoaderContext` is an `abstract class`. Our `AgehaMangaLoaderContext` *extends* it. For that to link, our subclass and the JAR's base class must be the same `java.lang.Class` instance — same bytes, same defining classloader. If the child loader defines its own copy of `MangaLoaderContext` (parent-last), then our subclass — loaded by the app loader, extending the app loader's copy — cannot be passed to `newParserInstance`. The result is a `LinkageError` or a `ClassCastException` at the first call, not at load.
+#### Why the allowlist failed
 
-The same applies to `OkHttpClient`, `CookieJar`, `Response`, `Interceptor`, `Bitmap`, `MangaSourceConfig` and every model type that crosses the boundary. Which is: nearly all of them.
+The reasoning behind it was sound. `MangaLoaderContext` is an abstract class Ageha subclasses, so
+our subclass and the JAR's base class must be the same `java.lang.Class` — which argued for
+sharing the API surface with the parent. Three things then went wrong.
 
-So the actual policy is **parent-first for everything shared, child-only for what is genuinely private to the JAR**:
+**`LinkResolver` drags in the world.** `MangaLoaderContext.newLinkResolver` returns
+`org.koitharu.kotatsu.parsers.util.LinkResolver`, so it must be parent-loaded. `LinkResolver`
+imports `AbstractMangaParser` — the base class every one of the 1300+ site parsers extends. Sharing
+the boundary types transitively freezes most of the library at whatever version shipped with the
+app, which is the opposite of the point.
 
-| Package prefix | Delegation | Why |
-|---|---|---|
-| `java.*`, `javax.*`, `jdk.*` | parent-first | platform, mandatory |
-| `kotlin.*`, `kotlinx.coroutines.*` | parent-first | `suspend` functions cross the boundary; two `Continuation` classes is a hard failure |
-| `okhttp3.*`, `okio.*` | parent-first | `httpClient`, `cookieJar`, `Response`, `Interceptor` all cross |
-| `org.jsoup.*` | parent-first | declared `api` in the library — jsoup types are in the public signature |
-| `org.json.*`, `androidx.collection.*` | parent-first | `implementation` deps, but cheap to share and avoids two copies |
-| `org.koitharu.kotatsu.parsers.**` | **parent-first for the API surface, child-first for site implementations** | see below |
-| everything else in the JAR | child-only | the 1300+ site parsers, KSP output, private helpers |
+**The generated enum sits inside the shared package.** `MangaParserSource` is emitted by KSP into
+`org.koitharu.kotatsu.parsers.model`, the same package as `Manga` and friends. A `model.**`
+prefix rule is therefore impossible: the one class that *must* be child-loaded lives among the
+ones that must be parent-loaded, so the rule needs a per-class carve-out on day one, and another
+each time upstream generates something new.
 
-The last row is the subtle one, and it means **we cannot use a plain package-prefix rule.** The API surface (`MangaLoaderContext`, `MangaParser`, the models, `Bitmap`, config types) must come from the parent so subclassing and value-passing work. The site parsers and the generated `MangaParserSource`/`MangaParserFactory` must come from the child so a new JAR actually brings new sources.
+**And the fatal one: sharing the models freezes them.** If `Manga` is parent-loaded, a build whose
+site parsers were compiled against a changed `Manga` links against ours and raises
+`NoSuchMethodError`. So every model change would require an app release — and `FINDINGS.md` §5
+records that `Manga` is mid-migration *right now*, shedding a deprecated constructor and three
+deprecated accessors. Routine source updates would stop being routine, which is the single
+property Layer 1 exists to protect.
 
-Both live under `org.koitharu.kotatsu.parsers.*`. So the delegation decision is made from an **explicit allowlist of API class names**, computed once at load time from the *bundled* JAR's public surface, not from a prefix match. The allowlist is a real artifact in the repo, versioned, and a mismatch between it and the loaded JAR is exactly what the compatibility gate reports.
+Cumulatively that is the "unmanageable" trigger: a hand-curated list of parser internals, needing
+maintenance on every upstream change, failing only at runtime and only after an update.
 
-This is the single most likely place for this project to go wrong. It gets a dedicated document
-comment, and the allowlist gets a test that fails loudly when the bundled JAR's API surface
-changes.
+#### What replaced it: a narrow typed bridge
 
-**If the allowlist becomes unmanageable, stop rather than work around it.** The failure mode to
-watch for is the allowlist needing per-class special cases that cannot be derived from the bundled
-JAR's public surface, or delegation rules that differ between parser builds. At that point the
-approved fallback is to **run the parsers in a separate JVM process and talk to it over IPC**,
-which trades a process boundary and a serialisation layer for complete classloader isolation.
-That is a bigger change than it sounds and it is not mine to make unilaterally: raise it before
-building around a fragile classloader, because a fragile classloader is the worse outcome of the
-two and it fails in production rather than in CI.
+Nothing from the parsers library crosses the boundary at all.
+
+The child classloader gets the parsers jar **and Ageha's own `:core:jvmcontext` jar**, which is the
+code that implements `MangaLoaderContext` and speaks parser types. Because they are loaded
+together, they are always consistent with each other, and both are free to change together. The
+parent holds neither.
+
+The two sides communicate through `app.ageha.core.source.ParserBridge`, an Ageha interface whose
+every signature is a JDK type or an Ageha type. The parent constructs the implementation once,
+reflectively; everything after that is an ordinary typed method call.
+
+```
+  parent (application classloader)          child (ParsersClassLoader)
+  ────────────────────────────────          ──────────────────────────────
+  :core:parsers  ── ParserBridge ──────────▶ RealParserBridge
+  :core:model                                AgehaMangaLoaderContext
+  :core:js        shared, parent-first  ───  ParserModelMapper
+  :core:network        ▲                     kotatsu-parsers.jar
+                       │                     jsoup, org.json, androidx.*
+                  one reflective call
+```
+
+The delegation rule shrinks from a curated class list to a short package-prefix list — JDK,
+Kotlin, OkHttp/Okio, and Ageha's four shared modules. Everything else is child-first. The full
+list and the reasoning live in `ParsersClassLoader`'s class comment, which is the authoritative
+copy.
+
+**`app.ageha.core.jvmcontext` is deliberately absent from that list**, and adding it is the single
+most likely way to break the design: it compiles, it loads, and then it raises `LinkageError` on
+first use. `:core:jvmcontext` is `compileOnly` against the parsers library and never reaches the
+application runtime classpath. `ClassLoaderIsolationTest` asserts that absence directly rather
+than trusting the build file.
+
+#### What this bought
+
+- **Model changes no longer need an app release.** `Manga` can gain and lose fields freely; only a
+  change to `ParserBridge` itself — which is Ageha's own code — forces one.
+- **The wall narrowed.** `:core:parsers` no longer names a parsers type, so the build's exemption
+  list went from two modules to one. A narrower exemption is a stronger guarantee.
+- **It is the seam IPC would need anyway.** If the in-process design is ever abandoned for a
+  separate parser process, a remote `ParserBridge` is a drop-in for the local one. Building this
+  was progress toward either outcome, which is why it was built rather than escalated.
+
+#### What it cost
+
+- One reflective construction, and a constructor signature that no compiler checks. That signature
+  is an ABI, and `CompatibilityGate` asserts it before activating anything.
+- The bundled parsers build now ships as a resource and is extracted on first run, because a
+  classloader needs a real file URL. This is a feature disguised as a cost: the bundled build takes
+  exactly the same code path as a downloaded one, so the path that matters most is exercised at
+  every launch rather than only during an upgrade.
+- The parsers library's own dependencies must be staged into the child too. That list is resolved
+  at build time rather than written by hand, which immediately turned up `androidx.annotation` —
+  a dependency no documentation mentions and nobody would have guessed.
 
 ### 4.2 Update flow
 
@@ -295,7 +353,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 |---|---|---|
 | 1 | Skills installed; `FINDINGS.md` + `ARCHITECTURE.md` | **done, this is it** |
 | 2 | Gradle skeleton, `:core:parsers` facade, `:core:jvmcontext`, CLI that searches one source | **done.** 1360 sources enumerated, live search/details/pages against MangaDex and Weeb Central, 26 tests green, wall enforced by the build |
-| 3 | Layer 1 dynamic loading + tests | SHA-based, not version-based; allowlist-driven delegation (§4.1) |
+| 3 | Layer 1 dynamic loading + tests | **done.** Bridge-based isolation (§4.1), SHA-based updates, gate with a designed rejection path, two builds proven to coexist in one JVM |
 | 4 | Database + library/history persistence | Room, start at schema v28 |
 | 4b | **Android backup import** | moved here by decision 4: it validates the schema before any UI depends on it |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | unchanged |

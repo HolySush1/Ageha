@@ -2,83 +2,100 @@ package app.ageha.core.parsers
 
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.js.NoJsRuntime
-import app.ageha.core.jvmcontext.AgehaMangaLoaderContext
-import app.ageha.core.jvmcontext.SourceConfigStore
+import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
-import app.ageha.core.parsers.internal.StaticMangaSourceRegistry
+import app.ageha.core.source.MangaSourceClient
+import app.ageha.core.source.MangaSourceRegistry
+import app.ageha.core.source.ParserBridge
 import java.io.File
 
 /**
  * Builds a working source stack.
  *
- * There is a circular dependency to break here, and it is worth naming because it is not obvious.
- * The loader context needs an OkHttp client; the client needs an interceptor that dispatches to
- * parsers; parsers are created *by* the loader context. Constructing that naively either
- * stack-overflows or leaves a half-built client.
- *
- * It is broken with a function reference rather than an object reference: the context is handed a
- * lambda that resolves a parser, and the registry that lambda points at is created afterwards.
- * Nothing calls the lambda until the first HTTP request, by which point both exist.
- *
- * Milestone 4 replaces this with Koin. The wiring stays the same shape -- Koin is a way of writing
- * this down, not a different design -- and at six objects it is not yet earning its keep.
+ * Every build, bundled or downloaded, is loaded through [ParsersClassLoader] and reached through
+ * [ParserBridge]. There is no separate "static" path: the bundled build is simply the one that is
+ * already on disk, so the code that runs at every launch is the same code that runs after an
+ * update. A path only exercised during an upgrade is a path that is broken during an upgrade.
  */
 object Ageha {
 
-	/**
-	 * The parsers build compiled into this app.
-	 *
-	 * Upstream publishes no version tags at all, so this is a commit SHA on
-	 * Kotatsu-Redo/kotatsu-parsers-redo (docs/FINDINGS.md 1). Keep it in step with
-	 * `parsers` in gradle/libs.versions.toml.
-	 */
-	const val BUNDLED_PARSERS_VERSION = "434030d481"
+	/** @see BundledParsers.VERSION */
+	const val BUNDLED_PARSERS_VERSION = BundledParsers.VERSION
 
 	fun createSourceStack(
 		jsRuntime: JsRuntime = NoJsRuntime,
 		cookieFile: File = AgehaPaths.cookieFile,
+		parsersDir: File = AgehaPaths.parsersDir,
 	): SourceStack {
+		val installation = ParsersInstallation(parsersDir)
+		val bundled = BundledParsers.ensureExtracted(installation)
+		val state = installation.read()
+
+		// Prefer what the user pinned, then what is active, then the bundled build. Each step
+		// falls through if the files are not actually there, so a half-deleted directory degrades
+		// to the bundled build rather than to a crash on launch.
+		val version = listOfNotNull(state.pinnedVersion, state.activeVersion)
+			.firstOrNull { installation.isInstalled(it) }
+			?: bundled
+
 		val cookieJar = PersistentCookieJar(cookieFile)
-		// Not a parameter: SourceConfigStore is a :core:jvmcontext type, and exposing it here
-		// would put a module-private type in the facade's public signature.
-		val configStore = SourceConfigStore()
-
-		// Late-bound so the context can be constructed before the registry that it feeds.
-		lateinit var registry: StaticMangaSourceRegistry
-
-		val context = AgehaMangaLoaderContext(
-			cookieJar = cookieJar,
-			jsRuntime = jsRuntime,
-			configStore = configStore,
-			parserForSource = { source -> registry.parserForTag(source) },
+		val loader = ParsersClassLoader.create(
+			parsersJar = installation.parsersJarFor(version),
+			bridgeJar = installation.bridgeJarFor(version),
+			extraJars = installation.libraryJarsFor(version),
+			version = version,
 		)
-
-		registry = StaticMangaSourceRegistry(
-			contextProvider = { context },
-			parsersVersion = BUNDLED_PARSERS_VERSION,
-		)
+		val bridge = ParserBridgeLoader.instantiate(loader, cookieJar, jsRuntime, version)
 
 		return SourceStack(
-			registry = registry,
+			registry = BridgedSourceRegistry(bridge),
+			installation = installation,
+			bridge = bridge,
+			loader = loader,
 			cookieJar = cookieJar,
 			jsRuntime = jsRuntime,
 		)
 	}
 }
 
-/**
- * A constructed source stack and the handles a host needs to shut it down cleanly.
- */
+/** Adapts a [ParserBridge] to the registry the rest of the app uses. */
+private class BridgedSourceRegistry(
+	private val bridge: ParserBridge,
+) : MangaSourceRegistry {
+
+	private val byName: Map<String, SourceDescriptor> by lazy {
+		bridge.sourceDescriptors().associateBy { it.name }
+	}
+
+	override fun availableSources(): List<SourceDescriptor> = bridge.sourceDescriptors()
+
+	override fun descriptorFor(name: String): SourceDescriptor? = byName[name]
+
+	override fun clientFor(name: String): MangaSourceClient = bridge.clientFor(name)
+
+	override val parsersVersion: String get() = bridge.parsersVersion
+}
+
+/** A constructed source stack, and the handles a host needs to shut it down cleanly. */
 class SourceStack internal constructor(
 	val registry: MangaSourceRegistry,
+	val installation: ParsersInstallation,
+	private val bridge: ParserBridge,
+	private val loader: ParsersClassLoader,
 	private val cookieJar: PersistentCookieJar,
 	private val jsRuntime: JsRuntime,
 ) {
 
-	/** Flush cookies and release any native JavaScript resources. */
+	/** The parsers build currently serving sources. */
+	val parsersVersion: String get() = bridge.parsersVersion
+
 	suspend fun close() {
 		cookieJar.persist()
 		jsRuntime.close()
+		runCatching { bridge.close() }
+		// Releases the jar file handles. On Windows an un-closed loader keeps the jar locked, and
+		// the next update cannot replace it.
+		runCatching { loader.close() }
 	}
 }

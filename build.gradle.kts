@@ -6,8 +6,15 @@ plugins {
 	alias(libs.plugins.kotlin.serialization) apply false
 }
 
-/** The only modules permitted to see parsers-library types. See [CheckParsersWallTask]. */
-val parsersWallExemptions = setOf(":core:parsers", ":core:jvmcontext")
+/**
+ * The only module permitted to see parsers-library types.
+ *
+ * It was two until Milestone 3. Moving the parsers behind a classloader boundary meant
+ * :core:parsers stopped needing to name a parsers type at all -- it reaches the library through
+ * ParserBridge instead -- so the exemption narrowed to the one module that genuinely implements
+ * against the library. A narrower exemption is a stronger guarantee, so it is worth keeping tight.
+ */
+val parsersWallExemptions = setOf(":core:jvmcontext")
 val parsersCoordinate = "com.github.Kotatsu-Redo:kotatsu-parsers-redo"
 
 subprojects {

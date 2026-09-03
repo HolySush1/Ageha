@@ -2,6 +2,7 @@ package app.ageha.core.jvmcontext
 
 import app.ageha.core.js.InterceptedHttpRequest
 import app.ageha.core.js.JsRuntime
+import app.ageha.core.model.BrowserActionRequiredException
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.network.UserAgents
@@ -81,6 +82,21 @@ class AgehaMangaLoaderContext(
 		jsRuntime.browserUserAgent ?: UserAgents.CHROME_DESKTOP
 
 	override fun getPreferredLocales(): List<Locale> = listOf(Locale.getDefault())
+
+	/**
+	 * Release the HTTP stack.
+	 *
+	 * OkHttp keeps a dispatcher thread pool, a connection pool of live sockets, and an open
+	 * journal file inside its disk cache. None of that is reclaimed by dropping the reference, and
+	 * the open cache file is the one that bites on Windows: a build being replaced by an update
+	 * cannot have its directory removed while a file in it is still open. The test suite found
+	 * this before a user did, as a temporary directory that refused to delete.
+	 */
+	fun close() {
+		runCatching { httpClient.dispatcher.executorService.shutdown() }
+		runCatching { httpClient.connectionPool.evictAll() }
+		runCatching { httpClient.cache?.close() }
+	}
 
 	// ---- javascript --------------------------------------------------------------------------
 
@@ -172,23 +188,4 @@ private fun InterceptedHttpRequest.toParserModel() = InterceptedRequest(
 	headers = headers,
 	timestamp = timestampMillis,
 	body = body,
-)
-
-/**
- * Thrown when a parser calls requestBrowserAction or requestCloudflareVerification.
- *
- * Both are declared Nothing-returning upstream, so a parser that reaches one has already given up
- * on doing the job itself. [isCloudflare] separates "clear a challenge" from "sign in or click
- * something", because the remedies differ.
- */
-class BrowserActionRequiredException(
-	val sourceName: String,
-	val url: String,
-	val isCloudflare: Boolean,
-) : UnsupportedOperationException(
-	if (isCloudflare) {
-		"Source '" + sourceName + "' needs a browser to clear a Cloudflare challenge at " + url
-	} else {
-		"Source '" + sourceName + "' needs a browser for an interactive step at " + url
-	},
 )

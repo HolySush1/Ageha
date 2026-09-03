@@ -1,4 +1,4 @@
-package app.ageha.core.parsers
+package app.ageha.core.source
 
 import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaFilter

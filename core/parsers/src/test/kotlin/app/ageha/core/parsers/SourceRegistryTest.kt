@@ -9,24 +9,44 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
 /**
- * Offline checks on the registry.
+ * Offline checks on the registry, going through the real classloader boundary.
  *
- * No network: enumerating sources reads the generated enum out of the bundled JAR, which is
- * exactly the thing worth testing without a network dependency. It confirms the parsers artifact
- * resolved, KSP output made it into the JAR, and the descriptor mapping holds.
+ * No network. Enumerating sources extracts the bundled build, loads it in an isolated
+ * classloader, instantiates the bridge reflectively and reads the KSP-generated enum out of it --
+ * so a green run here means the whole Layer 1 mechanism works, not just the mapping.
  */
 class SourceRegistryTest {
 
-	private fun registry(dir: File) = Ageha.createSourceStack(cookieFile = File(dir, "cookies.json")).registry
+	/**
+	 * Every test builds a real stack and closes it.
+	 *
+	 * Closing is not tidiness. An open URLClassLoader holds its jars open, and on Windows an open
+	 * file cannot be deleted or replaced -- so a leaked loader breaks @TempDir cleanup here and,
+	 * in production, breaks the update that tries to replace the jar. The first version of these
+	 * tests leaked, and JUnit failed them all with "Failed to close extension context", which is
+	 * how the problem was found.
+	 */
+	private fun <T> withStack(dir: File, block: (SourceStack) -> T): T {
+		val stack = Ageha.createSourceStack(
+			cookieFile = File(dir, "cookies.json"),
+			parsersDir = File(dir, "parsers"),
+		)
+		return try {
+			block(stack)
+		} finally {
+			runBlocking { stack.close() }
+		}
+	}
 
 	@Test
 	@DisplayName("the bundled parsers build exposes a large source catalogue")
-	fun sourcesAreEnumerated(@TempDir dir: File) {
-		val sources = registry(dir).availableSources()
+	fun sourcesAreEnumerated(@TempDir dir: File) = withStack(dir) { stack ->
+		val sources = stack.registry.availableSources()
 
 		// The build under test reports 1360 sources in its own summary.yaml. Asserting a loose
 		// floor rather than the exact number keeps this from failing on every routine bump, while
@@ -36,8 +56,8 @@ class SourceRegistryTest {
 
 	@Test
 	@DisplayName("descriptors are populated, not blank shells")
-	fun descriptorsAreUsable(@TempDir dir: File) {
-		val sources = registry(dir).availableSources()
+	fun descriptorsAreUsable(@TempDir dir: File) = withStack(dir) { stack ->
+		val sources = stack.registry.availableSources()
 
 		assertTrue(sources.all { it.name.isNotBlank() }, "every source needs a persistable name")
 		assertTrue(sources.all { it.title.isNotBlank() }, "every source needs a display title")
@@ -50,8 +70,8 @@ class SourceRegistryTest {
 
 	@Test
 	@DisplayName("upstream's broken flag is carried through rather than dropped")
-	fun brokenFlagSurvives(@TempDir dir: File) {
-		val sources = registry(dir).availableSources()
+	fun brokenFlagSurvives(@TempDir dir: File) = withStack(dir) { stack ->
+		val sources = stack.registry.availableSources()
 
 		// Upstream marks some sources broken at any given time. If none are flagged, the field is
 		// probably not being read -- which would mean the UI silently offers dead sources.
@@ -63,25 +83,25 @@ class SourceRegistryTest {
 
 	@Test
 	@DisplayName("an unknown source name resolves to null, never an exception")
-	fun unknownSourceDegradesGracefully(@TempDir dir: File) {
+	fun unknownSourceDegradesGracefully(@TempDir dir: File) = withStack(dir) { stack ->
 		// A user's library outlives any single parsers build. A source that was renamed or dropped
 		// upstream must not throw on lookup -- the row is shown as unavailable and kept.
-		assertNull(registry(dir).descriptorFor("A_SOURCE_THAT_NEVER_EXISTED"))
+		assertNull(stack.registry.descriptorFor("A_SOURCE_THAT_NEVER_EXISTED"))
 	}
 
 	@Test
 	@DisplayName("asking for a client for an unknown source is a typed failure")
-	fun unknownClientIsTyped(@TempDir dir: File) {
+	fun unknownClientIsTyped(@TempDir dir: File) = withStack(dir) { stack ->
 		val failure = assertThrows<SourceFailure.UnknownSource> {
-			registry(dir).clientFor("A_SOURCE_THAT_NEVER_EXISTED")
+			stack.registry.clientFor("A_SOURCE_THAT_NEVER_EXISTED")
 		}
 		assertEquals("A_SOURCE_THAT_NEVER_EXISTED", failure.sourceName)
 	}
 
 	@Test
 	@DisplayName("a client can be built for every source without touching the network")
-	fun clientsConstructOffline(@TempDir dir: File) {
-		val registry = registry(dir)
+	fun clientsConstructOffline(@TempDir dir: File) = withStack(dir) { stack ->
+		val registry = stack.registry
 		// Constructing a parser resolves its config and domain. Doing it for a sample of sources
 		// catches parsers that fail at construction time, which would otherwise only show up when
 		// a user picked that source.

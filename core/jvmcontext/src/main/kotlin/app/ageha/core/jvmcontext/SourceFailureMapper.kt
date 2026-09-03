@@ -1,10 +1,10 @@
-package app.ageha.core.parsers.internal
+package app.ageha.core.jvmcontext
 
 import app.ageha.core.js.JsAttemptRecorder
 import app.ageha.core.js.JsUnavailableException
+import app.ageha.core.model.BrowserActionRequiredException
 import app.ageha.core.model.JsCapability
 import app.ageha.core.model.SourceFailure
-import app.ageha.core.jvmcontext.BrowserActionRequiredException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import org.jsoup.HttpStatusException

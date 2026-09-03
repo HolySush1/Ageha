@@ -1,4 +1,4 @@
-package app.ageha.core.parsers.internal
+package app.ageha.core.jvmcontext
 
 import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaFilter
@@ -9,7 +9,7 @@ import app.ageha.core.model.AgehaPage
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.model.SourceFailure
-import app.ageha.core.parsers.MangaSourceClient
+import app.ageha.core.source.MangaSourceClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.koitharu.kotatsu.parsers.MangaParser

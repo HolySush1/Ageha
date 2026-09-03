@@ -4,10 +4,16 @@ import app.ageha.core.model.AgehaFilter
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceFailure
+import app.ageha.core.network.AgehaHttpClient
+import app.ageha.core.network.AgehaPaths
+import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.parsers.Ageha
-import app.ageha.core.parsers.MangaSourceClient
+import app.ageha.core.parsers.ParsersUpdateService
+import app.ageha.core.parsers.UpdateOutcome
+import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.parsers.SourceStack
 import kotlinx.coroutines.runBlocking
+import java.io.File
 import java.io.PrintStream
 import kotlin.system.exitProcess
 
@@ -33,6 +39,7 @@ fun main(args: Array<String>) {
 		runBlocking {
 			when (val command = args[0]) {
 				"sources" -> listSources(stack, args.getOrNull(1))
+				"parsers" -> parsers(stack, args.getOrNull(1))
 				"search" -> requireArgs(args, 3) { search(stack, args[1], args[2]) }
 				"details" -> requireArgs(args, 3) {
 					details(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
@@ -94,6 +101,80 @@ private fun listSources(stack: SourceStack, filter: String?) {
 			if (source.isBroken) add("BROKEN")
 		}.joinToString(", ")
 		println("  " + source.name.padEnd(28) + " " + source.title.padEnd(30) + " [" + flags + "]")
+	}
+}
+
+/**
+ * Inspect and update the loaded parsers build.
+ *
+ * The point of showing this in a CLI is that Layer 1 is otherwise invisible until it goes wrong.
+ * A rejected build is a normal event -- the host contract does occasionally move -- and being able
+ * to see which build is live, what was refused and why, is what makes that legible rather than
+ * mysterious.
+ */
+private suspend fun parsers(stack: SourceStack, command: String?) {
+	val installation = stack.installation
+	val state = installation.read()
+
+    when (command) {
+		null, "status" -> {
+			println("Active build:    " + stack.parsersVersion)
+			println("Bundled build:   " + Ageha.BUNDLED_PARSERS_VERSION)
+			println("Sources:         " + stack.registry.availableSources().size)
+			state.pinnedVersion?.let { println("Pinned to:       " + it) }
+			state.lastKnownGoodVersion?.let { println("Roll back to:    " + it) }
+			if (state.rejected.isNotEmpty()) {
+				println()
+				println("Refused builds (never retried):")
+				state.rejected.forEach { (version, reason) ->
+					println("  " + version + " -- " + reason)
+				}
+			}
+		}
+
+		"check" -> {
+			val cookieJar = PersistentCookieJar(File(AgehaPaths.dataDir, "update-cookies.json"))
+			val service = ParsersUpdateService(
+				httpClient = AgehaHttpClient.build(cookieJar),
+				installation = installation,
+				cookieJar = cookieJar,
+			)
+			println("Checking " + "Kotatsu-Redo/kotatsu-parsers-redo" + " for a newer build...")
+			when (val outcome = service.checkForUpdate()) {
+				is UpdateOutcome.UpToDate -> println("Up to date on " + outcome.version + ".")
+				is UpdateOutcome.Pinned -> println("Pinned to " + outcome.version + "; not checking.")
+				is UpdateOutcome.Ready -> {
+					println("Build " + outcome.version + " passed the compatibility gate.")
+					println("  " + outcome.sourceCount + " sources, sha256 " + outcome.sha256.take(16) + "...")
+					println("  Run 'parsers activate " + outcome.version + "' to use it.")
+				}
+
+				is UpdateOutcome.Rejected -> {
+					println(outcome.userMessage)
+					println("  Reason: " + outcome.reason)
+				}
+
+				is UpdateOutcome.PreviouslyRejected ->
+					println("Build " + outcome.version + " was refused earlier: " + outcome.reason)
+
+				is UpdateOutcome.CheckFailed -> println("Could not check: " + outcome.reason)
+			}
+		}
+
+		"rollback" -> {
+			val target = installation.rollBack()
+			if (target == null) {
+				println("Nothing to roll back to.")
+			} else {
+				println("Rolled back to " + target + ". It loads on next start.")
+			}
+		}
+
+		else -> {
+			System.err.println("Unknown parsers command: " + command)
+			System.err.println("Try: parsers [status|check|rollback]")
+			exitProcess(2)
+		}
 	}
 }
 
@@ -259,7 +340,8 @@ private fun printUsage() {
 		"""
 		Ageha source CLI -- proves the parsers work on desktop.
 
-		  sources [filter]              list sources in the bundled parsers build
+		  parsers [check|rollback]      show the loaded parsers build, or update it
+		  sources [filter]              list sources in the loaded parsers build
 		  search  <SOURCE> <query>      search one source
 		  details <SOURCE> <query> [n]  details and chapters for search result n (default 0)
 		  pages   <SOURCE> <query> [n]  page image urls for the first chapter of result n
