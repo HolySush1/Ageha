@@ -5,6 +5,8 @@ plugins {
 dependencies {
 	implementation(project(":core:parsers"))
 	implementation(project(":core:model"))
+	implementation(project(":core:backup"))
+	implementation(project(":core:database"))
 	implementation(libs.kotlinx.coroutines.core)
 }
 

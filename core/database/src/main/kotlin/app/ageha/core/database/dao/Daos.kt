@@ -25,6 +25,9 @@ interface MangaDao {
 	@Query("SELECT * FROM manga WHERE source = :source")
 	suspend fun findBySource(source: String): List<MangaEntity>
 
+	@Query("SELECT COUNT(*) FROM manga")
+	suspend fun count(): Int
+
 	@Upsert
 	suspend fun upsert(manga: MangaEntity)
 
@@ -98,6 +101,9 @@ interface FavouritesDao {
 
 	@Query("SELECT * FROM favourite_categories WHERE deleted_at = 0 ORDER BY sort_key ASC")
 	fun observeCategories(): Flow<List<FavouriteCategoryEntity>>
+
+	@Query("SELECT * FROM favourite_categories WHERE deleted_at = 0 ORDER BY sort_key ASC")
+	suspend fun categories(): List<FavouriteCategoryEntity>
 
 	@Upsert
 	suspend fun upsertCategory(category: FavouriteCategoryEntity): Long

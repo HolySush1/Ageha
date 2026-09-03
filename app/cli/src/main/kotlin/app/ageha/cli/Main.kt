@@ -4,6 +4,9 @@ import app.ageha.core.model.AgehaFilter
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceFailure
+import app.ageha.core.backup.BackupImportException
+import app.ageha.core.backup.BackupImporter
+import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
@@ -12,6 +15,7 @@ import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.UpdateOutcome
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.parsers.SourceStack
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.PrintStream
@@ -40,6 +44,8 @@ fun main(args: Array<String>) {
 			when (val command = args[0]) {
 				"sources" -> listSources(stack, args.getOrNull(1))
 				"parsers" -> parsers(stack, args.getOrNull(1))
+				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
+				"library" -> library()
 				"search" -> requireArgs(args, 3) { search(stack, args[1], args[2]) }
 				"details" -> requireArgs(args, 3) {
 					details(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
@@ -101,6 +107,77 @@ private fun listSources(stack: SourceStack, filter: String?) {
 			if (source.isBroken) add("BROKEN")
 		}.joinToString(", ")
 		println("  " + source.name.padEnd(28) + " " + source.title.padEnd(30) + " [" + flags + "]")
+	}
+}
+
+/**
+ * Show what the local database holds.
+ *
+ * The counterpart to `import`: without a way to look, "restored 4 items" is a claim rather than a
+ * fact. It also demonstrates the point of the source-name rule -- a row whose source is not in the
+ * loaded parsers build is shown as unavailable rather than hidden or dropped.
+ */
+private suspend fun library() {
+	val database = AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db"))
+	try {
+		println("Database:  " + File(AgehaPaths.dataDir, "ageha.db"))
+		println("Manga:     " + database.mangaDao().count())
+		println("Sources:   " + database.sourcesDao().all().size)
+		println()
+
+		val categories = database.favouritesDao().categories()
+		println("Categories (" + categories.size + "):")
+		categories.forEach { category ->
+			val items = database.favouritesDao().inCategory(category.categoryId)
+			println("  " + category.title + " -- " + items.size + " item(s)")
+			items.take(5).forEach { favourite ->
+				val manga = database.mangaDao().find(favourite.mangaId)
+				println("      " + (manga?.title ?: "(missing manga " + favourite.mangaId + ")"))
+			}
+		}
+
+		println()
+		val history = database.historyDao().observeRecent(10).first()
+		println("Recent history (" + history.size + "):")
+		history.forEach { entry ->
+			val manga = database.mangaDao().find(entry.mangaId)
+			val percent = (entry.percent * 100).toInt()
+			println(
+				"  " + (manga?.title ?: "?") +
+					"  chapter " + entry.chapterId + ", page " + entry.page +
+					(if (entry.percent >= 0f) "  (" + percent + "%)" else ""),
+			)
+		}
+	} finally {
+		database.close()
+	}
+}
+
+/**
+ * Import an Android backup.
+ *
+ * The migration path, and the reason it exists before any UI: it exercises every column of the
+ * schema against data the Android app actually wrote. The report is deliberately detailed --
+ * someone moving years of reading history needs to know exactly what did and did not come across,
+ * at the moment they do it.
+ */
+private suspend fun importBackup(path: String) {
+	val file = File(path)
+	val database = AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db"))
+	try {
+		println("Importing " + file.name + "...")
+		val result = BackupImporter(database).import(file)
+		result.index?.let {
+			println("Backup written by " + it.appId + " build " + it.appVersion)
+		}
+		println()
+		println(result.describe())
+	} catch (e: BackupImportException) {
+		System.err.println()
+		System.err.println(e.message)
+		exitProcess(1)
+	} finally {
+		database.close()
 	}
 }
 
@@ -340,6 +417,8 @@ private fun printUsage() {
 		"""
 		Ageha source CLI -- proves the parsers work on desktop.
 
+		  import  <backup.zip>          import a Kotatsu-Redo Android backup
+		  library                       what is in the local database
 		  parsers [check|rollback]      show the loaded parsers build, or update it
 		  sources [filter]              list sources in the loaded parsers build
 		  search  <SOURCE> <query>      search one source

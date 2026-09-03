@@ -177,7 +177,7 @@ class AgehaDatabaseTest {
 				createdAt = 0L,
 				sortKey = 0,
 				title = "Reading",
-				order = null,
+				order = "NEWEST",
 				track = true,
 				isVisibleInLibrary = true,
 				deletedAt = 0L,

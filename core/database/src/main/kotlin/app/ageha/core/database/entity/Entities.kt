@@ -87,7 +87,10 @@ data class MangaTagsEntity(
 
 @Entity(
 	tableName = TABLE_CHAPTERS,
-	primaryKeys = ["chapter_id", "manga_id"],
+	// Column order matters: it is the Android app's, and it decides which column the implicit
+	// primary-key index is usable for. Reversing it would still compile and still work, while
+	// quietly producing a different schema from the one backups were written against.
+	primaryKeys = ["manga_id", "chapter_id"],
 	foreignKeys = [
 		ForeignKey(
 			entity = MangaEntity::class,
@@ -98,9 +101,9 @@ data class MangaTagsEntity(
 	],
 )
 data class ChapterEntity(
-	@ColumnInfo(name = "chapter_id") val id: Long,
-	@ColumnInfo(name = "manga_id", index = true) val mangaId: Long,
-	@ColumnInfo(name = "name") val name: String,
+	@ColumnInfo(name = "chapter_id") val chapterId: Long,
+	@ColumnInfo(name = "manga_id") val mangaId: Long,
+	@ColumnInfo(name = "name") val title: String,
 	@ColumnInfo(name = "number") val number: Float,
 	@ColumnInfo(name = "volume") val volume: Int,
 	@ColumnInfo(name = "url") val url: String,
@@ -143,7 +146,7 @@ data class FavouriteCategoryEntity(
 	@ColumnInfo(name = "created_at") val createdAt: Long,
 	@ColumnInfo(name = "sort_key") val sortKey: Int,
 	@ColumnInfo(name = "title") val title: String,
-	@ColumnInfo(name = "order") val order: String?,
+	@ColumnInfo(name = "order") val order: String,
 	@ColumnInfo(name = "track") val track: Boolean,
 	@ColumnInfo(name = "show_in_lib") val isVisibleInLibrary: Boolean,
 	@ColumnInfo(name = "deleted_at") val deletedAt: Long,

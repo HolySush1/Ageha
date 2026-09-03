@@ -32,7 +32,18 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     dependencies from its POM, and gates what it fetches.
   - `cli parsers [status|check|rollback]`.
 
-- **Milestone 4 (in progress) -- the database.** `:core:database` on Room 2.8 with the bundled
+- **Milestone 4 -- database, persistence and Android backup import.**
+  - `:core:backup` imports a Kotatsu-Redo Android backup archive: history, favourites, categories
+    and sources, with reading position restored exactly. Moved ahead of any UI deliberately, since
+    it exercises every column of the schema against data the Android app actually wrote.
+  - Reading is lenient (unknown fields and unknown sections are tolerated, so a backup from a newer
+    Android app still imports what it can); writing is strict (one transaction, everything or
+    nothing).
+  - The result names what it could not restore. Sections Ageha does not support yet, entries it
+    does not recognise, and individual rows dropped -- such as a favourite referencing a category
+    the backup never defined, which would otherwise fail the whole import on a foreign key.
+  - `cli import <backup.zip>` and `cli library`.
+- **Milestone 4 -- the database.** `:core:database` on Room 2.8 with the bundled
   SQLite driver, which is what proves Room works off Android. Schema declared at **version 28** to
   match the Android app rather than replaying 27 migrations that could never run here. Eight
   entities so far (manga, tags, manga_tags, chapters, history, favourites, favourite_categories,

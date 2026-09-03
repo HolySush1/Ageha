@@ -6,8 +6,9 @@ Ageha is a desktop port of [Kotatsu-Redo](https://github.com/Kotatsu-Redo/Kotats
 manga reader. It reads from the same 1360 manga sources by consuming the same parser library, so
 keeping up with the web is a dependency bump rather than a rewrite.
 
-**Status: early. Milestone 2 of 9.** There is no user interface yet. What exists is the source
-layer and a CLI that proves it works on desktop.
+**Status: early. Milestone 4 of 9.** There is no user interface yet. What exists is the source
+layer, dynamic parser updates, the database, Android backup import, and a CLI that drives all of
+it.
 
 ## What works today
 
@@ -17,9 +18,21 @@ layer and a CLI that proves it works on desktop.
 ./app/cli/build/install/cli/bin/cli search MANGADEX "frieren"
 ./app/cli/build/install/cli/bin/cli details MANGADEX "sousou no frieren"
 ./app/cli/build/install/cli/bin/cli pages MANGADEX "sousou no frieren"
+
+./app/cli/build/install/cli/bin/cli parsers            # which parsers build is loaded
+./app/cli/build/install/cli/bin/cli parsers check      # look for a newer one, and gate it
+./app/cli/build/install/cli/bin/cli import backup.zip  # import a Kotatsu-Redo Android backup
+./app/cli/build/install/cli/bin/cli library            # what is in the local database
 ```
 
-That is a real search, against a real site, through the real parser library, on a plain JVM.
+That is a real search, against a real site, through the real parser library, on a plain JVM --
+and a real Android backup restored into a real SQLite database.
+
+## Migrating from the Android app
+
+Export a backup from Kotatsu-Redo and run `cli import <backup.zip>`. Library, favourites,
+categories, reading history and reading positions come across; the import says exactly what it
+could not restore rather than reporting success over a partial one.
 
 ## Architecture in one paragraph
 

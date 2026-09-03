@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 28,
-    "identityHash": "d6508527887f3474f03cf20d791186d6",
+    "identityHash": "173d7f262f1fa0c1c2bb021961142f7a",
     "entities": [
       {
         "tableName": "manga",
@@ -202,10 +202,10 @@
       },
       {
         "tableName": "chapters",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`chapter_id` INTEGER NOT NULL, `manga_id` INTEGER NOT NULL, `name` TEXT NOT NULL, `number` REAL NOT NULL, `volume` INTEGER NOT NULL, `url` TEXT NOT NULL, `scanlator` TEXT, `upload_date` INTEGER NOT NULL, `branch` TEXT, `source` TEXT NOT NULL, `index` INTEGER NOT NULL, PRIMARY KEY(`chapter_id`, `manga_id`), FOREIGN KEY(`manga_id`) REFERENCES `manga`(`manga_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`chapter_id` INTEGER NOT NULL, `manga_id` INTEGER NOT NULL, `name` TEXT NOT NULL, `number` REAL NOT NULL, `volume` INTEGER NOT NULL, `url` TEXT NOT NULL, `scanlator` TEXT, `upload_date` INTEGER NOT NULL, `branch` TEXT, `source` TEXT NOT NULL, `index` INTEGER NOT NULL, PRIMARY KEY(`manga_id`, `chapter_id`), FOREIGN KEY(`manga_id`) REFERENCES `manga`(`manga_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
-            "fieldPath": "id",
+            "fieldPath": "chapterId",
             "columnName": "chapter_id",
             "affinity": "INTEGER",
             "notNull": true
@@ -217,7 +217,7 @@
             "notNull": true
           },
           {
-            "fieldPath": "name",
+            "fieldPath": "title",
             "columnName": "name",
             "affinity": "TEXT",
             "notNull": true
@@ -272,21 +272,10 @@
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "chapter_id",
-            "manga_id"
+            "manga_id",
+            "chapter_id"
           ]
         },
-        "indices": [
-          {
-            "name": "index_chapters_manga_id",
-            "unique": false,
-            "columnNames": [
-              "manga_id"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_chapters_manga_id` ON `${TABLE_NAME}` (`manga_id`)"
-          }
-        ],
         "foreignKeys": [
           {
             "table": "manga",
@@ -475,7 +464,7 @@
       },
       {
         "tableName": "favourite_categories",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`category_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `created_at` INTEGER NOT NULL, `sort_key` INTEGER NOT NULL, `title` TEXT NOT NULL, `order` TEXT, `track` INTEGER NOT NULL, `show_in_lib` INTEGER NOT NULL, `deleted_at` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`category_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `created_at` INTEGER NOT NULL, `sort_key` INTEGER NOT NULL, `title` TEXT NOT NULL, `order` TEXT NOT NULL, `track` INTEGER NOT NULL, `show_in_lib` INTEGER NOT NULL, `deleted_at` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "categoryId",
@@ -504,7 +493,8 @@
           {
             "fieldPath": "order",
             "columnName": "order",
-            "affinity": "TEXT"
+            "affinity": "TEXT",
+            "notNull": true
           },
           {
             "fieldPath": "track",
@@ -600,7 +590,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd6508527887f3474f03cf20d791186d6')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '173d7f262f1fa0c1c2bb021961142f7a')"
     ]
   }
 }

@@ -5,6 +5,7 @@ import androidx.room.RoomDatabase
 import app.ageha.core.database.dao.FavouritesDao
 import app.ageha.core.database.dao.HistoryDao
 import app.ageha.core.database.dao.MangaDao
+import app.ageha.core.database.dao.RestoreDao
 import app.ageha.core.database.dao.SourcesDao
 import app.ageha.core.database.entity.ChapterEntity
 import app.ageha.core.database.entity.FavouriteCategoryEntity
@@ -50,4 +51,6 @@ abstract class AgehaDatabase : RoomDatabase() {
 	abstract fun favouritesDao(): FavouritesDao
 
 	abstract fun sourcesDao(): SourcesDao
+
+	abstract fun restoreDao(): RestoreDao
 }

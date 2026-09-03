@@ -44,6 +44,7 @@ include(
 	":core:network",
 	":core:js",
 	":core:jvmcontext",
+	":core:backup",
 	":core:database",
 	":core:parsers",
 	":app:cli",

@@ -471,8 +471,8 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 1 | Skills installed; `FINDINGS.md` + `ARCHITECTURE.md` | **done, this is it** |
 | 2 | Gradle skeleton, `:core:parsers` facade, `:core:jvmcontext`, CLI that searches one source | **done.** 1360 sources enumerated, live search/details/pages against MangaDex and Weeb Central, 26 tests green, wall enforced by the build |
 | 3 | Layer 1 dynamic loading + tests | **done.** Bridge-based isolation (§4.1), SHA-based updates, gate with a designed rejection path, two builds proven to coexist in one JVM |
-| 4 | Database + library/history persistence | **in progress.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
-| 4b | **Android backup import** | moved here by decision 4: it validates the schema before any UI depends on it |
+| 4 | Database + library/history persistence | **done.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
+| 4b | **Android backup import** | **done.** History, favourites, categories and sources restore from a real archive; unsupported sections and dropped rows are reported, not hidden |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | unchanged |
 | 6 | Compose UI: explore + library | surface `isBroken` from the descriptor |
 | 7 | Reader | webtoon scroll surface flagged as a risk (§1.4) |
