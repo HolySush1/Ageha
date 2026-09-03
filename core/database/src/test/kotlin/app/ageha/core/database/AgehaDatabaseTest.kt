@@ -101,7 +101,7 @@ class AgehaDatabaseTest {
 		db.mangaDao().upsertChapters(
 			listOf(ChapterEntity(100L, 1L, "Chapter 1", 1f, 0, "/c/1", null, 0L, null, "MANGADEX", 0)),
 		)
-		db.historyDao().upsert(HistoryEntity(1L, 0L, 0L, 100L, 3, 0f, 0.2f, 0L, 1))
+		db.historyDao().upsert(HistoryEntity(1L, 0L, 0L, 100L, 3, 0, 0f, 0.2f, 0L, 1))
 
 		assertEquals(1, db.mangaDao().chaptersOf(1L).size)
 		assertNotNull(db.historyDao().find(1L))
@@ -117,7 +117,7 @@ class AgehaDatabaseTest {
 	@DisplayName("history is soft deleted, so another device can still reconcile it")
 	fun historyIsSoftDeleted() = runBlocking {
 		db.mangaDao().upsert(manga(1L))
-		db.historyDao().upsert(HistoryEntity(1L, 0L, 5L, 100L, 3, 0f, 0.2f, 0L, 1))
+		db.historyDao().upsert(HistoryEntity(1L, 0L, 5L, 100L, 3, 0, 0f, 0.2f, 0L, 1))
 
 		db.historyDao().markDeleted(1L, now = 1_000L)
 
@@ -137,8 +137,8 @@ class AgehaDatabaseTest {
 	fun historyOrderIsMostRecentFirst() = runBlocking {
 		db.mangaDao().upsert(manga(1L, "Older"))
 		db.mangaDao().upsert(manga(2L, "Newer"))
-		db.historyDao().upsert(HistoryEntity(1L, 0L, 100L, 0L, 0, 0f, 0f, 0L, 1))
-		db.historyDao().upsert(HistoryEntity(2L, 0L, 200L, 0L, 0, 0f, 0f, 0L, 1))
+		db.historyDao().upsert(HistoryEntity(1L, 0L, 100L, 0L, 0, 0, 0f, 0f, 0L, 1))
+		db.historyDao().upsert(HistoryEntity(2L, 0L, 200L, 0L, 0, 0, 0f, 0f, 0L, 1))
 
 		assertEquals(listOf(2L, 1L), db.historyDao().observeRecent(10).first().map { it.mangaId })
 	}
@@ -152,7 +152,7 @@ class AgehaDatabaseTest {
 		val first = AgehaDatabaseFactory.open(file)
 		try {
 			first.mangaDao().upsert(manga(1L))
-			first.historyDao().upsert(HistoryEntity(1L, 0L, 0L, 100L, 17, 0.3456789f, 0.62f, 0L, 42))
+			first.historyDao().upsert(HistoryEntity(1L, 0L, 0L, 100L, 17, 20, 0.3456789f, 0.62f, 0L, 42))
 		} finally {
 			first.close()
 		}

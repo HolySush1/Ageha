@@ -1,8 +1,8 @@
 package app.ageha.feature.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -37,12 +36,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
+import app.ageha.core.data.ContinueEntry
 import app.ageha.core.data.LibraryCategory
 import app.ageha.core.data.LibraryEntry
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
-import app.ageha.core.designsystem.MangaCard
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.model.AgehaManga
@@ -60,6 +59,8 @@ fun LibraryScreen(
 	state: LibraryUiState,
 	imageHeaders: Map<String, Map<String, String>>,
 	onOpenManga: (AgehaManga) -> Unit,
+	onContinue: (ContinueEntry) -> Unit,
+	onSeeAllContinue: () -> Unit,
 	onSelectCategory: (Int) -> Unit,
 	onSearch: (String) -> Unit,
 	onSort: (LibrarySort) -> Unit,
@@ -97,7 +98,9 @@ fun LibraryScreen(
 					detail = "Nothing in this shelf matches \"${state.query}\".",
 				)
 
-				else -> LibraryContent(state, imageHeaders, onOpenManga, onNeedHeaders)
+				else -> LibraryContent(
+					state, imageHeaders, onOpenManga, onContinue, onSeeAllContinue, onNeedHeaders,
+				)
 			}
 		}
 	}
@@ -108,16 +111,27 @@ private fun LibraryContent(
 	state: LibraryUiState,
 	imageHeaders: Map<String, Map<String, String>>,
 	onOpenManga: (AgehaManga) -> Unit,
+	onContinue: (ContinueEntry) -> Unit,
+	onSeeAllContinue: () -> Unit,
 	onNeedHeaders: (String) -> Unit,
 ) {
 	// Resolving image headers is a per-source cost, not a per-cover one, so it is asked for once
 	// per distinct source in the current view rather than from inside the grid's item scope.
-	LaunchedEffect(state.entries) {
-		state.entries.map { it.manga.sourceName }.distinct().forEach(onNeedHeaders)
+	LaunchedEffect(state.entries, state.recent) {
+		(state.entries.map { it.manga.sourceName } + state.recent.map { it.manga.sourceName })
+			.distinct()
+			.forEach(onNeedHeaders)
 	}
 	Column(Modifier.fillMaxSize()) {
+		// Hidden while filtering: the shelf is ordered by when you last read, so leaving it above
+		// a filtered grid shows results that do not match the query the user just typed.
 		if (state.recent.isNotEmpty() && state.query.isEmpty()) {
-			ContinueReadingRow(state.recent, imageHeaders, onOpenManga)
+			ContinueShelf(
+				entries = state.recent,
+				imageHeaders = imageHeaders,
+				onOpen = onContinue,
+				onSeeAll = onSeeAllContinue,
+			)
 			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 		}
 		MangaGrid(
@@ -134,44 +148,6 @@ private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>) =
 	badgeCount = newChapters,
 	progress = progressPercent,
 )
-
-/**
- * Continue reading.
- *
- * A horizontal strip rather than a section of the grid: it is a *different* list, ordered by when
- * you last read rather than by shelf, and folding it into the grid would make its ordering look
- * arbitrary.
- */
-@Composable
-private fun ContinueReadingRow(
-	recent: List<LibraryEntry>,
-	imageHeaders: Map<String, Map<String, String>>,
-	onOpenManga: (AgehaManga) -> Unit,
-) {
-	Column(Modifier.padding(vertical = AgehaSpacing.sm)) {
-		Text(
-			"Continue reading",
-			style = MaterialTheme.typography.titleSmall,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
-			modifier = Modifier.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.xs),
-		)
-		LazyRow(
-			contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = AgehaSpacing.md),
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-		) {
-			items(recent, key = { "${it.manga.sourceName}:${it.manga.id}" }) { entry ->
-				MangaCard(
-					manga = entry.manga,
-					imageHeaders = imageHeaders[entry.manga.sourceName].orEmpty(),
-					onClick = { onOpenManga(entry.manga) },
-					badgeCount = entry.newChapters,
-					progress = entry.progressPercent,
-					modifier = Modifier.width(112.dp),
-				)
-			}
-		}
-	}
-}
 
 /**
  * The category rail.

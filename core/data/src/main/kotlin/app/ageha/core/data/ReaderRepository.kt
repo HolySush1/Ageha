@@ -21,6 +21,8 @@ data class ReadingPosition(
 	/** Fraction through the whole manga, for the library's progress bar. */
 	val percent: Float,
 	val chaptersAtLastRead: Int,
+	/** Pages in that chapter, or 0 when unknown. See `HistoryEntity.pageCount`. */
+	val pageCount: Int = 0,
 )
 
 /**
@@ -118,6 +120,7 @@ class ReaderRepository(
 				scroll = row.scroll,
 				percent = row.percent,
 				chaptersAtLastRead = row.chaptersCount,
+				pageCount = row.pageCount,
 			)
 		}
 
@@ -145,6 +148,7 @@ class ReaderRepository(
 		page: Int,
 		scroll: Float,
 		percent: Float,
+		pageCount: Int = 0,
 		now: Long = System.currentTimeMillis(),
 	) {
 		this.manga.upsertWithTags(
@@ -152,6 +156,26 @@ class ReaderRepository(
 			manga.tags.map { MangaMapping.toEntity(it) },
 		)
 		val existing = history.find(manga.id)
+		val chapters = manga.chapters
+		// Store the chapter list too, but not on every page turn.
+		//
+		// This is what makes Continue Reading answerable offline: the last chapter's number and
+		// name, and the identity of the chapter after it, both come from these rows rather than
+		// from the source. Until now nothing wrote to the `chapters` table at all.
+		//
+		// Guarded because `savePosition` runs on a debounce behind every page turn, and rewriting
+		// four hundred chapter rows each time would turn a page turn into a bulk upsert. The three
+		// conditions are the only ones that can change what is stored: nothing stored yet, a move
+		// to a different chapter, or a chapter list that has grown since.
+		if (!chapters.isNullOrEmpty() &&
+			(existing == null ||
+				existing.chapterId != chapter.id ||
+				existing.chaptersCount != chapters.size)
+		) {
+			this.manga.upsertChapters(
+				chapters.mapIndexed { index, item -> MangaMapping.toEntity(item, manga.id, index) },
+			)
+		}
 		history.upsert(
 			HistoryEntity(
 				mangaId = manga.id,
@@ -159,10 +183,15 @@ class ReaderRepository(
 				updatedAt = now,
 				chapterId = chapter.id,
 				page = page,
+				// Zero means "not known", so a caller that cannot say keeps whatever was known
+				// before rather than overwriting a real count with a claim of nothing.
+				pageCount = pageCount.takeIf { it > 0 }
+					?: existing?.takeIf { it.chapterId == chapter.id }?.pageCount
+					?: 0,
 				scroll = scroll,
 				percent = percent,
 				deletedAt = 0,
-				chaptersCount = manga.chapters?.size ?: existing?.chaptersCount ?: 0,
+				chaptersCount = chapters?.size ?: existing?.chaptersCount ?: 0,
 			),
 		)
 	}

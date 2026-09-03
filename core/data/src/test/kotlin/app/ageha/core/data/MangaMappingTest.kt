@@ -141,9 +141,14 @@ class MangaMappingTest {
 		updatedAt = updatedAt,
 		chapterId = 1,
 		page = 3,
+		pageCount = 0,
 		scroll = 0.5f,
 		percent = 0.25f,
 		chaptersAtLastRead = chaptersAtLastRead,
+		chapterName = null,
+		chapterNumber = null,
+		chapterBranch = null,
+		chapterIndex = null,
 	)
 
 	@Test

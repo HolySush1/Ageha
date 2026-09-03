@@ -138,9 +138,7 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     engine can and cannot do.
   - `:feature:downloads` and `ChapterDownloader` -- offline chapters written as ordinary CBZ, two
     at a time per source, with a queue that reports what it skipped and why.
-  - A native file picker, `Ctrl+3` for downloads and `Ctrl+,` for settings.
-  - **Tracking is not built.** It needs OAuth clients registered per service; see
-    `docs/ARCHITECTURE.md` 7b.
+  - A native file picker and `Ctrl+,` for settings.
 
 - **Milestone 9 -- packaging and CI.**
   - `conveyor.conf` -- signed, self-updating installers for six targets from one machine. The
@@ -152,6 +150,30 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     can be reproduced exactly.
   - `docs/UPDATING.md` and `docs/RELEASING.md`.
 
+- **Continue Reading.** Everything read, most recent first, with cover, title, source and the
+  chapter stopped on. Reached by `Ctrl+2`, and the most recent few appear as a shelf on the library
+  screen.
+  - **Opening an entry resumes the exact page** -- unless that page was the last of its chapter, in
+    which case the *next* chapter opens at page one. When there is no next chapter the entry
+    reopens where it was and says it is caught up.
+  - **A quick search that is actually quick.** Filtering by title runs over a list already in
+    memory: no network, no database round trip, no debounce. It is the one search in Ageha that
+    answers as fast as it is typed.
+  - **An entry whose source is gone stays put, marked unavailable**, and offers a search for the
+    same title across every enabled source. Sources disappear on a parsers downgrade and whenever
+    upstream retires a site; the reading history belongs to the user, not to the source.
+  - Entries can be removed one at a time, or all at once from Settings > Library. Both are soft
+    deletes, so a future sync cannot resurrect what was cleared.
+  - Schema **v30** adds `history.page_count` -- Ageha's own column, the first divergence from the
+    Android schema. Without it "was that the last page of the chapter" is unanswerable. Additive
+    and defaulted, so Android backups still import and simply report the count as unknown.
+  - `ReaderRepository` now stores the chapter list alongside the reading position, guarded so it is
+    not rewritten on every page turn. The `chapters` table had existed since Milestone 4 with
+    nothing writing to it; it is what lets the last chapter be *named* and the next one *found*
+    with no network call.
+- **Cross-source search.** One title against every enabled source at once, four requests in flight,
+  grouped by source and skipping sources that cannot take a search term at all.
+
 - **Local comic archives, end to end.** File > Open comic archive reads a CBZ straight into the
   reader, through the same image pipeline as a remote source. Reading position persists for local
   files too, since the archive's id is derived from its absolute path.
@@ -160,7 +182,28 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   full account -- restored, unsupported, unrecognised, and every dropped row with its reason --
   is shown monospaced and stays until dismissed.
 
+### Changed
+
+- **External tracking was cut from scope and replaced by Continue Reading.** Shikimori, AniList,
+  MyAnimeList and Kitsu are gone from the brief and from `CLAUDE.md`. All four need an OAuth client
+  registered by the project owner -- credentials that cannot be invented, committed to a public GPL
+  repository, or tested without being real -- and writing them blind would have shipped four
+  untested network clients. The question they were for, *where was I and what is next*, is answered
+  from rows Ageha already stores, with no account and no network. See `docs/ARCHITECTURE.md` 7b.
+- **Section shortcuts renumbered** to make room: Continue Reading is `Ctrl+2`, Explore `Ctrl+3`,
+  Downloads `Ctrl+4`. Library stays `Ctrl+1` and Settings stays `Ctrl+,`.
+
 ### Fixed
+
+- **The reader's final position could be lost on quit, or written into a closing database.** The
+  flush used `scope.launch(NonCancellable)`, and `NonCancellable` is a `Job` -- so `launch` took it
+  as the *parent* and detached the write from the application scope entirely. Shutdown's `join()`
+  then had nothing to wait for and closed the database mid-transaction. Switching to a plain launch
+  fixes that and opens the opposite hole: a coroutine cancelled before it is dispatched never runs
+  at all. It is now `launch(start = UNDISPATCHED) { withContext(NonCancellable) { … } }`, which is
+  both a child of the scope and already running before the cancellation lands. Found by the shell
+  render, which began throwing `statement is closed` once the position write grew a second
+  statement. Pinned by a test that fails for either mistake.
 
 - **Cover and page images used Coil's default loader, not Ageha's.** The configured loader was
   registered in DI and handed to Compose nowhere, so every `AsyncImage` silently fell back to a

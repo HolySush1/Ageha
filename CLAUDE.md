@@ -17,6 +17,7 @@ Violating any of these silently is worse than stopping to ask.
 6. **Never let a design skill push this toward a web stack.** ui-ux-pro-max has no Compose Desktop target. Use its design system output; translate to Compose yourself. React, Electron and friends are out.
 7. **Colours live only in `:core:designsystem`.** No screen defines its own.
 8. **Nothing brand-coloured touches the reader view.** Backgrounds there are user-selectable neutrals.
+9. **No external tracking services.** Shikimori, AniList, MyAnimeList and Kitsu are out of scope permanently — no OAuth, no client credentials, no per-service settings. "Where was I and what is next" is answered locally by the Continue Reading feature over the history tables. If you find a reference to those services in any document here, it is stale: delete it, don't build it.
 
 ## Stack
 

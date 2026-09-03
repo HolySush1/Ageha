@@ -9,6 +9,7 @@ import app.ageha.core.model.PageScale
 import app.ageha.core.model.ReaderMode
 import app.ageha.core.model.SourceFailure
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** One page, and the direct image url once it has been resolved. */
 data class ReaderPage(
@@ -207,12 +209,27 @@ class ReaderViewModel(
 	/** Flush the position immediately. Called when the reader closes, where a debounce would lose it. */
 	fun savePositionNow() {
 		saveJob?.cancel()
-		// NonCancellable, because this runs when the reader is being torn down -- often because
-		// the window is closing, which cancels the scope a moment later. A cancellable write
-		// would lose exactly the page turn the reader most wants remembered: the last one.
-		// `AgehaApplication.close` joins the scope after cancelling it, so this still completes
-		// before the database is closed underneath it.
-		scope.launch(NonCancellable) { writePosition() }
+		// Uncancellable, because this runs while the reader is being torn down -- often because the
+		// window is closing, which cancels the scope a moment later. A cancellable write would lose
+		// exactly the page turn most worth remembering: the last one.
+		//
+		// Every part of this line is load-bearing.
+		//
+		// `withContext(NonCancellable)` *inside* a launch, never `launch(NonCancellable)`. They
+		// read the same and are not: `NonCancellable` is a `Job`, so passing it to `launch`
+		// replaces the parent job and detaches the coroutine from `scope` altogether. The write
+		// then races `AgehaApplication.close`, which joins the scope, legitimately finds nothing
+		// to wait for, and closes the database out from under a write still in flight.
+		//
+		// `UNDISPATCHED` because the opposite window is just as real: a coroutine that has been
+		// launched but not yet dispatched is cancelled before its body runs at all, so on a fast
+		// quit the write would simply never happen. Starting undispatched runs it on this thread
+		// until it suspends into Room's dispatcher -- by which point it is inside
+		// `NonCancellable` and registered as a child of the scope, so it both survives the
+		// cancellation and is covered by the join.
+		scope.launch(start = CoroutineStart.UNDISPATCHED) {
+			withContext(NonCancellable) { writePosition() }
+		}
 	}
 
 	/**
@@ -272,6 +289,10 @@ class ReaderViewModel(
 				page = state.currentPage,
 				pageCount = state.pageCount,
 			),
+			// Recorded so Continue Reading can tell "stopped on the last page" from "stopped in
+			// the middle", which is what decides whether reopening resumes this chapter or starts
+			// the next one. The reader is the only place that knows this number.
+			pageCount = state.pageCount,
 		)
 	}
 
@@ -296,6 +317,7 @@ class ReaderViewModel(
 				page = page,
 				scroll = fraction,
 				percent = reader.progressOf(state.chapterIndex, state.chapterCount, page, state.pageCount),
+				pageCount = state.pageCount,
 			)
 		}
 	}

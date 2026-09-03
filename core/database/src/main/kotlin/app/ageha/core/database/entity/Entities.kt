@@ -133,6 +133,19 @@ data class HistoryEntity(
 	@ColumnInfo(name = "updated_at") val updatedAt: Long,
 	@ColumnInfo(name = "chapter_id") val chapterId: Long,
 	@ColumnInfo(name = "page") val page: Int,
+	/**
+	 * How many pages that chapter had, or 0 when it is not known.
+	 *
+	 * **Ageha's own column; the Android app has no equivalent.** Without it "was the reader on the
+	 * final page of this chapter" cannot be answered, and that question is what decides whether
+	 * Continue Reading resumes the saved page or opens the next chapter at page one. Deriving it
+	 * from [percent] was the alternative and it is float arithmetic against a chapter count that
+	 * may have changed since -- wrong rarely, and wrong by opening the wrong chapter.
+	 *
+	 * Additive and defaulted, so a backup written by the Android app restores with 0 here, which
+	 * reads as "unknown" and degrades to resuming exactly where the reader stopped.
+	 */
+	@ColumnInfo(name = "page_count", defaultValue = "0") val pageCount: Int,
 	@ColumnInfo(name = "scroll") val scroll: Float,
 	@ColumnInfo(name = "percent") val percent: Float,
 	/** Soft delete. Zero means not deleted; sync needs the tombstone. */

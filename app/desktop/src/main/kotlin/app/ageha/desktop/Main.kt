@@ -136,9 +136,12 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 						navigator.switchTo(Section.LIBRARY); true
 					}
 					event.isCtrlPressed && event.key == Key.Two -> {
-						navigator.switchTo(Section.EXPLORE); true
+						navigator.switchTo(Section.CONTINUE); true
 					}
 					event.isCtrlPressed && event.key == Key.Three -> {
+						navigator.switchTo(Section.EXPLORE); true
+					}
+					event.isCtrlPressed && event.key == Key.Four -> {
 						navigator.switchTo(Section.DOWNLOADS); true
 					}
 					// Ctrl+comma opens preferences on every desktop platform worth matching.
@@ -174,10 +177,13 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				Item("Library", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.One, ctrl = true)) {
 					navigator.switchTo(Section.LIBRARY)
 				}
-				Item("Explore", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Two, ctrl = true)) {
+				Item("Continue reading", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Two, ctrl = true)) {
+					navigator.switchTo(Section.CONTINUE)
+				}
+				Item("Explore", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Three, ctrl = true)) {
 					navigator.switchTo(Section.EXPLORE)
 				}
-				Item("Downloads", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Three, ctrl = true)) {
+				Item("Downloads", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Four, ctrl = true)) {
 					navigator.switchTo(Section.DOWNLOADS)
 				}
 				Item("Settings", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Comma, ctrl = true)) {

@@ -48,7 +48,7 @@ import app.ageha.core.database.entity.TagEntity
 	// Adding a table is a change Room can derive a migration for on its own, and a derived
 	// migration is safer than a hand-written one -- it cannot disagree with the schema it was
 	// generated from. Anything that renames or retypes a column will need a spec here instead.
-	autoMigrations = [AutoMigration(from = 28, to = 29)],
+	autoMigrations = [AutoMigration(from = 28, to = 29), AutoMigration(from = 29, to = 30)],
 )
 abstract class AgehaDatabase : RoomDatabase() {
 

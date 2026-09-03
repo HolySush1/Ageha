@@ -30,6 +30,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.ageha.core.data.CatalogRepository
+import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryRepository
 import app.ageha.core.data.SourceRepository
 import app.ageha.core.designsystem.AgehaSpacing
@@ -43,6 +44,11 @@ import app.ageha.feature.explore.ExploreViewModel
 import app.ageha.feature.downloads.DownloadQueue
 import app.ageha.feature.downloads.DownloadsScreen
 import app.ageha.feature.explore.SourcePickerScreen
+import app.ageha.core.data.ResumePoint
+import app.ageha.feature.explore.GlobalSearchScreen
+import app.ageha.feature.explore.GlobalSearchViewModel
+import app.ageha.feature.library.ContinueScreen
+import app.ageha.feature.library.ContinueViewModel
 import app.ageha.feature.library.LibraryScreen
 import app.ageha.core.parsers.Ageha
 import app.ageha.feature.library.LibraryViewModel
@@ -54,6 +60,7 @@ import app.ageha.feature.reader.ReaderKeys
 import app.ageha.feature.reader.ReaderScreen
 import app.ageha.feature.reader.ReaderViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * The application shell: a navigation rail, and whichever screen is current.
@@ -76,7 +83,15 @@ fun AgehaShell(
 	onImportBackup: () -> Unit = {},
 ) {
 	val scope = application.scope
-	val libraryViewModel = remember { LibraryViewModel(application.library, application.catalog, scope) }
+	val libraryViewModel = remember {
+		LibraryViewModel(application.library, application.catalog, application.history, scope)
+	}
+	val continueViewModel = remember {
+		ContinueViewModel(application.history, application.catalog, scope)
+	}
+	val globalSearchViewModel = remember {
+		GlobalSearchViewModel(application.catalog, application.sources, scope)
+	}
 	val exploreViewModel = remember { ExploreViewModel(application.sources, scope) }
 	val browseViewModel = remember { BrowseViewModel(application.catalog, application.sources, scope) }
 	val detailsViewModel = remember {
@@ -97,6 +112,47 @@ fun AgehaShell(
 
 	val notices by application.notices.notices.collectAsState()
 
+	// Where a Continue Reading entry resolved to.
+	//
+	// Handled here rather than inside either screen because both the shelf and the Continue screen
+	// produce these, and all three outcomes are *navigation* -- which is the shell's job. Working
+	// out the destination is a suspending database read, so it arrives as state rather than as a
+	// return value from the click.
+	val pendingResume by continueViewModel.resume.collectAsState()
+	LaunchedEffect(pendingResume) {
+		when (val point = pendingResume) {
+			null -> Unit
+
+			is ResumePoint.Open -> {
+				if (point.isCaughtUp) {
+					// Said out loud, because reopening the final page of the final chapter looks
+					// identical to the app having lost the last page turn.
+					application.notices.post(
+						"Caught up on ${point.manga.title}",
+						"You have read everything Ageha knows about here. Reopening the last page " +
+							"you were on -- check the source for new chapters.",
+					)
+				}
+				navigator.read(point.manga, point.chapter, point.page)
+				continueViewModel.consumeResume()
+			}
+
+			// Known manga, unknown chapters -- history restored from an Android backup carries no
+			// chapter rows. The details screen is where a source gets asked for them.
+			is ResumePoint.NeedsChapters -> {
+				navigator.openManga(point.manga)
+				continueViewModel.consumeResume()
+			}
+
+			// The source is not in this parsers build. Not an error and not a dead end: the same
+			// title, searched across the sources that *are* loaded.
+			is ResumePoint.SourceUnavailable -> {
+				navigator.searchAllSources(point.title, subject = point.title)
+				continueViewModel.consumeResume()
+			}
+		}
+	}
+
 	// Boxed so notices can float over whatever screen is current. They are application-level --
 	// a backup import's report outlives the screen that started it -- so they are anchored to the
 	// window rather than owned by a screen.
@@ -115,6 +171,8 @@ fun AgehaShell(
 								state = state,
 								imageHeaders = headers,
 								onOpenManga = navigator::openManga,
+								onContinue = { continueViewModel.open(it.mangaId) },
+								onSeeAllContinue = navigator::openContinue,
 								onSelectCategory = libraryViewModel::selectCategory,
 								onSearch = libraryViewModel::search,
 								onSort = libraryViewModel::setSort,
@@ -122,6 +180,45 @@ fun AgehaShell(
 								onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
 								searchFocus = searchFocus,
 							)
+						}
+
+						Destination.Continue -> {
+							val state by continueViewModel.state.collectAsState()
+							val headers by continueViewModel.imageHeaders.collectAsState()
+							ContinueScreen(
+								state = state,
+								imageHeaders = headers,
+								onOpen = { continueViewModel.open(it.mangaId) },
+								onSearch = continueViewModel::search,
+								onRemove = continueViewModel::remove,
+								onFindElsewhere = { entry ->
+									navigator.searchAllSources(entry.manga.title, subject = entry.manga.title)
+								},
+								onNeedHeaders = continueViewModel::ensureHeaders,
+								onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
+								searchFocus = searchFocus,
+							)
+						}
+
+						is Destination.SearchAll -> {
+							LaunchedEffect(destination.query, destination.subject) {
+								globalSearchViewModel.search(destination.query, destination.subject)
+							}
+							val state by globalSearchViewModel.state.collectAsState()
+							val headers by libraryViewModel.imageHeaders.collectAsState()
+							Column(Modifier.fillMaxSize()) {
+								BreadcrumbBar(navigator, "Search all sources")
+								GlobalSearchScreen(
+									state = state,
+									imageHeaders = headers,
+									onQuery = globalSearchViewModel::setQuery,
+									onSubmit = { globalSearchViewModel.search(state.query, state.subject) },
+									onOpenManga = navigator::openManga,
+									onOpenSource = navigator::openSource,
+									onNeedHeaders = libraryViewModel::ensureHeaders,
+									searchFocus = searchFocus,
+								)
+							}
 						}
 
 						Destination.Downloads -> {
@@ -137,6 +234,9 @@ fun AgehaShell(
 
 						Destination.Settings -> {
 							val parsersState by parsersViewModel.state.collectAsState()
+							// The count comes from the same live list Continue Reading draws, so the
+							// confirm button cannot offer to clear a number that is no longer true.
+							val continueState by continueViewModel.state.collectAsState()
 							SettingsScreen(
 								theme = preferences.theme,
 								readerBackground = preferences.readerBackground,
@@ -154,6 +254,17 @@ fun AgehaShell(
 								onRollBack = parsersViewModel::rollBack,
 								onPin = parsersViewModel::pin,
 								onImportBackup = onImportBackup,
+								onClearHistory = {
+									scope.launch {
+										val cleared = application.history.clearAll()
+										application.notices.post(
+											"Reading history cleared",
+											"$cleared entries removed. Your library, favourites and " +
+												"downloads are untouched.",
+										)
+									}
+								},
+								historyCount = continueState.totalCount,
 							)
 						}
 
@@ -191,8 +302,12 @@ fun AgehaShell(
 						}
 
 						is Destination.Read -> {
-							LaunchedEffect(destination.chapter.id) {
-								readerViewModel.open(destination.manga, destination.chapter)
+							LaunchedEffect(destination.chapter.id, destination.startPage) {
+								readerViewModel.open(
+									destination.manga,
+									destination.chapter,
+									destination.startPage,
+								)
 							}
 							val state by readerViewModel.state.collectAsState()
 							// The reader owns the keyboard while it is open. Registering the handler
@@ -396,9 +511,10 @@ internal fun buildViewModels(
 	library: LibraryRepository,
 	sources: SourceRepository,
 	catalog: CatalogRepository,
+	history: HistoryRepository,
 	scope: CoroutineScope,
 ) = Triple(
-	LibraryViewModel(library, catalog, scope),
+	LibraryViewModel(library, catalog, history, scope),
 	ExploreViewModel(sources, scope),
 	BrowseViewModel(catalog, sources, scope),
 )

@@ -146,6 +146,32 @@ private fun CoverFallback(title: String) {
 	}
 }
 
+/**
+ * A cover on its own, at whatever size the caller wants.
+ *
+ * For list rows rather than grids -- Continue Reading is a list of things you were part-way
+ * through, where a full [MangaCard] would give a cover the same weight as the chapter you stopped
+ * on. It shares [MangaCard]'s image path, fallback and progress hairline, which is the point of it
+ * living here: a second cover implementation is how two screens end up with different corner radii.
+ */
+@Composable
+fun MangaThumbnail(
+	manga: AgehaManga,
+	imageHeaders: Map<String, String>,
+	modifier: Modifier = Modifier,
+	progress: Float? = null,
+) {
+	Box(
+		modifier
+			.aspectRatio(COVER_ASPECT_RATIO)
+			.clip(CoverShape)
+			.background(MaterialTheme.colorScheme.surfaceContainerHigh),
+	) {
+		CoverImage(manga, imageHeaders)
+		if (progress != null && progress > 0f) ReadingProgressBar(progress)
+	}
+}
+
 /** A hairline of progress across the bottom of a cover. Neutral, so it does not tint the art. */
 @Composable
 private fun BoxScope.ReadingProgressBar(progress: Float) {

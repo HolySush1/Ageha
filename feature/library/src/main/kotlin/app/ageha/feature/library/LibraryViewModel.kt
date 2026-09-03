@@ -1,6 +1,8 @@
 package app.ageha.feature.library
 
 import app.ageha.core.data.CatalogRepository
+import app.ageha.core.data.ContinueEntry
+import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryCategory
 import app.ageha.core.data.LibraryEntry
 import app.ageha.core.data.LibraryRepository
@@ -29,7 +31,8 @@ data class LibraryUiState(
 	val sizes: Map<Int, Int> = emptyMap(),
 	val selectedCategoryId: Int = ALL_CATEGORY,
 	val entries: List<LibraryEntry> = emptyList(),
-	val recent: List<LibraryEntry> = emptyList(),
+	/** The Continue Reading shelf. Same rows as the Continue screen, most recent first. */
+	val recent: List<ContinueEntry> = emptyList(),
 	val query: String = "",
 	val sort: LibrarySort = LibrarySort.RECENTLY_ADDED,
 	val isLoading: Boolean = true,
@@ -58,6 +61,9 @@ data class LibraryUiState(
 class LibraryViewModel(
 	private val library: LibraryRepository,
 	private val catalog: CatalogRepository,
+	// The shelf comes from the history repository rather than from a second query of the same
+	// table, so the shelf and the Continue screen cannot disagree about what "recent" means.
+	private val history: HistoryRepository,
 	private val scope: CoroutineScope,
 ) {
 
@@ -71,7 +77,7 @@ class LibraryViewModel(
 		library.observeCategories(),
 		library.observeCategorySizes(),
 		shelf,
-		library.observeRecent(RECENT_LIMIT),
+		history.observeRecent(RECENT_LIMIT),
 		combine(selectedCategory, query, sort) { category, text, order -> Triple(category, text, order) },
 	) { categories, sizes, entries, recent, (category, text, order) ->
 		LibraryUiState(

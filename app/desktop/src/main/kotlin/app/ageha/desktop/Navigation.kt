@@ -11,8 +11,11 @@ import app.ageha.core.model.AgehaManga
 /** The two top-level places in Ageha. Reached by the rail, or by Ctrl+1 and Ctrl+2. */
 enum class Section(val label: String, val shortcutHint: String) {
 	LIBRARY("Library", "Ctrl+1"),
-	EXPLORE("Explore", "Ctrl+2"),
-	DOWNLOADS("Downloads", "Ctrl+3"),
+	// Second, not last. This is the screen someone opens Ageha to reach -- "carry on with what I
+	// was reading" is the app's most common intent, and it sits next to the library it draws from.
+	CONTINUE("Continue", "Ctrl+2"),
+	EXPLORE("Explore", "Ctrl+3"),
+	DOWNLOADS("Downloads", "Ctrl+4"),
 	SETTINGS("Settings", "Ctrl+,"),
 }
 
@@ -20,11 +23,20 @@ enum class Section(val label: String, val shortcutHint: String) {
 @Immutable
 sealed interface Destination {
 	data object Library : Destination
+	data object Continue : Destination
 	data object Sources : Destination
 	data object Downloads : Destination
 	data object Settings : Destination
 	data class Browse(val sourceName: String) : Destination
 	data class Details(val manga: AgehaManga) : Destination
+
+	/**
+	 * One query against every enabled source.
+	 *
+	 * Carries [subject] as well as the query so the results can say which Continue Reading entry
+	 * sent the user here -- by the time the results arrive, the list they clicked in is gone.
+	 */
+	data class SearchAll(val query: String, val subject: String? = null) : Destination
 
 	/**
 	 * The reader.
@@ -33,7 +45,20 @@ sealed interface Destination {
 	 * across branches -- the same manga read on a different scanlation branch has a different
 	 * chapter at position 5.
 	 */
-	data class Read(val manga: AgehaManga, val chapter: AgehaChapter) : Destination
+	data class Read(
+		val manga: AgehaManga,
+		val chapter: AgehaChapter,
+		/**
+		 * Where to open. -1 means "wherever the history says", which is what picking a chapter
+		 * from a list means.
+		 *
+		 * Continue Reading passes an explicit page instead. It has already decided whether this is
+		 * a resume or the *next* chapter after a finished one, and re-deriving that decision inside
+		 * the reader from a history row that says something different is how the two end up
+		 * disagreeing.
+		 */
+		val startPage: Int = -1,
+	) : Destination
 }
 
 /**
@@ -54,12 +79,14 @@ class Navigator {
 		private set
 
 	private val libraryStack = mutableStateListOf<Destination>(Destination.Library)
+	private val continueStack = mutableStateListOf<Destination>(Destination.Continue)
 	private val exploreStack = mutableStateListOf<Destination>(Destination.Sources)
 	private val downloadsStack = mutableStateListOf<Destination>(Destination.Downloads)
 	private val settingsStack = mutableStateListOf<Destination>(Destination.Settings)
 
 	private val stack get() = when (section) {
 		Section.LIBRARY -> libraryStack
+		Section.CONTINUE -> continueStack
 		Section.EXPLORE -> exploreStack
 		Section.DOWNLOADS -> downloadsStack
 		Section.SETTINGS -> settingsStack
@@ -98,8 +125,25 @@ class Navigator {
 	}
 
 	/** Open a chapter in the reader, keeping the details screen underneath to come back to. */
-	fun read(manga: AgehaManga, chapter: AgehaChapter) {
-		push(Destination.Read(manga, chapter))
+	fun read(manga: AgehaManga, chapter: AgehaChapter, startPage: Int = -1) {
+		push(Destination.Read(manga, chapter, startPage))
+	}
+
+	/**
+	 * Search every enabled source for a title.
+	 *
+	 * Pushed onto the *current* section rather than switching to Explore. It is reached from a
+	 * Continue Reading entry whose source has gone away, and going back from the results should
+	 * return to that list -- not strand the user in a section they never chose.
+	 */
+	fun searchAllSources(query: String, subject: String? = null) {
+		push(Destination.SearchAll(query, subject))
+	}
+
+	/** Jump to Continue Reading, from the shelf's "see all". */
+	fun openContinue() {
+		section = Section.CONTINUE
+		resetToRoot()
 	}
 
 	/** True when the current destination wants the whole window -- no rail, no chrome. */

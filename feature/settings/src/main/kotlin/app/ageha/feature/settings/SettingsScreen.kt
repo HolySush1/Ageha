@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +77,8 @@ fun SettingsScreen(
 	onRollBack: () -> Unit,
 	onPin: (String?) -> Unit,
 	onImportBackup: () -> Unit,
+	onClearHistory: () -> Unit,
+	historyCount: Int,
 	modifier: Modifier = Modifier,
 ) {
 	var section by remember { mutableStateOf(SettingsSection.APPEARANCE) }
@@ -105,7 +108,7 @@ fun SettingsScreen(
 					parsers, jsRuntime, parsersDescription,
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
 				)
-				SettingsSection.LIBRARY -> LibraryPanel(onImportBackup)
+				SettingsSection.LIBRARY -> LibraryPanel(onImportBackup, onClearHistory, historyCount)
 				SettingsSection.ABOUT -> AboutPanel(parsers)
 			}
 		}
@@ -342,7 +345,7 @@ private fun JavaScriptStatus(jsRuntime: JsRuntime) {
 }
 
 @Composable
-private fun LibraryPanel(onImportBackup: () -> Unit) {
+private fun LibraryPanel(onImportBackup: () -> Unit, onClearHistory: () -> Unit, historyCount: Int) {
 	PanelTitle("Library and backup")
 	Explain(
 		"Ageha reads the backup file the Android app produces: library, categories, favourites, " +
@@ -350,6 +353,39 @@ private fun LibraryPanel(onImportBackup: () -> Unit) {
 			"skipped quietly.",
 	)
 	Button(onClick = onImportBackup) { Text("Import an Android backup") }
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	PanelTitle("Reading history")
+	Explain(
+		"Continue Reading is built from this history, and it never leaves your machine -- there " +
+			"is no account behind it and nothing is sent anywhere. Clearing it empties the " +
+			"Continue Reading list and the shelf on the library screen. Your library, favourites " +
+			"and downloads are not touched.",
+	)
+	// Two-step, and the second step names the number. This is the one irreversible button in
+	// settings -- soft-deleted rows are tombstones, not an undo -- and a single click that
+	// silently discards years of reading positions is not a button, it is a trap.
+	var confirming by remember { mutableStateOf(false) }
+	if (confirming) {
+		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+			Button(
+				onClick = {
+					onClearHistory()
+					confirming = false
+				},
+				colors = ButtonDefaults.buttonColors(
+					containerColor = MaterialTheme.colorScheme.error,
+					contentColor = MaterialTheme.colorScheme.onError,
+				),
+			) {
+				Text("Clear $historyCount entries permanently")
+			}
+			TextButton(onClick = { confirming = false }) { Text("Cancel") }
+		}
+	} else {
+		TextButton(onClick = { confirming = true }, enabled = historyCount > 0) {
+			Text(if (historyCount > 0) "Clear reading history" else "Nothing to clear")
+		}
+	}
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	Explain(
 		"Ageha's own backup export lands with the sync work. Until then the database file is " +

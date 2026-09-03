@@ -107,16 +107,31 @@ interface HistoryDao {
 	@Query(
 		"""
 		SELECT manga.*, history.updated_at AS h_updated_at, history.chapter_id AS h_chapter_id,
-		       history.page AS h_page, history.scroll AS h_scroll, history.percent AS h_percent,
-		       history.chapters AS h_chapters
+		       history.page AS h_page, history.page_count AS h_page_count,
+		       history.scroll AS h_scroll, history.percent AS h_percent,
+		       history.chapters AS h_chapters,
+		       chapters.name AS c_name, chapters.number AS c_number, chapters.branch AS c_branch,
+		       chapters.`index` AS c_index
 		FROM history
 		INNER JOIN manga ON manga.manga_id = history.manga_id
+		LEFT JOIN chapters
+		       ON chapters.manga_id = history.manga_id AND chapters.chapter_id = history.chapter_id
 		WHERE history.deleted_at = 0
 		ORDER BY history.updated_at DESC
 		LIMIT :limit
 		""",
 	)
 	fun observeRecentWithManga(limit: Int): Flow<List<MangaWithHistory>>
+
+	/**
+	 * Clear the whole history in one statement.
+	 *
+	 * Soft, exactly like [markDeleted], and for the same reason: a hard delete would read as
+	 * "never read here" to whichever device syncs next, and every row the user just cleared would
+	 * come straight back. Returns the number of rows cleared so the UI can say what it did.
+	 */
+	@Query("UPDATE history SET deleted_at = :now WHERE deleted_at = 0")
+	suspend fun markAllDeleted(now: Long): Int
 }
 
 /**
@@ -138,9 +153,21 @@ data class MangaWithHistory(
 	@ColumnInfo(name = "h_updated_at") val updatedAt: Long,
 	@ColumnInfo(name = "h_chapter_id") val chapterId: Long,
 	@ColumnInfo(name = "h_page") val page: Int,
+	/** Pages in that chapter, or 0 for unknown. See `HistoryEntity.pageCount`. */
+	@ColumnInfo(name = "h_page_count") val pageCount: Int,
 	@ColumnInfo(name = "h_scroll") val scroll: Float,
 	@ColumnInfo(name = "h_percent") val percent: Float,
 	@ColumnInfo(name = "h_chapters") val chaptersAtLastRead: Int,
+	/*
+	 * The chapter itself, from a LEFT JOIN, so these are null in two real cases: history restored
+	 * from an Android backup, which carries positions but no chapter rows, and a manga last read
+	 * before Ageha started storing chapters. The list shows the entry either way -- an entry with
+	 * no chapter name is still an entry someone read.
+	 */
+	@ColumnInfo(name = "c_name") val chapterName: String?,
+	@ColumnInfo(name = "c_number") val chapterNumber: Float?,
+	@ColumnInfo(name = "c_branch") val chapterBranch: String?,
+	@ColumnInfo(name = "c_index") val chapterIndex: Int?,
 )
 
 @Dao

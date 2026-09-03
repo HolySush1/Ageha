@@ -36,10 +36,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "ageha"
 
-// Modules arrive at their milestone. :feature:tracking is the last one outstanding -- it needs
-// OAuth clients registered with Shikimori, AniList, MyAnimeList and Kitsu, which is the project
-// owner's to do; see docs/ARCHITECTURE.md 9. :feature:updates was folded into :feature:settings,
-// because the update engine lives in :core:parsers and needed a screen rather than a module.
+// Modules arrive at their milestone. Two planned in the brief were never created, deliberately:
+// :feature:tracking, because external tracking services are out of scope for good (CLAUDE.md 9)
+// and Continue Reading lives in :feature:library instead; and :feature:updates, because the update
+// engine lives in :core:parsers and needed a screen rather than a module of its own.
 include(
 	":core:model",
 	":core:network",

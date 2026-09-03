@@ -99,6 +99,10 @@ data class HistoryBackup(
 		updatedAt = updatedAt,
 		chapterId = chapterId,
 		page = page,
+		// The Android app has no page-count column, so an imported row cannot say how long the
+		// chapter was. 0 means "unknown", which makes Continue Reading resume the exact saved page
+		// rather than guess that the reader had finished it.
+		pageCount = 0,
 		scroll = scroll,
 		percent = percent,
 		// An imported row is present, not deleted. Carrying a tombstone in from a backup would

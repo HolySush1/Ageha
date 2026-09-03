@@ -83,12 +83,6 @@ class LibraryRepository(private val database: AgehaDatabase) {
 		}
 	}
 
-	/** Continue reading. The first thing the library screen draws. */
-	fun observeRecent(limit: Int = 20): Flow<List<LibraryEntry>> =
-		history.observeRecentWithManga(limit).map { rows ->
-			rows.map { LibraryEntry.of(it, currentChapterCount = null) }
-		}
-
 	fun observeIsFavourite(mangaId: Long): Flow<Boolean> =
 		favourites.observeFavouriteCount(mangaId).map { it > 0 }
 

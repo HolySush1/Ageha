@@ -30,6 +30,7 @@ fun main(args: Array<String>) {
 	try {
 		for ((name, section) in listOf(
 			"library" to Section.LIBRARY,
+			"continue" to Section.CONTINUE,
 			"explore" to Section.EXPLORE,
 			"downloads" to Section.DOWNLOADS,
 			"settings" to Section.SETTINGS,
@@ -55,6 +56,7 @@ fun main(args: Array<String>) {
 				scene.close()
 			}
 		}
+		renderSearchAll(app, outDir)
 		renderReader(app, outDir)
 		println("sources visible to the UI: ${app.sources.allDescriptors().size}")
 	} finally {
@@ -68,6 +70,42 @@ private const val RENDER_SETTLE_MS = 2_500L
 /** Frames to draw while waiting for asynchronous image loads to land. */
 private const val RENDER_FRAMES = 30
 private const val RENDER_FRAME_GAP_MS = 100L
+
+/**
+ * Renders the cross-source search, which nothing else reaches.
+ *
+ * It is the destination a Continue Reading entry lands on when its source has gone from the
+ * parsers build, so it is only ever seen in a situation that is hard to arrange deliberately --
+ * exactly the kind of screen that composes wrong for a release and is found by a user.
+ *
+ * On a fresh profile no sources are enabled, so this draws its empty state rather than querying
+ * anybody's server. That is the intended behaviour on a machine that has never been configured,
+ * and rendering it proves the screen handles it.
+ */
+private fun renderSearchAll(app: AgehaApplication, outDir: File) {
+	val navigator = Navigator().apply { searchAllSources("berserk", subject = "Berserk") }
+	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
+		AgehaTheme(mode = AgehaThemeMode.DARK) {
+			AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
+		}
+	}
+	try {
+		// Frame by frame rather than one render after a sleep: sources answer at their own pace
+		// and Coil decodes their covers asynchronously, and a composition only advances when the
+		// scene is rendered. One late frame would capture placeholders however long the wait.
+		var image = scene.render()
+		repeat(RENDER_FRAMES) {
+			runBlocking { delay(RENDER_FRAME_GAP_MS) }
+			image = scene.render()
+		}
+		File(outDir, "shell-search-all.png").writeBytes(
+			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
+		)
+		println("wrote shell-search-all.png")
+	} finally {
+		scene.close()
+	}
+}
 
 /**
  * Renders the reader against a real CBZ built on the spot.

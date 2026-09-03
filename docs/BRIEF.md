@@ -62,7 +62,7 @@ Do not scaffold yet. First:
 1. `git clone` both `Kotatsu-Redo/Kotatsu-Redo` and `Kotatsu-Redo/kotatsu-parsers-redo` into `./reference/` (gitignored).
 2. Read the parsers library: the `MangaLoaderContext` interface, the non-Android implementation example, `MangaParserSource`, and the core model types (`Manga`, `MangaChapter`, `MangaPage`, `MangaTag`, `SortOrder`, filter/listing APIs, `MangaLoaderException`).
 3. Identify every `MangaLoaderContext` member that is Android-specific on the app side — especially **JavaScript evaluation** (`evaluateJs` or equivalent), cookie storage, and User-Agent handling. The Android app backs JS execution with a WebView; desktop has no WebView. This is the hardest single problem in the project.
-4. Skim the Android app for feature scope and data model: library/favourites, history, downloads, tracking (Shikimori / AniList / MyAnimeList / Kitsu), the sync server protocol, backup/restore format, and reader modes (standard + webtoon).
+4. Skim the Android app for feature scope and data model: library/favourites, history, downloads, the sync server protocol, backup/restore format, and reader modes (standard + webtoon). **Skip its tracking integrations** — Ageha does not have them and is not going to; see “Reading history, not tracking” below.
 5. Check the licence. The project is GPL-3.0; this port must be GPL-3.0, must credit upstream, and must document changes.
 
 Then write `docs/FINDINGS.md` and `docs/ARCHITECTURE.md` and **stop for my review.** Include in FINDINGS:
@@ -95,7 +95,6 @@ Then write `docs/FINDINGS.md` and `docs/ARCHITECTURE.md` and **stop for my revie
 :feature:explore    # source browsing, search, filters
 :feature:reader     # page reader: paged + webtoon + double-page
 :feature:downloads  # offline download queue, CBZ read/write
-:feature:tracking   # Shikimori / AniList / MAL / Kitsu
 :feature:settings
 :feature:updates    # the update engine
 :app:desktop        # Compose entry point, window/tray, packaging config
@@ -210,6 +209,31 @@ Document the whole flow in `docs/UPDATING.md`, written for a human who forgot ho
 
 Implement **import of the Android app's backup file** (the zip Kotatsu-Redo's backup/restore produces): library, categories, favourites, history, and reading positions. Users must be able to move to desktop without losing progress. Also wire up the existing sync server protocol (`kotatsu-syncserver`) if feasible — flag it if the protocol turns out to be Android-coupled.
 
+## Reading history, not tracking
+
+**Ageha has no external tracking integrations, and adding one is out of scope.** No Shikimori, no
+AniList, no MyAnimeList, no Kitsu. No OAuth flows, no client credentials, no per-service settings
+screen. This was scoped in and then deliberately scoped back out; if a later session finds a
+reference to those services anywhere in this repository, the reference is stale and the correct
+action is to delete it rather than to implement it.
+
+What replaces it is **Continue Reading**, built entirely on the history Ageha already stores:
+
+- Everything read, most recent first, with cover, title, source and the last chapter (number and
+  name).
+- A title filter over that list. Local, instant, no network — this is the "quick search".
+- Opening an entry resumes the exact saved position. If that position was the final page of a
+  chapter, it opens the *next* chapter at page one instead; if there is no next chapter, it opens
+  the last chapter where it was left and says the reader is caught up.
+- The most recent few appear as a shelf on the library screen.
+- An entry whose source is missing from the current parsers build stays in the list, marked
+  unavailable, offering a search of the other sources by title. It must never error out and must
+  never quietly disappear.
+- One entry can be removed by hand; settings can clear the lot.
+
+The value of tracking was always "where was I, and what is next". This answers that without an
+account, a network round trip, or a credential this project cannot hold.
+
 ## Reader requirements
 
 This is a manga reader; the reader is the product. Non-negotiable:
@@ -232,7 +256,7 @@ This is a manga reader; the reader is the product. Non-negotiable:
   5. `DESIGN.md` + `:core:designsystem` + logo/icon asset pipeline + a theme gallery screen showing every token in light/dark/AMOLED — reviewed before any real screen is built
   6. Compose UI: explore + library
   7. Reader
-  8. Downloads, tracking, settings
+  8. Downloads, continue reading, settings
   9. Layer 2 + 3 packaging and CI
 - Don't stub silently. If something can't be done, say so and explain why.
 - Every module gets tests. Networked tests are tagged and excluded from the default run.

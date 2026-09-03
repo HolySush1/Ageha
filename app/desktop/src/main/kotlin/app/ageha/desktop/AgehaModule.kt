@@ -1,6 +1,7 @@
 package app.ageha.desktop
 
 import app.ageha.core.data.CatalogRepository
+import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryRepository
 import app.ageha.core.data.ReaderRepository
 import app.ageha.core.data.SourceRepository
@@ -67,6 +68,17 @@ val agehaModule = module {
 	single<ImageLoader> { AgehaImages.create(get<SourceStack>().httpClient, AgehaPaths.cacheDir) }
 
 	single { LibraryRepository(get<AgehaDatabase>()) }
+	single {
+		HistoryRepository(
+			history = get<AgehaDatabase>().historyDao(),
+			// For the stored chapter list, which is what lets Continue Reading name the last
+			// chapter and find the next one without asking a source.
+			manga = get<AgehaDatabase>().mangaDao(),
+			// To tell a source that is merely offline from one the loaded parsers build does not
+			// have at all. The second is a state the list renders; it is not a failure.
+			sources = get(),
+		)
+	}
 	single { SourceRepository(get<AgehaDatabase>().sourcesDao(), get<MangaSourceRegistry>()) }
 	single { CatalogRepository(get<MangaSourceRegistry>()) }
 	single {
@@ -123,6 +135,7 @@ class AgehaApplication private constructor(
 	val preferencesStore: PreferencesStore get() = koin.get()
 	val notices: NoticeCenter get() = koin.get()
 	val library: LibraryRepository get() = koin.get()
+	val history: HistoryRepository get() = koin.get()
 	val sources: SourceRepository get() = koin.get()
 	val catalog: CatalogRepository get() = koin.get()
 	val reader: ReaderRepository get() = koin.get()
@@ -141,11 +154,15 @@ class AgehaApplication private constructor(
 		// Then *wait* for the cancellation to finish unwinding, with a bound.
 		//
 		// Cancelling only asks. A coroutine already inside a database call keeps running until it
-		// suspends, and anything the reader launched as NonCancellable -- the final reading
-		// position -- runs to completion regardless. Closing the database while either is in
-		// flight throws "connection is closed" from a background thread, which is what happened
-		// before this join existed. The timeout is the backstop: a wedged write costs a slightly
-		// slower quit rather than a process that will not exit.
+		// suspends, and the reader's final position write runs to completion regardless, being
+		// wrapped in `withContext(NonCancellable)`. Closing the database while either is in
+		// flight throws from a background thread -- "connection is closed", or "statement is
+		// closed" if it is mid-transaction -- which is what happened before this join existed.
+		//
+		// This works only because that write is still a *child* of this scope; `ReaderViewModel`
+		// explains why `launch(NonCancellable)` would silently break it. The timeout is the
+		// backstop: a wedged write costs a slightly slower quit rather than a process that will
+		// not exit.
 		runBlocking {
 			withTimeoutOrNull(SHUTDOWN_GRACE_MS) { scope.coroutineContext.job.join() }
 		}

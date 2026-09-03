@@ -476,7 +476,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged โ€
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list; the ยง1.4 risk is open until it is profiled |
-| 8 | Downloads, tracking, settings | **mostly done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). Tracking is **not built** -- it needs OAuth clients only the project owner can register |
+| 8 | Downloads, continue reading, settings | **done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). External tracking was cut from scope and replaced by local **Continue Reading** over the history tables (7b) |
 | 9 | Layer 2 + 3 packaging and CI | **done, one caveat.** Conveyor config, four workflows, `UPDATING.md` and `RELEASING.md`. Conveyor itself is not installed on this machine, so the config is written and syntax-checked but has not built an installer |
 
 ---
@@ -511,25 +511,39 @@ Two details that are not obvious, and are tested:
   `ClassShutter`, and a wall-clock deadline enforced through the instruction observer, all applied
   at `Context` creation because that is the only place Rhino honours them.
 
-### Tracking is not built, and this is why
+### Tracking is not external, and this is why
 
-Shikimori, AniList, MyAnimeList and Kitsu all require an **OAuth client registered by the
-application's owner** -- a client id and secret issued per service, tied to a redirect URI. Those
-credentials cannot be invented, cannot be checked into a public GPL repository, and cannot be
-tested without being real.
+Shikimori, AniList, MyAnimeList and Kitsu were in the brief and were removed from scope
+deliberately. All four require an **OAuth client registered by the application's owner** -- a
+client id and secret issued per service, tied to a redirect URI. Those credentials cannot be
+invented, cannot be checked into a public GPL repository, and cannot be tested without being real.
+Writing the four integrations blind would have produced four untested network clients that look
+finished and work for nobody.
 
-Writing the four integrations blind would produce four untested network clients that look finished
-and work for nobody. What is needed first, and is the project owner's to do:
+What was worth having was never the accounts. It was the answer to *where was I, and what is
+next* -- and Ageha already stores everything needed to answer that, on the reader's own machine.
 
-1. Register an OAuth application with each service, with a loopback redirect URI
-   (`http://127.0.0.1:<port>`), since Ageha is a desktop app and has no web callback.
-2. Decide how the client secret ships. A desktop app cannot keep a secret, so the correct shape is
-   PKCE with a public client, which all four support to varying degrees.
-3. Then the seam is small: a `Tracker` interface with search, bind and push-progress, one
-   implementation per service, and the three tracking tables from the Android schema by migration.
+**Continue Reading** (`:core:data/HistoryRepository`, `:feature:library/ContinueScreen`) is that
+answer. Three things about it are not obvious:
 
-The reader's own progress is already recorded and already survives a backup round trip, so nothing
-about tracking's absence loses data.
+- **Chapters are persisted on the reading path.** The `chapters` table existed from Milestone 4 and
+  nothing wrote to it. `ReaderRepository.savePosition` now upserts the chapter list alongside the
+  manga row, so the last chapter's *number and name* and the identity of the *next* chapter are
+  both answerable with no network call. It is guarded, not written per page turn -- see the
+  comment there.
+- **`history.page_count` is a new column (schema 30).** Without it "was the reader on the final
+  page of that chapter" is not answerable: the row records the page but not how many there were,
+  and inferring it from `percent` is float arithmetic against a chapter count that may since have
+  changed. Zero means unknown, which degrades to resuming the exact saved page -- never to a wrong
+  chapter.
+- **A missing source is a first-class state, not a failure.** `SourceRepository.descriptor` returns
+  null for a source absent from the loaded parsers build, which happens on every parsers downgrade
+  and whenever upstream retires a site. Those entries stay in the list marked unavailable and offer
+  a cross-source search by title instead of opening a reader that could only fail.
+
+Because none of this leaves the machine, it works offline, needs no account, and cannot leak a
+reading history to a third party. The reader's own progress already survives a backup round trip,
+so nothing here is lost when moving between installations.
 
 ---
 

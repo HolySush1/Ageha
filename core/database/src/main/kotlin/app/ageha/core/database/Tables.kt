@@ -31,11 +31,17 @@ internal const val TABLE_PREFERENCES = "preferences"
  * and not ours.
  */
 /**
- * Version 29: adds the Android app's `preferences` table, which carries per-manga reader mode.
+ * Version 29 adds the Android app's `preferences` table, which carries per-manga reader mode.
+ *
+ * Version 30 adds `history.page_count`, which is **Ageha's own** rather than the Android app's --
+ * the first place the two schemas diverge. It is additive with a default, so a backup written by
+ * the Android app still restores, and a row restored from one simply reports "page count unknown".
+ * Continue Reading needs it to tell "stopped on the last page of a chapter" from "stopped in the
+ * middle of one"; see the column's own comment.
  *
  * Ageha started at 28 to match the Android schema and moves forward from there by migration
  * rather than by editing 28 in place -- an already-shipped version that changes shape is a
  * version that cannot be migrated *from*. Each of the nine entities still missing lands the same
  * way, with the feature that needs it.
  */
-const val AGEHA_DATABASE_VERSION = 29
+const val AGEHA_DATABASE_VERSION = 30
