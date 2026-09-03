@@ -2,6 +2,14 @@ pluginManagement {
 	repositories {
 		mavenCentral()
 		gradlePluginPortal()
+		// The Room Gradle plugin is published to Google's Maven, not to Central or the plugin
+		// portal. Scoped to androidx so nothing else can resolve from here by accident.
+		google {
+			content {
+				includeGroupByRegex("androidx\\..*")
+				includeGroupByRegex("com\\.google\\..*")
+			}
+		}
 	}
 }
 
@@ -36,6 +44,7 @@ include(
 	":core:network",
 	":core:js",
 	":core:jvmcontext",
+	":core:database",
 	":core:parsers",
 	":app:cli",
 )

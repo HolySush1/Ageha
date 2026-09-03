@@ -37,7 +37,20 @@ parsers library.
 
 `FINDINGS.md` §7: the Android app is Room, `DATABASE_VERSION = 28`, 17 entities, 27 migrations. SQLDelight would mean re-deriving that schema by hand from generated SQL, and re-deriving it again on every upstream migration. Room lets us declare the same entities and get the same DDL.
 
-We declare our schema **starting at version 28** and never write migrations 1→27. Our own migrations start at 29. If a user's Android backup is older, the *Android app* upgrades it before export — not our problem.
+We declare our schema **starting at version 28** and never write migrations 1→27. Our own
+migrations start at 29. If a user's Android backup is older, the *Android app* upgrades it before
+export — not our problem.
+
+Confirmed at Milestone 4: Room 2.8 with `androidx.sqlite:sqlite-bundled` runs on a desktop JVM
+with no Android dependency, and the schema exports to `core/database/schemas/` so it can be
+diffed against the Android app's. Two things needed saying in code because neither fails at
+compile time — the driver must be the bundled one (desktop JVMs have no SQLite), and
+`PRAGMA foreign_keys = ON` must be set per connection, because SQLite defaults it off and the
+schema leans on `ON DELETE CASCADE` to stop tags, chapters and history outliving their manga.
+
+Eight of the seventeen entities are ported: the ones library, favourites and history need. The
+rest arrive with the features that use them, each as a migration rather than by retroactively
+editing version 28.
 
 ### 1.4 Compose Desktop, with one caveat about the reader
 
@@ -458,7 +471,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 1 | Skills installed; `FINDINGS.md` + `ARCHITECTURE.md` | **done, this is it** |
 | 2 | Gradle skeleton, `:core:parsers` facade, `:core:jvmcontext`, CLI that searches one source | **done.** 1360 sources enumerated, live search/details/pages against MangaDex and Weeb Central, 26 tests green, wall enforced by the build |
 | 3 | Layer 1 dynamic loading + tests | **done.** Bridge-based isolation (§4.1), SHA-based updates, gate with a designed rejection path, two builds proven to coexist in one JVM |
-| 4 | Database + library/history persistence | Room, start at schema v28 |
+| 4 | Database + library/history persistence | **in progress.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
 | 4b | **Android backup import** | moved here by decision 4: it validates the schema before any UI depends on it |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | unchanged |
 | 6 | Compose UI: explore + library | surface `isBroken` from the descriptor |

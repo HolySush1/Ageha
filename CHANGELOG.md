@@ -32,6 +32,13 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     dependencies from its POM, and gates what it fetches.
   - `cli parsers [status|check|rollback]`.
 
+- **Milestone 4 (in progress) -- the database.** `:core:database` on Room 2.8 with the bundled
+  SQLite driver, which is what proves Room works off Android. Schema declared at **version 28** to
+  match the Android app rather than replaying 27 migrations that could never run here. Eight
+  entities so far (manga, tags, manga_tags, chapters, history, favourites, favourite_categories,
+  sources); the remaining nine arrive with the features that use them. Schema is exported to
+  `core/database/schemas/` so it can be diffed against the Android app's.
+
 ### Changed
 
 - **The approved parent-first classloader allowlist was abandoned before it was built.** It

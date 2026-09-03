@@ -12,6 +12,9 @@ json = "20240303"
 androidx-collection = "1.5.0"
 kotlinx-serialization = "1.9.0"
 junit = "5.13.4"
+ksp = "2.2.10-2.0.2"
+room = "2.8.4"
+sqlite = "2.7.0"
 
 # The parsers library. There are no version tags upstream: this is a commit SHA on
 # Kotatsu-Redo/kotatsu-parsers-redo master. See docs/FINDINGS.md 1 before bumping it.
@@ -20,6 +23,8 @@ parsers = "434030d481"
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+room = { id = "androidx.room", version.ref = "room" }
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -41,3 +46,10 @@ junit-api = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "jun
 junit-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit" }
 junit-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+
+# Room 2.7+ is a Kotlin Multiplatform library with JVM as a first-class target, so it runs on
+# desktop without Android. sqlite-bundled ships its own SQLite build rather than relying on the
+# platform's, which desktop does not have. docs/ARCHITECTURE.md 1.3.
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
