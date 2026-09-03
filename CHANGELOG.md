@@ -103,6 +103,21 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     the reader's freedom from brand colour, and the hand-written `.ico`/`.icns` writers parsed back
     byte by byte.
 
+- **Milestone 6 -- the desktop UI: explore and library.**
+  - `:core:data` -- repositories over the database and the source facade. Every source call comes
+    back as a `CatalogResult`, so a site being down is a value a screen renders rather than an
+    exception that unwinds it.
+  - `:core:image` -- Coil 3 on **OkHttp**, sharing the source stack's client so covers travel with
+    the same cookies and User-Agent the listing did.
+  - `:feature:library` -- shelves in a persistent rail with live counts, a grid that reflows with
+    the window, continue-reading, filter and sort.
+  - `:feature:explore` -- the 1360-source picker with per-source enable, one-source browsing with
+    paging, and a two-pane details screen.
+  - `:app:desktop` -- the application shell: navigation rail, per-section back stacks, keyboard
+    shortcuts, a menu bar, remembered window geometry, and Koin wiring with an ordered shutdown.
+  - `renderShell` draws the real application headlessly against the real graph, so a build that
+    would open a blank window fails in CI instead.
+
 ### Notes
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
@@ -122,3 +137,8 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   chroma and are never a design-system token.
 - Fonts are **not** bundled yet. The families are an explicit preference chain resolved against
   what is installed, and the gallery reports per-script CJK coverage so the gap is visible.
+- Sources start **disabled**. Ageha ships 1360 and only ever contacts the ones a user turns on.
+- The library grid uses `GridCells.Adaptive`, not a fixed column count: this is a resizable
+  desktop window, not a phone.
+- A source failure never clears results already on screen, and a non-transient failure stops the
+  pager rather than retrying into a block.

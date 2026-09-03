@@ -19,6 +19,28 @@ sqlite = "2.7.0"
 # Compose Multiplatform 1.12.0 is the current stable (2026-08-25). The Compose compiler is a
 # Kotlin compiler plugin now, so its version tracks `kotlin` above, not `compose`.
 compose = "1.12.0"
+# Material 3 versions independently of the Compose Multiplatform plugin now, which is why the
+# plugin's `compose.material3` shorthand is deprecated in favour of naming the artifact.
+compose-material3 = "1.9.0"
+# Frozen upstream at 1.7.3, and that is fine here: the artifact is static vector path data, not
+# code, and icon outlines do not need maintenance. JetBrains' migration path is Material Symbols
+# as vector resources, which would mean the Compose resources Gradle plugin for a handful of
+# glyphs. Revisit if we ever need symbols this set does not carry.
+compose-material-icons = "1.7.3"
+
+# Coil 3 for cover art. The OkHttp network layer is not optional here: Coil defaults to Ktor off
+# Android, and CLAUDE.md forbids Ktor because the parsers library is built on OkHttp.
+#
+# Pinned below the newest release on purpose. Coil 3.5+ depends on Kotlin stdlib 2.4, whose
+# metadata this project's Kotlin 2.2.10 compiler cannot read -- and `kotlin` is aligned with what
+# kotatsu-parsers-redo builds against, so raising it to chase an image library would be the tail
+# wagging the dog. 3.4.0 is the newest Coil whose metadata is readable here. The root build also
+# forces the stdlib to `kotlin` above, so a future transitive bump fails loudly rather than
+# producing this error somewhere unrelated.
+coil = "3.4.0"
+
+# DI. Koin rather than Hilt/Dagger -- no annotation processing, and it is not Android-coupled.
+koin = "4.2.2"
 
 # Build-time only: Google's Material colour science (HCT/CAM16), used by :tools:brandkit to
 # derive the tonal palettes from the brand seed. It is NOT a dependency of the app -- the
@@ -66,3 +88,13 @@ room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 
 material-color-utilities = { module = "me.tatarka.google.material:material-color-utilities", version.ref = "material-color-utilities" }
+
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
+
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-compose = { module = "io.insert-koin:koin-compose", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+compose-material-icons-core = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "compose-material-icons" }

@@ -34,6 +34,18 @@ subprojects {
 		jvmToolchain(21)
 	}
 
+	// Every dependency gets *this* project's Kotlin stdlib, whatever it asked for.
+	//
+	// Gradle resolves version conflicts by picking the highest, so a single library depending on a
+	// newer Kotlin silently upgrades the stdlib for the whole build -- and the failure surfaces as
+	// "Unresolved reference 'apply'", pointing at our own source rather than at the dependency
+	// that caused it. Forcing it turns a confusing compile error into an obvious version conflict.
+	configurations.configureEach {
+		resolutionStrategy {
+			force("org.jetbrains.kotlin:kotlin-stdlib:${rootProject.libs.versions.kotlin.get()}")
+		}
+	}
+
 	tasks.withType<Test>().configureEach {
 		useJUnitPlatform {
 			// Networked tests hit live manga sources, so they are opt-in:
