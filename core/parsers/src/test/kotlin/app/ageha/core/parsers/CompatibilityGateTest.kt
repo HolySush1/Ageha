@@ -1,6 +1,9 @@
 package app.ageha.core.parsers
 
+import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.PersistentCookieJar
+import okhttp3.OkHttpClient
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -9,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
@@ -29,7 +33,22 @@ class CompatibilityGateTest {
 		return installation to version
 	}
 
+	private val clients = mutableListOf<OkHttpClient>()
+
 	private fun cookieJar(dir: File) = PersistentCookieJar(File(dir, "cookies.json"))
+
+	private fun httpClient(dir: File): OkHttpClient =
+		AgehaHttpClient.build(cookieJar(dir), cacheDir = File(dir, "http-cache")).also { clients += it }
+
+	@AfterEach
+	fun releaseClients() {
+		clients.forEach { client ->
+			runCatching { client.dispatcher.executorService.shutdown() }
+			runCatching { client.connectionPool.evictAll() }
+			runCatching { client.cache?.close() }
+		}
+		clients.clear()
+	}
 
 	@Test
 	@DisplayName("the bundled build passes the gate")
@@ -41,6 +60,7 @@ class CompatibilityGateTest {
 			bridgeJar = installation.bridgeJarFor(version),
 			extraJars = installation.libraryJarsFor(version),
 			version = version,
+			httpClient = httpClient(dir),
 			cookieJar = cookieJar(dir),
 		)
 
@@ -61,6 +81,7 @@ class CompatibilityGateTest {
 			bridgeJar = installation.bridgeJarFor(version),
 			extraJars = listOf(installation.parsersJarFor(version)) + installation.libraryJarsFor(version),
 			version = "deadbeef01",
+			httpClient = httpClient(dir),
 			cookieJar = cookieJar(dir),
 		)
 
@@ -85,6 +106,7 @@ class CompatibilityGateTest {
 			bridgeJar = ParsersJarFixtures.emptyJar(dir),
 			extraJars = installation.libraryJarsFor(version),
 			version = "nobridge01",
+			httpClient = httpClient(dir),
 			cookieJar = cookieJar(dir),
 		)
 
@@ -100,6 +122,7 @@ class CompatibilityGateTest {
 			parsersJar = ParsersJarFixtures.corruptJar(dir),
 			bridgeJar = installation.bridgeJarFor(version),
 			version = "corrupt001",
+			httpClient = httpClient(dir),
 			cookieJar = cookieJar(dir),
 		)
 
@@ -199,5 +222,45 @@ class CompatibilityGateTest {
 		val state = installation.read()
 		assertNotNull(state)
 		assertNull(state.activeVersion, "an unreadable state means 'use the bundled build'")
+	}
+
+	@Test
+	@DisplayName("gating a candidate while a build is live does not disturb the live one")
+	fun gateDoesNotDisturbTheLiveStack(@TempDir dir: File) {
+		// The scenario the single-owner rule exists for. The gate constructs a second context
+		// while the live one is serving, so before this was fixed both built their own OkHttp
+		// Cache over the same directory -- which OkHttp's own documentation calls an error, and
+		// which classloader isolation does nothing to prevent, because the directory is shared.
+		val stack = Ageha.createSourceStack(
+			cookieFile = File(dir, "live-cookies.json"),
+			parsersDir = File(dir, "live-parsers"),
+		)
+		try {
+			val before = stack.registry.availableSources().size
+			assertTrue(before > 1000)
+
+			val installation = stack.installation
+			val version = BundledParsers.VERSION
+			repeat(3) {
+				val verdict = CompatibilityGate.evaluate(
+					parsersJar = installation.parsersJarFor(version),
+					bridgeJar = installation.bridgeJarFor(version),
+					extraJars = installation.libraryJarsFor(version),
+					version = version,
+					httpClient = stack.httpClient,
+					cookieJar = cookieJar(dir),
+				)
+				assertInstanceOf(GateVerdict.Accepted::class.java, verdict)
+			}
+
+			assertEquals(
+				before,
+				stack.registry.availableSources().size,
+				"the live build must be unaffected by gating a candidate",
+			)
+			assertNotNull(stack.httpClient.cache, "the shared cache must survive the gate runs")
+		} finally {
+			runBlocking { stack.close() }
+		}
 	}
 }

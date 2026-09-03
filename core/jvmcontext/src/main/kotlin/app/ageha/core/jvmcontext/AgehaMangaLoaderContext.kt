@@ -19,7 +19,6 @@ import org.koitharu.kotatsu.parsers.model.MangaSource
 import org.koitharu.kotatsu.parsers.webview.InterceptedRequest
 import org.koitharu.kotatsu.parsers.webview.InterceptionConfig
 import java.awt.image.BufferedImage
-import java.util.Locale
 import javax.imageio.ImageIO
 
 /**
@@ -57,10 +56,26 @@ class AgehaMangaLoaderContext(
 	 * for a source the current parsers build does not have.
 	 */
 	private val parserForSource: (MangaSource) -> MangaParser?,
-	httpClientFactory: (PersistentCookieJar) -> OkHttpClient = { AgehaHttpClient.build(it) },
+	/**
+	 * The shared HTTP client, owned by the parent and injected -- never built here.
+	 *
+	 * This is not a style preference. An OkHttp Cache is a DiskLruCache over one directory, and
+	 * two Cache instances on the same directory corrupt each other's journal; OkHttp's own docs
+	 * call it an error. Two builds coexist whenever the compatibility gate runs, because it
+	 * constructs a second context while the live one is still serving, so a context that built its
+	 * own client against the default cache directory would corrupt the cache on every update
+	 * check. Classloader isolation does not help: the directory is shared regardless.
+	 *
+	 * One client also means one connection pool and one dispatcher, which is what OkHttp asks for.
+	 */
+	baseHttpClient: OkHttpClient,
 ) : MangaLoaderContext() {
 
-	override val httpClient: OkHttpClient = httpClientFactory(cookieJar)
+	/**
+	 * Derived from the shared client with [OkHttpClient.newBuilder], so the cache, connection pool
+	 * and dispatcher are the *same objects*, not copies. Only the interceptor stack differs.
+	 */
+	override val httpClient: OkHttpClient = baseHttpClient
 		.newBuilder()
 		// Added last so it runs innermost of the application interceptors: the parser should see
 		// headers the common interceptors have already set.
@@ -81,21 +96,17 @@ class AgehaMangaLoaderContext(
 	override fun getDefaultUserAgent(): String =
 		jsRuntime.browserUserAgent ?: UserAgents.CHROME_DESKTOP
 
-	override fun getPreferredLocales(): List<Locale> = listOf(Locale.getDefault())
-
 	/**
-	 * Release the HTTP stack.
+	 * Release what this context owns, which is deliberately almost nothing.
 	 *
-	 * OkHttp keeps a dispatcher thread pool, a connection pool of live sockets, and an open
-	 * journal file inside its disk cache. None of that is reclaimed by dropping the reference, and
-	 * the open cache file is the one that bites on Windows: a build being replaced by an update
-	 * cannot have its directory removed while a file in it is still open. The test suite found
-	 * this before a user did, as a temporary directory that refused to delete.
+	 * The dispatcher, connection pool and cache belong to the parent's client and are shared with
+	 * every other context derived from it -- shutting them down here would break the live stack
+	 * every time the gate finished evaluating a candidate build. The parent closes them once, in
+	 * SourceStack.close.
 	 */
 	fun close() {
-		runCatching { httpClient.dispatcher.executorService.shutdown() }
-		runCatching { httpClient.connectionPool.evictAll() }
-		runCatching { httpClient.cache?.close() }
+		// Nothing owned. Kept as an explicit no-op so the asymmetry is visible rather than a
+		// missing method someone later "fixes" by shutting down the shared client.
 	}
 
 	// ---- javascript --------------------------------------------------------------------------

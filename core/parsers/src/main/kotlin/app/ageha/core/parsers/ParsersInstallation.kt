@@ -49,6 +49,26 @@ class ParsersInstallation(
 	fun isInstalled(version: String): Boolean =
 		parsersJarFor(version).isFile && bridgeJarFor(version).isFile
 
+	/**
+	 * Check a build against its lock file.
+	 *
+	 * Called before loading, every time, not only after downloading. A build that verified when it
+	 * was staged can stop verifying later -- a partially applied app update, disk corruption, or
+	 * someone dropping a jar into the directory by hand. The classloader is handed everything in
+	 * that directory, so anything unrecorded is unvouched-for code that would run with the same
+	 * privileges as the rest.
+	 */
+	fun verify(version: String): LockVerification {
+		val dir = directoryFor(version)
+		if (!dir.isDirectory) return LockVerification.Failed("not installed")
+		return LockVerification.verify(dir, ParsersLock.read(dir))
+	}
+
+	/** Record checksums for a freshly staged build. */
+	fun writeLock(version: String, buildDir: File = directoryFor(version)) {
+		ParsersLock.write(buildDir, ParsersLock.create(version, buildDir))
+	}
+
 	fun read(): ParsersState = runCatching {
 		if (!stateFile.isFile) return@runCatching ParsersState()
 		json.decodeFromString<ParsersState>(stateFile.readText())

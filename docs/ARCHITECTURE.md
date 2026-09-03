@@ -321,6 +321,110 @@ deliberate does not file a bug about stale sources.
 
 Networked tests are tagged and excluded from the default run, per the working agreement.
 
+### 4.5 Properties of the boundary, and what they cost
+
+Five questions were put to the bridge design after it was built. The answers are here because
+each is a standing property that a later change could break quietly.
+
+#### The HTTP cache has one owner (this was a bug)
+
+Two builds coexist whenever the gate runs: it constructs a second context while the live one is
+still serving. Before this was fixed, each context built its own `OkHttpClient` against the
+**default** cache directory, so two `Cache` instances shared one directory — which OkHttp's own
+documentation calls an error, and which classloader isolation does nothing to prevent, because
+the directory is shared regardless of who loaded the class.
+
+The parent now creates exactly one client and injects it. Each context derives from it with
+`newBuilder()`, so the cache, connection pool and dispatcher are *the same objects*, not copies;
+only the interceptor stack differs. The gate additionally hands its candidate a `cache(null)` view,
+so a build about to be discarded cannot write into the cache the live build is reading from. Only
+`SourceStack.close` shuts any of it down.
+
+Per-build cache directories were the alternative and were rejected: they would throw away the
+entire HTTP cache on every parsers update, which is a large, silent cost for a problem that single
+ownership solves outright.
+
+`CompatibilityGateTest.gateDoesNotDisturbTheLiveStack` runs the gate three times against a live
+stack and asserts the live one is unaffected.
+
+#### Kotlin stdlib and coroutines are parent-shared, and must be
+
+They are excluded from the child's staged dependencies — `libs/` contains only `jsoup`,
+`org.json`, `androidx.collection` and `androidx.annotation`.
+
+They have to be. `MangaSourceClient` declares six `suspend` functions that cross the boundary, so
+`Continuation` must resolve to the same class on both sides; two copies of the coroutines runtime
+would fail at the first suspension. Sharing is not a convenience here, it is a requirement of the
+bridge being suspending at all.
+
+**If a parsers build bumps its stdlib past ours** and uses an API we do not have, its classes link
+against our older copy and raise `NoSuchMethodError` — which is a `LinkageError`, which is exactly
+what the gate catches and reports as "needs a newer Ageha". The failure is contained by design
+rather than avoided. In practice the risk is small: the Kotlin stdlib is strongly
+backward-compatible, and we track the same version the library builds against.
+
+#### The shim surface is 13 members, and it is a tracked metric
+
+Every member Ageha implements against `MangaLoaderContext` is a place upstream can move and break
+us — `evaluateJs` gaining a third parameter is the precedent. So the number is held to a test,
+`ShimSurfaceTest`, which fails in either direction. Growing it is sometimes correct; drifting
+upward one convenience override at a time is not.
+
+Counted by signature rather than by name, because each overload is its own break point.
+
+| Group | Count | Can it go down? |
+|---|---|---|
+| HTTP (`httpClient`, `cookieJar`) | 2 | No. Literal OkHttp types in the upstream contract. |
+| Configuration (`getConfig`, `getDefaultUserAgent`) | 2 | No. |
+| Images (`createBitmap`, `redrawImageResponse`) | 2 | No, but both are trivial and stable. |
+| JavaScript (`evaluateJs` ×2, `interceptWebViewRequests` ×2, `captureWebViewUrls`) | 5 | **This is where the risk lives.** All five are the newest and least settled part of the upstream API. |
+| Browser hand-off (`requestBrowserAction`, `requestCloudflareVerification`) | 2 | Possibly one: the second delegates to the first upstream, and we override it only to distinguish a Cloudflare challenge from a login. |
+
+It went from 14 to 13 when this was first measured: `getPreferredLocales` was overridden with an
+implementation byte-for-byte identical to the upstream default. Seven of the remaining thirteen
+are JavaScript or browser members, which is the same concentration of risk `FINDINGS.md` §5
+identified from the other direction.
+
+#### Downloaded builds are locked and verified before every load
+
+Resolving the POM at runtime means Ageha fetches a set of jars whose membership it did not know in
+advance — which is how `androidx.annotation` turned up. Verifying only the parsers jar would leave
+every transitive dependency unchecked, and they load into the same classloader with the same
+privileges: a tampered `json-20240303.jar` runs exactly as freely as a tampered parsers jar.
+
+So each build directory carries a `lock.json` recording a SHA-256 for every file, written while the
+build is still staged. Verification is all-or-nothing and runs **before every load**, not only
+after download — a build that verified when staged can stop verifying later through a partly
+applied app update, disk corruption, or someone dropping a jar in by hand. Missing files,
+modified files and *unexpected* files all fail: the classloader is handed everything in `libs/`,
+so a file nobody recorded is code nobody vouched for.
+
+At download time each artifact is additionally checked against the repository's own published
+`.sha1` where one exists. That is the only point in the flow where provenance can be checked at
+all — the lock records what arrived, so it would faithfully record a bad download; the published
+digest is what catches a truncated transfer or a mangling proxy as it happens.
+
+An unverified build is stepped over rather than repaired, falling back to the next candidate and
+ultimately to the bundled build. The bundled build is the exception: it has nothing to fall back
+to, so a failed verification re-extracts it from the application's own resources.
+
+#### Model mapping is per chapter, not per page and never per byte
+
+- `pages()` maps a chapter's page list once — tens to low hundreds of small objects.
+- `pageUrl()` is called per page but **maps nothing**: it returns a `String`. Its only per-page
+  cost is an LRU lookup and one recorder allocation. Where a source needs a network round trip per
+  page, that is the parser's design, not the boundary's.
+- **Image bytes never cross the boundary at all.** The reader fetches them itself over HTTP using
+  `imageRequestHeaders()`.
+
+`BridgeSurfaceTest` asserts the last point structurally: no method on the boundary may return a
+stream, a byte array or an HTTP response. A method that did would move megabytes through the
+mapping layer on every page turn, and that is far easier to add by accident than to notice.
+
+The one place bytes are touched is `redrawImageResponse`, used by the handful of sources that
+serve pages as shuffled tiles. That decode-redraw-re-encode is inherent to descrambling and runs
+on the child side, inside the interceptor chain — it is the parser's work, not mapping.
+
 ---
 
 ## 5. Threading

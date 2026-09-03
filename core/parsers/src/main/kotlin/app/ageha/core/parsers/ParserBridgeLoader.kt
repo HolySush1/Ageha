@@ -2,6 +2,7 @@ package app.ageha.core.parsers
 
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.network.PersistentCookieJar
+import okhttp3.OkHttpClient
 import app.ageha.core.source.ParserBridge
 
 /**
@@ -22,6 +23,7 @@ internal object ParserBridgeLoader {
 
 	fun instantiate(
 		loader: ClassLoader,
+		httpClient: OkHttpClient,
 		cookieJar: PersistentCookieJar,
 		jsRuntime: JsRuntime,
 		version: String,
@@ -37,11 +39,12 @@ internal object ParserBridgeLoader {
 		}
 
 		val constructor = type.getConstructor(
+			OkHttpClient::class.java,
 			PersistentCookieJar::class.java,
 			JsRuntime::class.java,
 			String::class.java,
 		)
-		val instance = constructor.newInstance(cookieJar, jsRuntime, version)
+		val instance = constructor.newInstance(httpClient, cookieJar, jsRuntime, version)
 
 		// If this cast fails, ParserBridge was loaded twice -- once per side -- which means the
 		// delegation policy stopped treating app.ageha.core.source as parent-first.

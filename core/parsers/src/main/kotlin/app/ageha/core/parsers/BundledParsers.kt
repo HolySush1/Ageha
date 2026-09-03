@@ -38,7 +38,14 @@ object BundledParsers {
 	 * @return the version now on disk.
 	 */
 	fun ensureExtracted(installation: ParsersInstallation): String {
-		if (installation.isInstalled(VERSION)) return VERSION
+		// Re-extract if what is on disk no longer matches its lock. The bundled build is the
+		// fallback everything else falls back to, so a corrupted copy of it is the one failure
+		// with no recovery path -- and re-extracting costs a few hundred milliseconds once.
+		if (installation.isInstalled(VERSION) &&
+			installation.verify(VERSION) is LockVerification.Verified
+		) {
+			return VERSION
+		}
 
 		val index = readIndex()
 		val target = installation.directoryFor(VERSION)
@@ -51,6 +58,8 @@ object BundledParsers {
 			for (entry in index) {
 				extract("$RESOURCE_DIR/$entry", File(staging, entry))
 			}
+			// Locked while still staged, so the checksums describe exactly what was extracted.
+			ParsersLock.write(staging, ParsersLock.create(VERSION, staging))
 			target.deleteRecursively()
 			check(staging.renameTo(target)) { "Could not place the bundled parsers build at $target" }
 		} finally {

@@ -1,8 +1,11 @@
 package app.ageha.core.parsers
 
 import app.ageha.core.js.NoJsRuntime
+import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.source.ParserBridge
+import okhttp3.OkHttpClient
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
@@ -35,11 +38,21 @@ class ClassLoaderIsolationTest {
 		return installation to BundledParsers.ensureExtracted(installation)
 	}
 
+	private val clients = mutableListOf<OkHttpClient>()
+
+	/** One client per test, shared by every build the test loads -- as in production. */
+	private fun sharedClient(dir: File): OkHttpClient =
+		AgehaHttpClient.build(
+			PersistentCookieJar(File(dir, "shared-cookies.json")),
+			cacheDir = File(dir, "http-cache"),
+		).also { clients += it }
+
 	private fun load(
 		installation: ParsersInstallation,
 		version: String,
 		dir: File,
 		label: String,
+		httpClient: OkHttpClient,
 	): Pair<ParsersClassLoader, ParserBridge> {
 		val loader = ParsersClassLoader.create(
 			parsersJar = installation.parsersJarFor(version),
@@ -49,11 +62,22 @@ class ClassLoaderIsolationTest {
 		)
 		val bridge = ParserBridgeLoader.instantiate(
 			loader = loader,
-			cookieJar = PersistentCookieJar(File(dir, "$label-cookies.json")),
+			httpClient = httpClient,
+			cookieJar = PersistentCookieJar(File(dir, label + "-cookies.json")),
 			jsRuntime = NoJsRuntime,
 			version = label,
 		)
 		return loader to bridge
+	}
+
+	@AfterEach
+	fun releaseClients() {
+		clients.forEach { client ->
+			runCatching { client.dispatcher.executorService.shutdown() }
+			runCatching { client.connectionPool.evictAll() }
+			runCatching { client.cache?.close() }
+		}
+		clients.clear()
 	}
 
 	@Test
@@ -62,8 +86,9 @@ class ClassLoaderIsolationTest {
 		val (firstInstall, firstVersion) = install(dir, "first")
 		val (secondInstall, secondVersion) = install(dir, "second")
 
-		val (loaderA, bridgeA) = load(firstInstall, firstVersion, dir, "build-a")
-		val (loaderB, bridgeB) = load(secondInstall, secondVersion, dir, "build-b")
+		val client = sharedClient(dir)
+		val (loaderA, bridgeA) = load(firstInstall, firstVersion, dir, "build-a", client)
+		val (loaderB, bridgeB) = load(secondInstall, secondVersion, dir, "build-b", client)
 
 		try {
 			// --- isolation -------------------------------------------------------------------
@@ -137,7 +162,7 @@ class ClassLoaderIsolationTest {
 	@DisplayName("closing a loader releases the jars, so an update can replace them")
 	fun closingReleasesJarFiles(@TempDir dir: File) {
 		val (installation, version) = install(dir, "closeable")
-		val (loader, bridge) = load(installation, version, dir, "closeable")
+		val (loader, bridge) = load(installation, version, dir, "closeable", sharedClient(dir))
 		assertTrue(bridge.sourceDescriptors().isNotEmpty())
 
 		bridge.close()

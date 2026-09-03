@@ -83,12 +83,13 @@ class ParsersUpdateService(
 		staging.mkdirs()
 		try {
 			val parsersJar = File(staging, "kotatsu-parsers.jar")
-			download(artifactUrl(version, "jar"), parsersJar)
+			download(artifactUrl(version, "jar"), parsersJar, artifactUrl(version, "jar.sha1"))
 
 			val libs = File(staging, ParsersInstallation.LIBS_DIR).apply { mkdirs() }
 			for (dependency in readChildDependencies(version)) {
-				val failure = runCatching { download(dependency.url, File(libs, dependency.fileName)) }
-					.exceptionOrNull()
+				val failure = runCatching {
+					download(dependency.url, File(libs, dependency.fileName), dependency.url + ".sha1")
+				}.exceptionOrNull()
 				if (failure != null) {
 					return@withContext UpdateOutcome.CheckFailed(
 						"could not fetch " + dependency.fileName + ": " + failure.message,
@@ -108,18 +109,24 @@ class ParsersUpdateService(
 					bridgeJar = bridgeJar,
 					extraJars = libs.listFiles()?.toList().orEmpty(),
 					version = version,
+					httpClient = httpClient,
 					cookieJar = cookieJar,
 					jsRuntime = jsRuntime,
 				)
 			) {
 				is GateVerdict.Accepted -> {
+					// Locked while still staged, so the manifest describes exactly what was
+					// gated. Every later load re-verifies against it.
+					val lock = ParsersLock.create(version, staging)
+					ParsersLock.write(staging, lock)
+
 					val target = installation.directoryFor(version)
 					target.deleteRecursively()
 					check(staging.renameTo(target)) { "could not place the staged build" }
 					UpdateOutcome.Ready(
 						version = version,
 						sourceCount = verdict.sourceCount,
-						sha256 = sha256(installation.parsersJarFor(version)),
+						sha256 = lock.files.getValue("kotatsu-parsers.jar"),
 					)
 				}
 
@@ -220,7 +227,19 @@ class ParsersUpdateService(
 		}
 	}
 
-	private fun download(url: String, target: File) {
+	/**
+	 * Fetch [url] to [target], and where the repository publishes a checksum beside the artifact,
+	 * check what arrived against it.
+	 *
+	 * This is the only point in the whole flow where provenance can be checked at all. The lock
+	 * file records what was downloaded, which catches later corruption and tampering but would
+	 * faithfully record a bad download; comparing against the repository's own published digest is
+	 * what catches a truncated transfer or a mangling proxy at the moment it happens.
+	 *
+	 * A missing checksum is not fatal -- not every repository publishes one for every artifact --
+	 * but a checksum that is present and wrong is.
+	 */
+	private fun download(url: String, target: File, checksumUrl: String? = null) {
 		val request = Request.Builder().url(url).build()
 		httpClient.newCall(request).execute().use { response ->
 			check(response.isSuccessful) { "HTTP " + response.code + " for " + url }
@@ -229,14 +248,26 @@ class ParsersUpdateService(
 				target.outputStream().use(input::copyTo)
 			}
 		}
+
+		val published = checksumUrl?.let { fetchPublishedSha1(it) } ?: return
+		val actual = sha1(target)
+		check(actual.equals(published, ignoreCase = true)) {
+			"checksum mismatch for " + url + ": published " + published + ", got " + actual
+		}
 	}
 
-	private fun artifactUrl(version: String, extension: String) =
-		"https://jitpack.io/com/github/" + REPO + "/" + version + "/" +
-			ARTIFACT + "-" + version + "." + extension
+	private fun fetchPublishedSha1(url: String): String? = runCatching {
+		httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
+			if (!response.isSuccessful) return null
+			// Maven checksum files are the hex digest, sometimes followed by a filename.
+			response.body.string().trim().substringBefore(' ').takeIf { it.length == 40 }
+		}
+	}.getOrNull()
 
-	private fun sha256(file: File): String {
-		val digest = MessageDigest.getInstance("SHA-256")
+	private fun sha1(file: File) = digest(file, "SHA-1")
+
+	private fun digest(file: File, algorithm: String): String {
+		val digest = MessageDigest.getInstance(algorithm)
 		file.inputStream().use { stream ->
 			val buffer = ByteArray(1 shl 16)
 			while (true) {
@@ -247,6 +278,10 @@ class ParsersUpdateService(
 		}
 		return digest.digest().joinToString("") { "%02x".format(it) }
 	}
+
+	private fun artifactUrl(version: String, extension: String) =
+		"https://jitpack.io/com/github/" + REPO + "/" + version + "/" +
+			ARTIFACT + "-" + version + "." + extension
 
 	private data class RemoteArtifact(
 		val group: String,

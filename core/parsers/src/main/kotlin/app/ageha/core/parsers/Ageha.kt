@@ -3,11 +3,13 @@ package app.ageha.core.parsers
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.js.NoJsRuntime
 import app.ageha.core.model.SourceDescriptor
+import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.source.MangaSourceRegistry
 import app.ageha.core.source.ParserBridge
+import okhttp3.OkHttpClient
 import java.io.File
 
 /**
@@ -35,22 +37,30 @@ object Ageha {
 		// Prefer what the user pinned, then what is active, then the bundled build. Each step
 		// falls through if the files are not actually there, so a half-deleted directory degrades
 		// to the bundled build rather than to a crash on launch.
+		// Prefer what the user pinned, then what is active, then the bundled build. A build only
+		// counts if it is installed *and* verifies against its lock: an unverified build is not
+		// loaded at all, it is stepped over. Falling back costs the user some source coverage;
+		// loading unvouched-for code costs them more.
 		val version = listOfNotNull(state.pinnedVersion, state.activeVersion)
-			.firstOrNull { installation.isInstalled(it) }
+			.firstOrNull { installation.isInstalled(it) && installation.verify(it) is LockVerification.Verified }
 			?: bundled
 
 		val cookieJar = PersistentCookieJar(cookieFile)
+		// One client, owned here, shared by every build that gets loaded. See the comment on
+		// AgehaMangaLoaderContext.baseHttpClient for why this cannot live on the child side.
+		val httpClient = AgehaHttpClient.build(cookieJar)
 		val loader = ParsersClassLoader.create(
 			parsersJar = installation.parsersJarFor(version),
 			bridgeJar = installation.bridgeJarFor(version),
 			extraJars = installation.libraryJarsFor(version),
 			version = version,
 		)
-		val bridge = ParserBridgeLoader.instantiate(loader, cookieJar, jsRuntime, version)
+		val bridge = ParserBridgeLoader.instantiate(loader, httpClient, cookieJar, jsRuntime, version)
 
 		return SourceStack(
 			registry = BridgedSourceRegistry(bridge),
 			installation = installation,
+			httpClient = httpClient,
 			bridge = bridge,
 			loader = loader,
 			cookieJar = cookieJar,
@@ -81,6 +91,8 @@ private class BridgedSourceRegistry(
 class SourceStack internal constructor(
 	val registry: MangaSourceRegistry,
 	val installation: ParsersInstallation,
+	/** Shared with every loaded build, and with the update service. Closed here and nowhere else. */
+	val httpClient: OkHttpClient,
 	private val bridge: ParserBridge,
 	private val loader: ParsersClassLoader,
 	private val cookieJar: PersistentCookieJar,
@@ -94,8 +106,13 @@ class SourceStack internal constructor(
 		cookieJar.persist()
 		jsRuntime.close()
 		runCatching { bridge.close() }
-		// Releases the jar file handles. On Windows an un-closed loader keeps the jar locked, and
-		// the next update cannot replace it.
+		// The single owner releases the shared HTTP resources. OkHttp keeps a dispatcher thread
+		// pool, live sockets and an open cache journal, none of which is reclaimed by dropping the
+		// reference -- and on Windows the open journal stops an update replacing what it updates.
+		runCatching { httpClient.dispatcher.executorService.shutdown() }
+		runCatching { httpClient.connectionPool.evictAll() }
+		runCatching { httpClient.cache?.close() }
+		// Releases the jar file handles, for the same Windows reason.
 		runCatching { loader.close() }
 	}
 }

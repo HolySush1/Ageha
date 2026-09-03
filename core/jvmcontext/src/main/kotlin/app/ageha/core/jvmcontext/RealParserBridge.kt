@@ -4,6 +4,7 @@ import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.model.SourceFailure
 import app.ageha.core.network.PersistentCookieJar
+import okhttp3.OkHttpClient
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.source.ParserBridge
 import org.koitharu.kotatsu.parsers.MangaParser
@@ -40,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
  * that has to be done reflectively. It links against whatever build it was loaded with.
  */
 class RealParserBridge(
+	baseHttpClient: OkHttpClient,
 	cookieJar: PersistentCookieJar,
 	jsRuntime: JsRuntime,
 	override val parsersVersion: String,
@@ -59,6 +61,7 @@ class RealParserBridge(
 			jsRuntime = jsRuntime,
 			configStore = configStore,
 			parserForSource = ::parserForTag,
+			baseHttpClient = baseHttpClient,
 		)
 	}
 
@@ -127,7 +130,6 @@ class RealParserBridge(
 	override fun close() {
 		parsers.clear()
 		clients.clear()
-		// The HTTP stack lives on this side of the boundary, so it has to be released from here.
 		context.close()
 	}
 

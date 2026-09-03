@@ -47,6 +47,19 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Fixed
 
+- **Two coexisting builds shared one OkHttp cache directory.** Every child context built its own
+  client against the default cache dir, so the compatibility gate -- which constructs a second
+  context while the live one is serving -- put two `Cache` instances on one directory on every
+  update check. OkHttp calls that an error, and classloader isolation does not help because the
+  directory is shared regardless. The parent now owns one client and injects it; the gate gets a
+  cache-less view of it.
+- **Downloaded builds are now locked and verified.** A per-build `lock.json` records a SHA-256 for
+  every file, verified before every load rather than only after download. Missing, modified and
+  unexpected files all fail. Downloads are additionally checked against the repository's published
+  `.sha1` where one exists.
+- The shim surface is now a tracked metric: 13 members, held to a test that fails in either
+  direction. It went from 14 when `getPreferredLocales` turned out to be overridden with an
+  implementation identical to the upstream default.
 - `SourceFailure.Blocked` and HTTP status classification, so a 403 from bot protection no longer
   reports as an unreachable network.
 - The HTTP stack is now shut down on close. OkHttp holds a dispatcher pool, live sockets and an

@@ -4,6 +4,7 @@ import app.ageha.core.js.JsRuntime
 import app.ageha.core.js.NoJsRuntime
 import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.source.ParserBridge
+import okhttp3.OkHttpClient
 import java.io.File
 
 /**
@@ -41,9 +42,14 @@ object CompatibilityGate {
 		bridgeJar: File,
 		extraJars: List<File> = emptyList(),
 		version: String,
+		httpClient: OkHttpClient,
 		cookieJar: PersistentCookieJar,
 		jsRuntime: JsRuntime = NoJsRuntime,
 	): GateVerdict {
+		// The candidate build gets a cache-less view of the shared client. It shares the
+		// connection pool and dispatcher, which is what we want, but a build that is about to be
+		// discarded must not write into the cache the live build is reading from.
+		val sandboxed = httpClient.newBuilder().cache(null).build()
 		var loader: ParsersClassLoader? = null
 		var bridge: ParserBridge? = null
 		return try {
@@ -56,7 +62,7 @@ object CompatibilityGate {
 
 			// 1. The bridge class exists, with the constructor signature the loader calls.
 			//    Nothing checks this at build time, so it is checked here.
-			bridge = ParserBridgeLoader.instantiate(loader, cookieJar, jsRuntime, version)
+			bridge = ParserBridgeLoader.instantiate(loader, sandboxed, cookieJar, jsRuntime, version)
 
 			// 2. The build reports sources at all. An empty enum means KSP output never made it
 			//    into the jar -- a build that succeeded and produced nothing usable.
