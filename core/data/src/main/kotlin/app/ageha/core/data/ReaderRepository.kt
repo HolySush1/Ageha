@@ -207,6 +207,28 @@ class ReaderRepository(
 	 * Read-modify-write rather than a targeted `UPDATE`, because the row carries eight other
 	 * columns Ageha does not use yet but the Android app does. Writing a fresh row with defaults
 	 * would silently reset a user's colour-filter settings on their next backup round trip.
+	 *
+	 * **Takes the manga, not just its id, and writes the manga row first.** `preferences.manga_id`
+	 * is an enforced foreign key, exactly like `history.manga_id`, so switching to webtoon mode on
+	 * something that was never favourited threw a constraint violation instead of changing the
+	 * mode -- which is every manga opened from search, from a listing, or from a local file, and
+	 * the reader's mode menu is reachable from all of them. The same defect was fixed for
+	 * [savePosition]; this is its twin, found by the webtoon profile, which opens a local archive
+	 * and sets a mode before anything has saved a position.
+	 */
+	suspend fun setMode(manga: AgehaManga, mode: ReaderMode) {
+		this.manga.upsertWithTags(
+			MangaMapping.toEntity(manga),
+			manga.tags.map { MangaMapping.toEntity(it) },
+		)
+		setMode(manga.id, mode)
+	}
+
+	/**
+	 * Set the mode for a manga already known to be stored.
+	 *
+	 * Prefer the overload taking the manga. This one is correct only when the row is already
+	 * there, which the caller has to know.
 	 */
 	suspend fun setMode(mangaId: Long, mode: ReaderMode) {
 		val existing = prefs.find(mangaId)

@@ -55,6 +55,21 @@ tasks.register<JavaExec>("renderGallery") {
 	args(File(rootProject.projectDir, "docs/design-gallery.png").absolutePath)
 }
 
+/**
+ * Profiles the webtoon reader on a real 200-page strip.
+ *
+ * The open risk from `docs/ARCHITECTURE.md` 1.4. Not part of `check`: it takes a minute and its
+ * output is a measurement to read, not a threshold to fail on -- a frame-time assertion on shared
+ * CI hardware would be a flaky test rather than a guard.
+ */
+tasks.register<JavaExec>("webtoonProfile") {
+	group = "verification"
+	description = "Scrolls a 200-page webtoon strip and reports frame times and heap."
+	mainClass.set("app.ageha.desktop.WebtoonProfileKt")
+	classpath = sourceSets["main"].runtimeClasspath
+	args(layout.buildDirectory.dir("profile").get().asFile.absolutePath)
+}
+
 /** Renders the real shell headlessly. Proves the graph builds and the screens compose. */
 tasks.register<JavaExec>("renderShell") {
 	group = "verification"

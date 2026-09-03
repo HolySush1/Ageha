@@ -187,7 +187,9 @@ class ReaderViewModel(
 	fun setMode(mode: ReaderMode) {
 		val manga = _state.value.manga ?: return
 		_state.update { it.copy(mode = mode) }
-		scope.launch { reader.setMode(manga.id, mode) }
+		// The whole manga, not its id: the preferences row has a foreign key onto it, and the
+		// reader is reachable for manga the database has never stored. See ReaderRepository.
+		scope.launch { reader.setMode(manga, mode) }
 	}
 
 	fun setScale(scale: PageScale) {
@@ -305,6 +307,17 @@ class ReaderViewModel(
 	 */
 	fun recordScroll(page: Int, fraction: Float) {
 		_state.update { it.copy(currentPage = page) }
+		// Resolve around the new position, exactly as a page turn does.
+		//
+		// Without this the webtoon strip resolves the first few pages when the chapter opens and
+		// then never resolves another one, because scrolling is the *only* way to move through a
+		// strip and it does not go through `goToPage`. Every page past the opening window stayed a
+		// spinner for as long as the chapter was open. Measured, not guessed: the 200-page profile
+		// reported 5 pages resolved and 195 still pending after scrolling the whole strip.
+		//
+		// Safe to call on every scroll emission -- `resolveAround` skips anything already resolved
+		// or already failed, so this is a no-op except at the moving edge.
+		resolveAround(page)
 		saveJob?.cancel()
 		saveJob = scope.launch {
 			delay(SAVE_DEBOUNCE_MS)

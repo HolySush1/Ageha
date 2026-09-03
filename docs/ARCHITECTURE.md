@@ -56,6 +56,23 @@ editing version 28.
 
 Agreed on Compose Multiplatform for Desktop. One thing to flag now rather than at Milestone 7: Compose's `LazyColumn` is not designed for continuous webtoon strips of 200 images at 800×12000px each. The reader's scroll surface will likely need a custom layout over a bounded bitmap cache rather than a stock lazy list. I am noting it as a known risk, not proposing a solution yet — that decision belongs in Milestone 7 with a profiler attached.
 
+**Resolved — measured, and the stock lazy list is fine.** `:app:desktop:webtoonProfile` builds a real 200-page strip (800×2400 per page), opens it in the real `ReaderScreen` in webtoon mode, and scrolls it from the first page to the last with real scroll events, recording every frame:
+
+```
+webtoon strip, 200 pages, 600 scrolled frames
+  frame p50   8.18 ms      frame p95   9.75 ms
+  frame p99   10.92 ms     frame max   12.73 ms
+  budget      16.67 ms (60Hz)          over budget 0 frames
+  heap before 10 MB        heap peak   30 MB      heap after 10 MB (after gc)
+  reached     page 200 of 200          resolved 198 pages, 0 failed
+```
+
+No frame missed the 60Hz budget, and the heap peaked at 30MB against the ~1.5GB that holding all 200 decoded pages would need. That is the property the lazy list was chosen for and it holds: items that leave the viewport are disposed, Coil releases their bitmaps with them, and the decoded set stays proportional to the window rather than to the chapter. **No custom layout is needed.**
+
+Two caveats on the number, stated so nobody over-reads it. The pages come from a local archive, so decode cost is real but network latency is not modelled — a remote strip is bounded by the source, not by the reader. And the profile renders headlessly through Skia's software path; a GPU surface is the faster case, not the slower one.
+
+The profile also earned its keep immediately: it found that **webtoon scrolling never resolved page urls**. `resolveAround` was called from `goToPage` and nowhere else, and scrolling a strip does not go through `goToPage` — so a chapter opened, resolved five pages, and every page after that stayed a spinner for as long as it was open. The first run reported `resolved=5, pending=195` while posting excellent frame times, because scrolling past placeholders is cheap. Fixed in `ReaderViewModel.recordScroll`.
+
 ---
 
 ## 2. Module graph
@@ -475,7 +492,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 4b | **Android backup import** | **done.** History, favourites, categories and sources restore from a real archive; unsupported sections and dropped rows are reported, not hidden |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
-| 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list; the §1.4 risk is open until it is profiled |
+| 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list and the §1.4 risk is now **closed by measurement** -- 200 pages, every frame inside budget, heap bounded |
 | 8 | Downloads, continue reading, settings | **done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). External tracking was cut from scope and replaced by local **Continue Reading** over the history tables (7b) |
 | 9 | Layer 2 + 3 packaging and CI | **done, one caveat.** Conveyor config, four workflows, `UPDATING.md` and `RELEASING.md`. Conveyor itself is not installed on this machine, so the config is written and syntax-checked but has not built an installer |
 
@@ -553,6 +570,6 @@ Written down now so it is not a surprise later.
 
 1. **Classloader delegation (§4.1).** Highest-risk item in the project. Symptoms are `LinkageError`/`ClassCastException` at runtime, never at compile time, and they appear only when the second JAR loads — i.e. not during development.
 2. **The browser, if we build it.** ~200 MB, three native binary sets, Compose interop for the captcha window, and Cloudflare actively working against us. Deferred deliberately.
-3. **Webtoon reader performance.** Compose Desktop has no equivalent of Android's mature RecyclerView tuning for this shape of content.
+3. ~~**Webtoon reader performance.**~~ **Closed.** Compose Desktop has no equivalent of Android's RecyclerView tuning, and it turned out not to need one: a 200-page strip scrolls end to end with every frame inside the 60Hz budget and a bounded heap. Numbers and caveats in §1.4; rerun with `:app:desktop:webtoonProfile`.
 4. **Sources breaking the app rather than themselves.** A parser throwing an unexpected exception type must degrade to "this source failed", never propagate to a crash. Every facade call is wrapped.
 5. **`getDefaultUserAgent()` fidelity.** Returning a Chrome UA while presenting a JVM TLS fingerprint is exactly what bot detection looks for. If we ship JCEF, return its real UA; if we do not, return a plausible desktop UA and accept that some sources will challenge us more often.

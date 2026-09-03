@@ -120,6 +120,22 @@ val agehaModule = module {
 }
 
 /**
+ * Hand Ageha's image loader to Coil's singleton.
+ *
+ * Extracted from [AgehaApplication.start] so it can be tested without booting the parsers bridge
+ * or opening the user's real database, which is what a test of the whole startup would do.
+ *
+ * The bug this guards was invisible: the loader was built, registered in Koin, and handed to
+ * nothing. Compose's `AsyncImage` resolves the *singleton*, so every image quietly went through
+ * Coil's own default loader -- which has neither the archive fetcher nor Ageha's OkHttp client,
+ * and therefore no cookie jar, no User-Agent and no per-source `Referer`. It compiled, it ran, and
+ * the only symptom was a blank page for a local CBZ and 403s from sources that gate their images.
+ */
+internal fun installImageLoader(koin: org.koin.core.Koin) {
+	SingletonImageLoader.setSafe { koin.get<ImageLoader>() }
+}
+
+/**
  * The application's lifetime, as an object that can be closed.
  *
  * Startup order is load-bearing and so is shutdown order: the source stack must outlive anything
@@ -199,7 +215,7 @@ class AgehaApplication private constructor(
 			// use reads the singleton. Providing a local instead would mean passing an
 			// `imageLoader` argument at every call site, and missing one would reintroduce this
 			// bug silently.
-			SingletonImageLoader.setSafe { koinApplication.koin.get<ImageLoader>() }
+			installImageLoader(koinApplication.koin)
 
 			// SupervisorJob so one screen's failed coroutine does not cancel every other screen's.
 			// A source blowing up while browsing must not take the library's database subscription

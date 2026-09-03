@@ -140,6 +140,17 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     at a time per source, with a queue that reports what it skipped and why.
   - A native file picker and `Ctrl+,` for settings.
 
+- **A webtoon profile.** `./gradlew :app:desktop:webtoonProfile` builds a real 200-page strip,
+  scrolls it end to end through the real reader with real scroll events, and reports frame times,
+  heap and how much of the strip actually resolved. This closes the open risk from
+  `docs/ARCHITECTURE.md` 1.4: every frame lands inside the 60Hz budget and the heap peaks near
+  30MB against the ~1.5GB that holding all 200 decoded pages would need, so the stock `LazyColumn`
+  stays and no custom layout is needed.
+- **A test that Compose draws through Ageha's image loader**, covering the singleton handoff, the
+  archive fetcher's ordering ahead of the network, and -- by putting an interceptor on the client
+  and watching it fire -- that requests really go through Ageha's OkHttp stack rather than the one
+  Coil registers for itself.
+
 - **Milestone 9 -- packaging and CI.**
   - `conveyor.conf` -- signed, self-updating installers for six targets from one machine. The
     icon ladder is handed over explicitly rather than generated, so the simplified small-size mark
@@ -194,6 +205,17 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   Downloads `Ctrl+4`. Library stays `Ctrl+1` and Settings stays `Ctrl+,`.
 
 ### Fixed
+
+- **Webtoon mode never resolved page urls past the first few.** `resolveAround` was called from
+  `goToPage` and nowhere else, and scrolling a continuous strip does not go through `goToPage` -- so
+  a chapter opened, resolved five pages, and every page after that stayed a loading spinner for as
+  long as it was open. Found by the new 200-page profile, which reported 5 pages resolved and 195
+  pending *while posting excellent frame times*, because scrolling past placeholders is cheap.
+- **Changing the reader mode failed for anything not in the library.** `preferences.manga_id` is an
+  enforced foreign key and `setMode` wrote no manga row, so switching to webtoon mode on something
+  opened from search, from a listing or from a local file threw a constraint violation instead of
+  changing the mode. The twin of the history bug fixed above it; `setMode` now takes the manga and
+  writes the row first, exactly as `savePosition` does.
 
 - **The reader's final position could be lost on quit, or written into a closing database.** The
   flush used `scope.launch(NonCancellable)`, and `NonCancellable` is a `Job` -- so `launch` took it
