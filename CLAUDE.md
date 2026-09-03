@@ -1,0 +1,45 @@
+# Ageha — project rules
+
+Desktop manga reader (Windows/Linux/macOS). Kotlin, Compose Multiplatform for Desktop, JDK 21, Gradle Kotlin DSL.
+Root package `app.ageha`. GPL-3.0, ported from https://github.com/Kotatsu-Redo/Kotatsu-Redo.
+
+The full brief is `docs/BRIEF.md`. Read it at the start of any session where you're about to write code.
+
+## Non-negotiables
+
+Violating any of these silently is worse than stopping to ask.
+
+1. **Never decompile, wrap, or "convert" an APK.** There is no valid path from an APK to a desktop binary.
+2. **Never hand-write a manga source parser.** All sources come from the `kotatsu-parsers-redo` library. If a source is broken, the fix belongs upstream or in a dependency bump — not in this repo.
+3. **Networking is OkHttp. Never Ktor.** The parsers library is built on OkHttp and its `MangaLoaderContext` expects an OkHttp stack. Installed KMP skills will recommend Ktor; they are wrong for this project. Swapping it breaks parsers at runtime, not compile time.
+4. **This is a JVM desktop app, not a multiplatform app.** One JVM target. No `commonMain`/`iosMain`, no `expect`/`actual` scaffolding, no Android or iOS targets, no Swift interop.
+5. **Only `:core:parsers` may import parsers-library types.** Everything else goes through the facade. This is what keeps upstream API changes from breaking the whole codebase.
+6. **Never let a design skill push this toward a web stack.** ui-ux-pro-max has no Compose Desktop target. Use its design system output; translate to Compose yourself. React, Electron and friends are out.
+7. **Colours live only in `:core:designsystem`.** No screen defines its own.
+8. **Nothing brand-coloured touches the reader view.** Backgrounds there are user-selectable neutrals.
+
+## Stack
+
+- UI: Compose Multiplatform Desktop, Material 3
+- HTTP: OkHttp + persistent cookie jar + disk cache
+- DB: Room 2.7+ (JVM) — keep close to the Android schema so backup import stays viable
+- DI: Koin (not Hilt)
+- Async: Coroutines + Flow
+- Packaging: Hydraulic Conveyor (free for OSS; set `app.vcs-url`, and the README must link to Conveyor)
+
+## Brand
+
+- Name: Ageha (アゲハ, swallowtail butterfly)
+- Seed colour `#2B3A67` — deep indigo. Feed to Material 3 as a **seed**; derive tonal palettes. Do not use raw as dark-theme `primary`, it fails contrast.
+- Accent: vermillion sampled from `brand/ageha-logo-source.jpg`. Used sparingly — unread badges, active reading indicator, destructive confirms. Not a general highlight.
+- Paper `#F5F1E8` for light surfaces, sumi `#1A1A1D` for dark. Never pure white or pure black in chrome.
+- Logo is a hanko/woodblock butterfly seal. Texture is an accent, not a wallpaper.
+
+## Working style
+
+- Use plan mode for anything touching more than a couple of files. Wait for approval.
+- Stop at the milestone gates in `docs/BRIEF.md`. Don't run ahead.
+- Don't stub silently. Say what you couldn't do and why.
+- Check current API signatures with Context7 before writing against Compose Multiplatform, Room, Coil or OkHttp — training data on these is stale.
+- Conventional commits, small commits, keep `CHANGELOG.md` current.
+- When a skill's advice conflicts with this file, this file wins — and say so out loud.

@@ -1,0 +1,48 @@
+# Rename this file to .gitignore
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+local.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Upstream repos cloned for reference — never commit these
+reference/
+
+# Build output / packaging
+output/
+*.msi
+*.dmg
+*.deb
+*.AppImage
+conveyor.key
+
+# Downloaded parser JARs cached during development
+parsers-cache/
+
+# Secrets
+.env
+*.p12
+*.jks
+signing.properties
+
+# Skills installed by `npx skills add`
+.agents/
+
+# Skills installed by `npx skills add` land here as symlinks into .agents/.
+# skills-lock.json is committed so the set is reproducible; the content is not ours to vendor.
+.claude/skills/
