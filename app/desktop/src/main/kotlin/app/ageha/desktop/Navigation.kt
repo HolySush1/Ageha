@@ -140,6 +140,24 @@ class Navigator {
 		push(Destination.SearchAll(query, subject))
 	}
 
+	/**
+	 * Open cross-source search with nothing typed yet, from the navigation pill.
+	 *
+	 * The same destination [searchAllSources] pushes, reached deliberately rather than as a
+	 * consolation prize for a dead source. Before this there was exactly one way in -- clicking a
+	 * Continue Reading entry whose source the current parsers build no longer had -- which made
+	 * the broadest search in the app reachable only by accident, and only by people whose history
+	 * had already broken. "Search everything I have enabled" is a thing to want on its own.
+	 *
+	 * Pushed onto the current section rather than switching to Explore, for the reason
+	 * [searchAllSources] gives: going back should return the user where they were, not strand them
+	 * in a section they never chose.
+	 */
+	fun openGlobalSearch() {
+		if (current is Destination.SearchAll) return
+		push(Destination.SearchAll(query = "", subject = null))
+	}
+
 	/** Jump to Continue Reading, from the shelf's "see all". */
 	fun openContinue() {
 		section = Section.CONTINUE

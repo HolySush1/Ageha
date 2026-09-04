@@ -13,6 +13,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
@@ -188,6 +189,15 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					event.isCtrlPressed && event.key == Key.Comma -> {
 						navigator.switchTo(Section.SETTINGS); true
 					}
+					// Ctrl+Shift+F searches every enabled source, from wherever you are -- the
+					// keyboard half of the magnifier in the navigation pill. Tested *before*
+					// plain Ctrl+F, because a shifted event reports Ctrl as pressed too and the
+					// unshifted branch would otherwise swallow it.
+					event.isCtrlPressed && event.isShiftPressed && event.key == Key.F -> {
+						navigator.openGlobalSearch()
+						runCatching { searchFocus.requestFocus() }
+						true
+					}
 					// Ctrl+F focuses whichever search field the current screen owns. Every screen
 					// has exactly one, so there is no ambiguity about which.
 					event.isCtrlPressed && event.key == Key.F -> {
@@ -223,6 +233,19 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				}
 				Item("Explore", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Three, ctrl = true)) {
 					navigator.switchTo(Section.EXPLORE)
+				}
+				// In the menu as well as in the pill. The magnifier is discoverable by looking at
+				// the window; this is where someone goes when they want to know the shortcut.
+				Item(
+					"Search all sources",
+					shortcut = androidx.compose.ui.input.key.KeyShortcut(
+						Key.F,
+						ctrl = true,
+						shift = true,
+					),
+				) {
+					navigator.openGlobalSearch()
+					runCatching { searchFocus.requestFocus() }
 				}
 				Item("Downloads", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Four, ctrl = true)) {
 					navigator.switchTo(Section.DOWNLOADS)

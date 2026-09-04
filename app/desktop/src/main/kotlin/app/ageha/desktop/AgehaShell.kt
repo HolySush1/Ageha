@@ -22,7 +22,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.ageha.core.data.CatalogRepository
 import app.ageha.core.data.HistoryRepository
@@ -204,31 +208,21 @@ fun AgehaShell(
 		}
 	}
 
-	// What the backdrop shows. The user's own library rather than a stock image: whatever they
-	// were last reading, blurred and scrimmed behind the interface. Null on a fresh installation,
-	// where AgehaBackdrop falls back to the brand gradient rather than to a grey void.
-	val recent by continueViewModel.state.collectAsState()
-	val recentHeaders by continueViewModel.imageHeaders.collectAsState()
-	val newest = recent.entries.firstOrNull()
-	val backdropCover = newest?.manga?.coverUrl
-	// Headers are per source -- a cover URL fetched without its source's Referer is a 403, and a
-	// 403 here is a backdrop that silently falls back to the gradient.
-	val backdropHeaders = newest?.let { recentHeaders[it.manga.sourceName] }.orEmpty()
-
 	// Boxed so notices can float over whatever screen is current. They are application-level --
 	// a backup import's report outlives the screen that started it -- so they are anchored to the
 	// window rather than owned by a screen.
 	Box(modifier.fillMaxSize()) {
 		// The reader takes the whole window. Chrome around a page is chrome over somebody's manga,
 		// and both the navigation and the backdrop are the app talking about itself while they are
-		// trying to read -- cover art behind a page would be the tinted-wash mistake rule 8 exists
-		// to prevent, one layer further back. One check suppresses both.
+		// trying to read -- brand colour behind a page would be the tinted-wash mistake rule 8
+		// exists to prevent, one layer further back. One check suppresses both.
+		//
+		// The backdrop takes no arguments: it is derived entirely from the theme, which is chosen
+		// in Settings -> Appearance. It used to be handed the most recent Continue Reading cover,
+		// which meant the window's background changed when the user finished a chapter and made
+		// the Appearance setting only half true. See AgehaBackdrop for the full account.
 		if (!navigator.isImmersive) {
-			AgehaBackdrop(
-				coverUrl = backdropCover,
-				imageHeaders = backdropHeaders,
-				modifier = Modifier.fillMaxSize(),
-			) {}
+			AgehaBackdrop(modifier = Modifier.fillMaxSize()) {}
 		}
 		Column(
 			Modifier
@@ -254,6 +248,16 @@ fun AgehaShell(
 						onNeedHeaders = libraryViewModel::ensureHeaders,
 						onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
 						searchFocus = searchFocus,
+						// The rail's fold is a preference rather than screen state, so switching
+						// to Explore and back does not quietly unfold it. See Preferences.
+						isRailCollapsed = preferences.libraryRailCollapsed,
+						onToggleRail = {
+							onPreferencesChange(
+								preferences.copy(
+									libraryRailCollapsed = !preferences.libraryRailCollapsed,
+								),
+							)
+						},
 					)
 				}
 
@@ -515,7 +519,17 @@ fun AgehaShell(
 		}
 
 		if (!navigator.isImmersive) {
-			FloatingNav(navigator, Modifier.align(Alignment.TopCenter))
+			FloatingNav(
+				navigator = navigator,
+				onSearchAllSources = {
+					navigator.openGlobalSearch()
+					// Straight into the field. The pill is one click away from anywhere, and a
+					// search screen that then asks for a second click before it will take a query
+					// is a search screen people stop using.
+					runCatching { searchFocus.requestFocus() }
+				},
+				modifier = Modifier.align(Alignment.TopCenter),
+			)
 		}
 
 		NoticeOverlay(
@@ -541,7 +555,11 @@ fun AgehaShell(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FloatingNav(navigator: Navigator, modifier: Modifier = Modifier) {
+private fun FloatingNav(
+	navigator: Navigator,
+	onSearchAllSources: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
 	Row(
 		modifier
 			.padding(top = AgehaSpacing.md)
@@ -565,8 +583,83 @@ private fun FloatingNav(navigator: Navigator, modifier: Modifier = Modifier) {
 				)
 			}
 		}
+		SearchAllButton(
+			isSelected = navigator.current is Destination.SearchAll,
+			onClick = onSearchAllSources,
+		)
 	}
 }
+
+/**
+ * Search every enabled source, from anywhere.
+ *
+ * ## Why it is in the pill rather than being a sixth section
+ *
+ * The sections are *places*: a library, a history, a catalogue, a queue, some settings. Search is
+ * an **action** you take on the place you are already in, and giving it a section would have
+ * pushed it into the same back stack as the screen it was launched from and made Escape ambiguous.
+ * A trailing icon in the same pill is reachable from every screen without claiming to be one.
+ *
+ * ## Why an icon rather than a sixth word
+ *
+ * Five words plus a sixth is the point at which a pill becomes a menu bar. A magnifier is the one
+ * glyph in this interface that needs no label at all -- and it gets one anyway, in a tooltip and
+ * in `contentDescription`, because an icon-only control with no accessible name is a control only
+ * the person who wrote it can use.
+ *
+ * It carries a selected state like every other item in the pill: while the results are on screen,
+ * the thing that opened them is lit. Without that, this is the one destination in Ageha you can be
+ * looking at while the navigation claims you are somewhere else.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
+	TooltipArea(
+		tooltip = {
+			Box(
+				Modifier
+					.glassSurface(MaterialTheme.shapes.small, GlassTone.RAISED)
+					.padding(AgehaSpacing.sm),
+			) {
+				Text(
+					"Search all enabled sources - Ctrl+Shift+F",
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurface,
+				)
+			}
+		},
+	) {
+		Box(
+			Modifier
+				.clip(AgehaGlass.PillShape)
+				.background(
+					if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+				)
+				.clickable(onClick = onClick)
+				.padding(horizontal = AgehaSpacing.sm, vertical = AgehaSpacing.sm)
+				.testTag(SEARCH_ALL_TAG),
+		) {
+			Icon(
+				imageVector = Icons.Default.Search,
+				contentDescription = "Search all enabled sources",
+				tint = if (isSelected) {
+					MaterialTheme.colorScheme.onSecondaryContainer
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+				modifier = Modifier.size(18.dp),
+			)
+		}
+	}
+}
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * An icon has no text to find it by, and "the fifth thing in the pill" is a locator that breaks
+ * the next time a section is added.
+ */
+const val SEARCH_ALL_TAG = "nav-search-all"
 
 /** The shortcut hint the rail used to print under every label. */
 @Composable
