@@ -94,4 +94,74 @@ class AgehaContrastTest {
 			}
 		}
 	}
+
+	/**
+	 * Glass, composited.
+	 *
+	 * Translucent chrome has no fixed background, so none of the pairs above say anything about
+	 * it. What makes it testable is that [AgehaBackdrop] bounds the problem: it scrims arbitrary
+	 * artwork down to [AgehaGlass.BACKDROP_SCRIM], so the worst backdrop a panel can ever sit on
+	 * is the scrim applied to pure black or pure white. Everything real falls between those two.
+	 *
+	 * So this composites the actual stack -- artwork, scrim, glass fill -- and holds the result to
+	 * the same 4.5:1 floor as any other body text. It is the test that stops someone lowering an
+	 * alpha because it looked better on one screenshot.
+	 */
+	private fun over(backdrop: Color, fill: Color, alpha: Float) = Color(
+		red = fill.red * alpha + backdrop.red * (1 - alpha),
+		green = fill.green * alpha + backdrop.green * (1 - alpha),
+		blue = fill.blue * alpha + backdrop.blue * (1 - alpha),
+	)
+
+	private fun glassFill(s: AgehaScheme, tone: GlassTone) = when (tone) {
+		GlassTone.CHROME -> s.surfaceContainer
+		GlassTone.PANEL -> s.surfaceContainerHigh
+		GlassTone.RAISED -> s.surfaceContainerHighest
+	}
+
+	/** The two extremes of cover art. Every real cover composites to something between them. */
+	private val worstArtwork = listOf("black artwork" to Color.Black, "white artwork" to Color.White)
+
+	@TestFactory
+	fun `body text on glass over the backdrop meets AA`(): List<DynamicTest> =
+		themes.flatMap { (name, s) ->
+			// RAISED is excluded here and tested on its own below: menus and dialogs float over
+			// content, not over the scrimmed backdrop, so they get none of the scrim's help and
+			// the honest test for them is the harsher one.
+			listOf(GlassTone.CHROME, GlassTone.PANEL).flatMap { tone ->
+				worstArtwork.map { (artLabel, art) ->
+					DynamicTest.dynamicTest("$name: onSurface on $tone over $artLabel") {
+						val backdrop = over(art, s.surface, AgehaGlass.BACKDROP_SCRIM)
+						val glass = over(backdrop, glassFill(s, tone), tone.fillAlpha)
+						val r = ratio(s.onSurface, glass)
+						assertTrue(r >= 4.5) {
+							"$name onSurface on $tone over $artLabel is %.2f:1, below the 4.5:1 AA floor"
+								.format(r)
+						}
+					}
+				}
+			}
+		}
+
+	/**
+	 * Menus and dialogs get no scrim, so they are held to the same floor over raw content.
+	 *
+	 * A dropdown opens over the library grid -- an arbitrary wall of cover art with no scrim
+	 * between it and the menu. This is why [GlassTone.RAISED] is nearly opaque, and this is the
+	 * test that keeps it that way.
+	 */
+	@TestFactory
+	fun `body text on a raised glass panel meets AA over any content`(): List<DynamicTest> =
+		themes.flatMap { (name, s) ->
+			worstArtwork.map { (artLabel, art) ->
+				DynamicTest.dynamicTest("$name: onSurface on RAISED over $artLabel") {
+					val glass = over(art, glassFill(s, GlassTone.RAISED), GlassTone.RAISED.fillAlpha)
+					val r = ratio(s.onSurface, glass)
+					assertTrue(r >= 4.5) {
+						"$name onSurface on RAISED over $artLabel is %.2f:1, below the 4.5:1 AA floor"
+							.format(r)
+					}
+				}
+			}
+		}
 }

@@ -105,6 +105,24 @@ fun MangaCard(
 	}
 }
 
+/**
+ * A cover drawn as a wide banner rather than as a card.
+ *
+ * Same image, same fallback, no aspect ratio of its own -- the caller decides the shape and the
+ * art is cropped to fill it. This exists so a hero can use the *sharp* cover while
+ * [AgehaBackdrop] uses the blurred one; two different treatments of one image, from one loader.
+ */
+@Composable
+fun CoverBanner(
+	manga: AgehaManga,
+	imageHeaders: Map<String, String>,
+	modifier: Modifier = Modifier,
+) {
+	Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+		CoverImage(manga, imageHeaders)
+	}
+}
+
 @Composable
 private fun CoverImage(manga: AgehaManga, imageHeaders: Map<String, String>) {
 	val url = manga.coverUrl
