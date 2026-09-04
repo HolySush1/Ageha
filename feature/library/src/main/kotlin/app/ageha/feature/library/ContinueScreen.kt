@@ -17,12 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.ContinueEntry
+import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -112,16 +109,13 @@ private fun Toolbar(state: ContinueUiState, onSearch: (String) -> Unit, searchFo
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		OutlinedTextField(
+		AgehaSearchField(
 			value = state.query,
 			onValueChange = onSearch,
-			singleLine = true,
-			leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
 			// Named for what it is. Every other search field in Ageha queries a website; this one
 			// filters a list already in memory, and saying so is the difference between a user
 			// waiting for it and a user trusting it.
-			placeholder = { Text("Quick search — titles you have read", style = MaterialTheme.typography.bodyMedium) },
-			textStyle = MaterialTheme.typography.bodyMedium,
+			placeholder = "Quick search — titles you have read",
 			modifier = Modifier.weight(1f).focusRequester(searchFocus),
 		)
 		Text(

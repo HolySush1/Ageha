@@ -14,16 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,15 +35,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.SourceListing
 import app.ageha.core.designsystem.AgehaAccent
+import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -81,15 +73,10 @@ fun SourcePickerScreen(
 			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			OutlinedTextField(
+			AgehaSearchField(
 				value = state.query,
 				onValueChange = onSearch,
-				singleLine = true,
-				leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-				placeholder = {
-					Text("Search ${state.totalCount} sources", style = MaterialTheme.typography.bodyMedium)
-				},
-				textStyle = MaterialTheme.typography.bodyMedium,
+				placeholder = "Search ${state.totalCount} sources",
 				modifier = Modifier.weight(1f).focusRequester(searchFocus),
 			)
 			LocaleMenu(state.locale, state.availableLocales, onLocale)
@@ -287,26 +274,14 @@ fun BrowseScreen(
 		) {
 			Text(state.sourceTitle, style = MaterialTheme.typography.titleLarge)
 			if (state.isSearchSupported) {
-				OutlinedTextField(
+				AgehaSearchField(
 					value = state.query,
 					onValueChange = onSearch,
-					singleLine = true,
-					leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-					placeholder = { Text("Search this source", style = MaterialTheme.typography.bodyMedium) },
-					textStyle = MaterialTheme.typography.bodyMedium,
-					modifier = Modifier
-						.weight(1f)
-						.focusRequester(searchFocus)
-						// Enter submits. Searching on every keystroke would be a request per
-						// character to somebody else's server.
-						.onPreviewKeyEvent { event ->
-							if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
-								onSubmitSearch()
-								true
-							} else {
-								false
-							}
-						},
+					placeholder = "Search this source",
+					// Enter submits. Searching on every keystroke would be a request per
+					// character to somebody else's server.
+					onSubmit = onSubmitSearch,
+					modifier = Modifier.weight(1f).focusRequester(searchFocus),
 				)
 			} else {
 				Box(Modifier.weight(1f))

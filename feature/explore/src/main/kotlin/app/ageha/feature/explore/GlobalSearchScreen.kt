@@ -10,16 +10,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,8 +21,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -116,17 +110,13 @@ private fun SearchBar(
 			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			OutlinedTextField(
+			AgehaSearchField(
 				value = state.query,
 				onValueChange = onQuery,
-				singleLine = true,
-				leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-				placeholder = { Text("Search all enabled sources", style = MaterialTheme.typography.bodyMedium) },
-				textStyle = MaterialTheme.typography.bodyMedium,
+				placeholder = "Search all enabled sources",
 				// Enter submits. Every search here is a request to somebody else's server, so it
 				// is never per-keystroke.
-				keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-				keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+				onSubmit = onSubmit,
 				modifier = Modifier.weight(1f).focusRequester(searchFocus),
 			)
 			TextButton(onClick = onSubmit) { Text("Search") }

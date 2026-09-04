@@ -14,14 +14,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import app.ageha.core.data.ContinueEntry
 import app.ageha.core.data.LibraryCategory
 import app.ageha.core.data.LibraryEntry
+import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -238,13 +235,10 @@ private fun LibraryToolbar(
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		OutlinedTextField(
+		AgehaSearchField(
 			value = query,
 			onValueChange = onSearch,
-			singleLine = true,
-			leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-			placeholder = { Text("Filter this shelf", style = MaterialTheme.typography.bodyMedium) },
-			textStyle = MaterialTheme.typography.bodyMedium,
+			placeholder = "Filter this shelf",
 			modifier = Modifier.weight(1f).focusRequester(searchFocus),
 		)
 		SortMenu(sort, onSort)
