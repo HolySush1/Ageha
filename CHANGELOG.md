@@ -105,10 +105,17 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   upscaling on every frame is cheaper than upscaling on every frame.
 - **Ctrl+wheel did nothing in webtoon mode.** The handler read the wheel on the Main pointer pass,
   by which point the `LazyColumn`'s own scrollable had already consumed the event, so Ctrl+wheel
-  scrolled. It is now read on the Initial pass and changes the strip's width -- 40% to 400% of the
-  source, capped at the window, remembered in preferences and shown in the top bar. Scaling the
-  list with a `graphicsLayer` instead was tried and rejected: it scales the viewport too, so the
-  edges clip and one notch of wheel travels a different distance at every zoom level.
+  scrolled. It is now read on the Initial pass and changes the strip's width -- 25% to 600% of the
+  source, remembered in preferences and shown in the top bar. Past the window width the strip
+  scrolls sideways (Shift+wheel, or a horizontal wheel) rather than stopping, so zooming in far
+  enough to read small print actually works. Scaling the list with a `graphicsLayer` instead was
+  tried and rejected: it scales the viewport too, so the edges clip and one notch of wheel travels
+  a different distance at every zoom level.
+  - The first attempt clamped the strip to the window width, which broke the control it was meant
+    to provide: with a source page already as wide as the window, a run of zoom levels all resolved
+    to the same width and several notches in either direction did nothing at all. Reported as "the
+    webtoon version doesn't allow me to zoom out". The width no longer takes the viewport as an
+    input, and `WebtoonStripWidthTest` asserts every notch across the range changes it.
 - **A page reserved no height until its image arrived**, so an unloaded page in the webtoon strip
   was zero pixels tall, the list composed a long run of them at once, and the strip lurched every
   time one resolved. Each item now reserves space from an aspect ratio learned as the chapter

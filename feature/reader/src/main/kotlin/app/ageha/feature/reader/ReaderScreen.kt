@@ -6,6 +6,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -45,6 +49,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -62,6 +67,7 @@ import app.ageha.core.model.ReaderMode
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -277,8 +283,11 @@ private fun PagedReader(
  *
  *  - **The strip is a centred column of the source's own width, not the whole window.** A webtoon
  *    page is around 800px; filling a 1920px window with it is a 2.4x upscale of somebody's line
- *    art. So the default is never to enlarge past the source, and Ctrl+wheel is how you say
- *    otherwise.
+ *    art. So the *default* is never to enlarge past the source -- but Ctrl+wheel then goes as far
+ *    past it as you like, and the strip scrolls sideways once it is wider than the window. An
+ *    earlier version clamped the width to the window instead, which quietly broke the control it
+ *    was meant to provide: with a source page already as wide as the window, several notches in
+ *    either direction resolved to the same width and appeared to do nothing.
  *  - **Ctrl+wheel changes that width rather than scaling the strip.** A `graphicsLayer` scale on a
  *    lazy list scales its *viewport* too, so the edges get clipped and one notch of wheel travels
  *    a different distance at every zoom level. Re-measuring the column has neither problem.
@@ -296,6 +305,7 @@ private fun WebtoonReader(
 	onToggleChrome: () -> Unit,
 ) {
 	val listState = rememberLazyListState()
+	val across = rememberScrollState()
 	val scope = rememberCoroutineScope()
 	val smooth = rememberSmoothScroller(listState, scope)
 	val density = LocalDensity.current
@@ -348,12 +358,21 @@ private fun WebtoonReader(
 						if (event.type != PointerEventType.Scroll) continue
 						val change = event.changes.firstOrNull() ?: continue
 						val delta = change.scrollDelta.y
-						if (delta == 0f) continue
-						if (event.keyboardModifiers.isCtrlPressed) {
-							val step = if (delta < 0) WEBTOON_ZOOM_STEP else 1f / WEBTOON_ZOOM_STEP
-							currentOnZoom((currentZoom * step).coerceIn(MIN_WEBTOON_ZOOM, MAX_WEBTOON_ZOOM))
-						} else {
-							smooth.scrollBy(delta * notch)
+						val sideways = change.scrollDelta.x
+						if (delta == 0f && sideways == 0f) continue
+						when {
+							event.keyboardModifiers.isCtrlPressed -> {
+								val step = if (delta < 0) WEBTOON_ZOOM_STEP else 1f / WEBTOON_ZOOM_STEP
+								currentOnZoom((currentZoom * step).coerceIn(MIN_WEBTOON_ZOOM, MAX_WEBTOON_ZOOM))
+							}
+							// Shift+wheel, and a genuine horizontal wheel, walk across a strip that
+							// is wider than the window. Without this, zooming in far enough to read
+							// small text would strand the edges of the page off screen.
+							event.keyboardModifiers.isShiftPressed || sideways != 0f -> {
+								val acrossDelta = if (sideways != 0f) sideways else delta
+								scope.launch { across.scrollBy(acrossDelta * notch) }
+							}
+							else -> smooth.scrollBy(delta * notch)
 						}
 						change.consume()
 					}
@@ -362,39 +381,42 @@ private fun WebtoonReader(
 			.pointerInput(Unit) { detectTapGestures(onTap = { onToggleChrome() }) },
 	) {
 		val viewport = maxWidth
-		// Never wider than the window: a strip you have to scroll sideways to read is not a
-		// webtoon reader, so zooming past the window edge simply stops.
 		val natural = sourceWidth ?: viewport.coerceAtMost(FALLBACK_STRIP_WIDTH)
-		val stripWidth = (natural * zoom).coerceIn(MIN_STRIP_WIDTH.coerceAtMost(viewport), viewport)
+		val stripWidth = webtoonStripWidth(natural, zoom)
 
-		LazyColumn(
-			state = listState,
-			modifier = Modifier.fillMaxSize(),
-			horizontalAlignment = Alignment.CenterHorizontally,
-			verticalArrangement = Arrangement.spacedBy(0.dp),
-		) {
-			items(state.pages, key = { it.key }) { page ->
-				ReaderPageImage(
-					page = page,
-					headers = state.imageHeaders,
-					// Width-filling is the only scale that makes sense for a continuous strip: the
-					// whole point is that the reader scrolls rather than fits.
-					contentScale = ContentScale.FillWidth,
-					modifier = Modifier
-						.width(stripWidth)
-						.aspectRatio(ratios[page.key] ?: chapterRatio),
-					onDecoded = { width, height ->
-						if (height > 0) {
-							ratios[page.key] = width.toFloat() / height
-							// The first page to decode sets the strip's natural width, and the
-							// placeholder shape for every page still on its way.
-							if (sourceWidth == null) {
-								sourceWidth = with(density) { width.toDp() }
-								chapterRatio = width.toFloat() / height
+		// A strip wider than the window scrolls sideways rather than being cropped to it. When it
+		// is narrower, the frame stays exactly the width of the window so the column sits centred
+		// and there is nothing to scroll across.
+		Box(Modifier.fillMaxSize().horizontalScroll(across)) {
+			LazyColumn(
+				state = listState,
+				modifier = Modifier.width(maxOf(stripWidth, viewport)).fillMaxHeight(),
+				horizontalAlignment = Alignment.CenterHorizontally,
+				verticalArrangement = Arrangement.spacedBy(0.dp),
+			) {
+				items(state.pages, key = { it.key }) { page ->
+					ReaderPageImage(
+						page = page,
+						headers = state.imageHeaders,
+						// Width-filling is the only scale that makes sense for a continuous strip:
+						// the whole point is that the reader scrolls rather than fits.
+						contentScale = ContentScale.FillWidth,
+						modifier = Modifier
+							.width(stripWidth)
+							.aspectRatio(ratios[page.key] ?: chapterRatio),
+						onDecoded = { width, height ->
+							if (height > 0) {
+								ratios[page.key] = width.toFloat() / height
+								// The first page to decode sets the strip's natural width, and the
+								// placeholder shape for every page still on its way.
+								if (sourceWidth == null) {
+									sourceWidth = with(density) { width.toDp() }
+									chapterRatio = width.toFloat() / height
+								}
 							}
-						}
-					},
-				)
+						},
+					)
+				}
 			}
 		}
 	}
@@ -597,25 +619,46 @@ private const val CHROME_IDLE_MS = 2_500L
  */
 private val FALLBACK_STRIP_WIDTH = 900.dp
 
-/** Narrow enough to be a deliberate choice, wide enough to still be reading rather than squinting. */
-private val MIN_STRIP_WIDTH = 240.dp
+/**
+ * How wide the webtoon strip is drawn, for a source page [natural] wide at a given [zoom].
+ *
+ * **The window width is not a parameter, and that is the point.** Clamping this to the viewport was
+ * the obvious thing to do and it broke the control it was meant to provide, in two ways. It made
+ * Ctrl+wheel useless for what anyone actually reaches for it -- getting close enough to read small
+ * text -- and, whenever the source page was already at least as wide as the window, it collapsed a
+ * whole range of zoom levels onto the same width, so several notches in either direction visibly
+ * did nothing. Zoom ran out before it started.
+ *
+ * Past the window width the strip scrolls sideways instead of stopping, so every step of the range
+ * does something. [WebtoonStripWidthTest] pins that.
+ */
+fun webtoonStripWidth(natural: Dp, zoom: Float): Dp = (natural * zoom).coerceAtLeast(MIN_STRIP_WIDTH)
+
+/** A floor on the absolute width, so zooming all the way out cannot leave a strip of nothing. */
+private val MIN_STRIP_WIDTH = 160.dp
 
 /** Aspect ratio (width / height) assumed for a page nothing is yet known about. */
 private const val DEFAULT_PAGE_RATIO = 0.7f
 
-/** One Ctrl+wheel notch of strip width. */
-private const val WEBTOON_ZOOM_STEP = 1.1f
+/**
+ * One Ctrl+wheel notch of strip width.
+ *
+ * 1.15 rather than something finer because this is a control someone reaches for when they cannot
+ * read something -- it has to visibly respond to one notch. Going from the source's own width to
+ * twice it takes five notches.
+ */
+private const val WEBTOON_ZOOM_STEP = 1.15f
 
-private const val MIN_WEBTOON_ZOOM = 0.4f
+/** Far enough out to see the shape of a page; there is no reason to go further. */
+private const val MIN_WEBTOON_ZOOM = 0.25f
 
 /**
- * Zoom runs well past "fills the window" on purpose.
+ * Far enough in to read a translator's note set in six-point type.
  *
- * The width is clamped to the viewport anyway, so this only bounds the stored number. Letting it
- * reach 4x means someone who widened the strip on a large monitor still has it filling the window
- * on a laptop, rather than having quietly lost the setting to a clamp.
+ * Real magnification, not a number that gets clamped away: past the window width the strip scrolls
+ * sideways rather than stopping, so every step of this range does something.
  */
-private const val MAX_WEBTOON_ZOOM = 4f
+private const val MAX_WEBTOON_ZOOM = 6f
 
 /**
  * How far one wheel notch scrolls the strip.
