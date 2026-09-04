@@ -8,6 +8,20 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **An end-to-end journey test that drives the real app.** `:app:desktop:e2e` boots the whole
+  application, renders the real shell, and walks the path a person actually takes: open a chapter,
+  turn pages with the keyboard, close the application, open a *new* one against the same profile,
+  and follow the Continue Reading entry back. It asserts on the page image on screen, not on the
+  view model. `-PwithNetwork` adds a second journey against live MangaDex -- enable the source,
+  browse it, open a manga, open a chapter. Three of the four bugs from the previous session were
+  invisible to unit tests and only appeared once something rendered; this is the harness that
+  renders it. Excluded from `check`, because booting an application installs Coil's process-global
+  singleton and would decide what every later test in the JVM saw.
+- **`AGEHA_DATA_DIR` / `-Dageha.data.dir`** points Ageha at a different profile directory. The
+  end-to-end test, the shell and gallery renderers, and the webtoon profiler now all use scratch
+  profiles under `build/`. Before this, generating a screenshot wrote a sample CBZ into whatever
+  reading history was on the machine.
+
 - **Milestone 1 -- investigation.** `docs/FINDINGS.md` and `docs/ARCHITECTURE.md`, from reading
   `kotatsu-parsers-redo` at `434030d481`, `Kotatsu-Redo`, and `kotatsu-dl`.
 - **Milestone 2 -- the source layer and a CLI that proves it.**
@@ -64,6 +78,27 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   application runtime classpath.
 
 ### Fixed
+
+- **The reader claimed "1 / 0" while a chapter was still loading.** Everything the status bar shows
+  is derived from the page list, but it was drawn outside the `isLoading` guard -- so a chapter
+  opened from a live source displayed "1 / 0" and "Chapter 1 of 0", confidently and wrongly, for
+  as long as the source took to answer. Now it waits for pages; the top bar, whose Close button is
+  exactly what someone wants during a slow load, still does not. Found by the end-to-end driver.
+- **A search on Explore with no sources enabled said "No sources match".** On a fresh installation
+  nothing is enabled, so *every* search of the enabled sources comes back empty -- and the message
+  sent the user looking for a source that was sitting right there, switched off. It now says how
+  many sources match in the full catalogue and offers to show them. The empty-list state already
+  did this; the searched state did not, which is the state a new user reaches first.
+- **`createDistributable` and `runDistributable` had never worked.** jpackage rejects a version
+  that is not strictly numeric-dotted, and the project version carries `-SNAPSHOT`, so every
+  invocation failed with `Version [0.1.0-SNAPSHOT] contains invalid component [0-SNAPSHOT]`.
+  Conveyor does not go through jpackage and so never hit it, which is why it went unnoticed: the
+  shipping path worked and the local one did not.
+- **`:app:desktop:e2e` passed by running nothing.** The root build applied `excludeTags` to every
+  `Test` task, including the one that opts *in* to the `e2e` tag, and JUnit resolves
+  include-and-exclude of the same tag as excluded. The tag filtering is now scoped to the standard
+  `test` task. A test task that reports success without running a test is worse than one that
+  fails.
 
 - **Two coexisting builds shared one OkHttp cache directory.** Every child context built its own
   client against the default cache dir, so the compatibility gate -- which constructs a second

@@ -13,8 +13,38 @@ object AgehaPaths {
 
 	private const val APP_NAME = "Ageha"
 
+	/**
+	 * An explicit override for both directories, from the environment.
+	 *
+	 * This exists so that anything which is not the installed app -- the end-to-end driver, the
+	 * shell and gallery renderers, the webtoon profiler, a second copy run for debugging -- can be
+	 * pointed at a scratch profile instead of the one the user actually reads their manga in.
+	 *
+	 * It was added after a render tool wrote its throwaway sample CBZ into a real reading history.
+	 * Nothing was lost, but a tool that quietly edits the user's library while "just rendering a
+	 * screenshot" is a tool that will eventually lose something, and the fix is one environment
+	 * variable rather than a convention nobody remembers.
+	 *
+	 * Both spellings are read: `AGEHA_DATA_DIR` from the environment, and `ageha.data.dir` as a
+	 * system property. They mean the same thing; the property exists because a JVM can set one on
+	 * itself and cannot set an environment variable on itself, which is what the end-to-end test
+	 * needs.
+	 *
+	 * Read once, through `by lazy`. A process therefore has exactly one profile for its whole
+	 * lifetime, and changing the property halfway through will not move it -- which is the right
+	 * behaviour, since half the app would still be holding files open in the old one.
+	 */
+	private fun override(name: String): File? {
+		// The system property first, because a test JVM can set one and cannot set an environment
+		// variable for itself. The environment variable is what a person launching a second copy
+		// from a shell will reach for.
+		val property = System.getProperty(name.lowercase().replace('_', '.'))
+		return (property ?: System.getenv(name))?.takeIf { it.isNotBlank() }?.let(::File)
+	}
+
 	/** Config and small state. Backed up by the OS on macOS and Windows. */
 	val dataDir: File by lazy {
+		override("AGEHA_DATA_DIR")?.let { return@lazy it }
 		val os = System.getProperty("os.name").orEmpty().lowercase()
 		val home = File(System.getProperty("user.home"))
 		when {
@@ -34,6 +64,11 @@ object AgehaPaths {
 
 	/** Regenerable bulk data: HTTP responses, page images, downloaded parser JARs. */
 	val cacheDir: File by lazy {
+		override("AGEHA_CACHE_DIR")?.let { return@lazy it }
+		// A data-dir override with no cache override keeps the two together, which is what someone
+		// pointing Ageha at a scratch profile means. Splitting them would leave the scratch run
+		// sharing -- and evicting from -- the real installation's image and parser caches.
+		override("AGEHA_DATA_DIR")?.let { return@lazy File(it, "cache") }
 		val os = System.getProperty("os.name").orEmpty().lowercase()
 		val home = File(System.getProperty("user.home"))
 		when {

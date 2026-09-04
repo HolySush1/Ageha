@@ -47,15 +47,37 @@ subprojects {
 	}
 
 	tasks.withType<Test>().configureEach {
+		testLogging {
+			events("passed", "skipped", "failed")
+		}
+
+		/*
+		 * Tag filtering, applied only to the standard `test` task.
+		 *
+		 * Scoped by name rather than to every Test task, because a task that opts *in* to a tag
+		 * must not have this add the matching exclusion behind it: JUnit resolves include-and-
+		 * exclude of the same tag as excluded, so `:app:desktop:e2e` ran zero tests and reported
+		 * success. A test task that passes by running nothing is worse than one that fails.
+		 */
+		if (name != "test") return@configureEach
+
 		useJUnitPlatform {
 			// Networked tests hit live manga sources, so they are opt-in:
 			//   ./gradlew test -PwithNetwork
 			if (!project.hasProperty("withNetwork")) {
 				excludeTags("network")
 			}
-		}
-		testLogging {
-			events("passed", "skipped", "failed")
+			// The end-to-end journey is never part of an ordinary run. It has a task of its own,
+			// `:app:desktop:e2e`, which gives it the scratch profile directory it needs.
+			//
+			// Excluded here rather than merely for being slow: it boots the whole application, and
+			// starting the application installs Coil's *process-global* singleton image loader.
+			// `SingletonImageLoader.setSafe` keeps the first loader it is given, so whichever test
+			// booted an application first would decide what every later test in the same JVM saw
+			// -- which is exactly how ImageLoaderWiringTest started failing on an unrelated
+			// change. A test that quietly rewrites global state for its neighbours does not belong
+			// in the same run as them.
+			excludeTags("e2e")
 		}
 	}
 

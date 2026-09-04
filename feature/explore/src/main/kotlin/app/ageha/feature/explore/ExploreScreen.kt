@@ -45,6 +45,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.SourceListing
 import app.ageha.core.designsystem.AgehaAccent
 import app.ageha.core.designsystem.AgehaSpacing
@@ -132,6 +133,21 @@ fun SourcePickerScreen(
 					action = { TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") } },
 				)
 
+			// Found nothing here, but the full catalogue has it. Always the case on a fresh
+			// installation, where nothing is enabled yet and so *every* search of the enabled
+			// sources comes back empty -- and "no sources match" sends someone looking for a
+			// source that is sitting right there, switched off.
+			state.sources.isEmpty() && state.matchesInAllSources > 0 -> EmptyState(
+				title = if (state.matchesInAllSources == 1) {
+					"1 source matches, but it is not enabled"
+				} else {
+					"${state.matchesInAllSources} sources match, but none are enabled"
+				},
+				detail = "Ageha starts with every source off, so it only ever talks to sites you " +
+					"chose. Show the full list to turn this one on.",
+				action = { TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") } },
+			)
+
 			state.sources.isEmpty() -> EmptyState(
 				title = "No sources match",
 				detail = "Nothing here matches that search and filter.",
@@ -155,6 +171,7 @@ private fun SourceRow(
 	Row(
 		Modifier
 			.fillMaxWidth()
+			.testTag(SOURCE_ROW_TAG)
 			.clickable(enabled = listing.isEnabled) { onOpen(listing.name) }
 			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.md),
 		verticalAlignment = Alignment.CenterVertically,
@@ -193,9 +210,23 @@ private fun SourceRow(
 		Switch(
 			checked = listing.isEnabled,
 			onCheckedChange = { onSetEnabled(listing.name, it) },
+			modifier = Modifier.testTag(SOURCE_TOGGLE_TAG),
 		)
 	}
 }
+
+/*
+ * Test tags for the end-to-end journey driver.
+ *
+ * A handful of rows in Ageha carry no fixed string to find them by -- a source row is a title
+ * nobody can predict plus a locale plus an optional "known broken", and a chapter row is whatever
+ * the source decided to call chapter one. Finding them by text means the driver breaks when a
+ * source renames itself, which is a false alarm about the app rather than a real one.
+ *
+ * Public because the driver lives in :app:desktop and these are the contract between them.
+ */
+const val SOURCE_ROW_TAG = "source-row"
+const val SOURCE_TOGGLE_TAG = "source-toggle"
 
 @Composable
 private fun LocaleMenu(selected: String?, available: List<String>, onSelect: (String?) -> Unit) {

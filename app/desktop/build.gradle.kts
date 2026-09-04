@@ -29,6 +29,11 @@ dependencies {
 	implementation(libs.kotlinx.serialization.json)
 	runtimeOnly(libs.sqlite.bundled)
 
+	// Drives the real shell in the end-to-end test: semantics-based finders, synthetic clicks and
+	// typing, and an idle-aware clock. `runComposeUiTest` is the non-Rule entry point, so this
+	// does not drag JUnit 4 into a JUnit 5 project.
+	testImplementation(compose.desktop.uiTestJUnit4)
+
 	// Skia is native, so Compose Desktop ships a different artifact per platform. `currentOS`
 	// above is right for running and testing here; these are what Conveyor needs to build an
 	// installer for a machine that is not this one. Without them, a Linux build made on Windows
@@ -44,7 +49,45 @@ dependencies {
 compose.desktop {
 	application {
 		mainClass = "app.ageha.desktop.MainKt"
+
+		nativeDistributions {
+			packageName = "Ageha"
+			description = "A desktop manga reader"
+			vendor = "Ageha"
+			copyright = "GPL-3.0-or-later"
+
+			/*
+			 * jpackage's own version, which is not the project's.
+			 *
+			 * It rejects anything that is not strictly numeric-dotted -- "0.1.0-SNAPSHOT" fails
+			 * with `Version [0.1.0-SNAPSHOT] contains invalid component [0-SNAPSHOT]`, which is
+			 * what `createDistributable` and `runDistributable` did on every invocation before
+			 * this. Conveyor does not go through jpackage and so never hit it, which is exactly
+			 * why it went unnoticed: the shipping path worked and the local one did not.
+			 */
+			packageVersion = project.version.toString().substringBefore("-SNAPSHOT")
+
+			// jlink strips whatever is not asked for. These are the same modules conveyor.conf
+			// names, and for the same reasons: AWT for the file picker, icon pipeline and font
+			// enumeration; java.sql for the bundled SQLite driver. Omitting either produces a
+			// build that starts and then fails the first time a user opens a file dialog.
+			modules("java.desktop", "java.sql", "java.naming")
+		}
 	}
+}
+
+
+/*
+ * Every tool below runs the real application graph, and therefore opens a real profile.
+ *
+ * Pointed at `build/` rather than at the user's own directory. `renderShell` opens a sample CBZ
+ * and `webtoonProfile` scrolls a 200-page strip, and both of those land in reading history -- so
+ * before this, generating a screenshot silently added entries to whatever library was on the
+ * machine. See AgehaPaths for the override itself.
+ */
+fun JavaExec.useScratchProfile(name: String) {
+	val dir = layout.buildDirectory.dir("profiles/$name")
+	systemProperty("ageha.data.dir", dir.get().asFile.absolutePath)
 }
 
 /** Renders the theme gallery to docs/design-gallery.png for review off this machine. */
@@ -53,6 +96,7 @@ tasks.register<JavaExec>("renderGallery") {
 	description = "Renders the theme gallery to a PNG without opening a window."
 	mainClass.set("app.ageha.desktop.GalleryRenderKt")
 	classpath = sourceSets["main"].runtimeClasspath
+	useScratchProfile("gallery")
 	args(File(rootProject.projectDir, "docs/design-gallery.png").absolutePath)
 }
 
@@ -68,6 +112,7 @@ tasks.register<JavaExec>("webtoonProfile") {
 	description = "Scrolls a 200-page webtoon strip and reports frame times and heap."
 	mainClass.set("app.ageha.desktop.WebtoonProfileKt")
 	classpath = sourceSets["main"].runtimeClasspath
+	useScratchProfile("webtoon")
 	args(layout.buildDirectory.dir("profile").get().asFile.absolutePath)
 }
 
@@ -77,6 +122,7 @@ tasks.register<JavaExec>("renderShell") {
 	description = "Renders the application shell to PNGs without a display."
 	mainClass.set("app.ageha.desktop.ShellRenderKt")
 	classpath = sourceSets["main"].runtimeClasspath
+	useScratchProfile("shell")
 	args(layout.buildDirectory.dir("shell").get().asFile.absolutePath)
 }
 
@@ -111,3 +157,54 @@ val checkAppVersion by tasks.registering {
 }
 
 tasks.named("check") { dependsOn(checkAppVersion) }
+
+/**
+ * Print the runtime classpath, one entry per line.
+ *
+ * The end-to-end driver launches Ageha with `java` directly rather than through `run`, because it
+ * needs to set `AGEHA_DATA_DIR` per launch and to own the process it later kills. Gradle's run
+ * task gives it neither.
+ */
+tasks.register("printRuntimeClasspath") {
+	group = "verification"
+	description = "Prints the runtime classpath for launching the app outside Gradle."
+	val cp = sourceSets["main"].runtimeClasspath
+	doLast { cp.forEach { println(it.absolutePath) } }
+}
+
+/**
+ * The end-to-end journey: launch, find, read, close, reopen, resume.
+ *
+ * A task of its own rather than part of `check`, for two reasons. It takes minutes, because it
+ * boots the whole application twice and waits on real I/O each time. And it needs a profile
+ * directory of its own -- pointed at `build/` below -- so that a test which reads manga cannot
+ * write into the library somebody actually uses.
+ *
+ *   ./gradlew :app:desktop:e2e                 # local archive, deterministic
+ *   ./gradlew :app:desktop:e2e -PwithNetwork   # adds the live MangaDex journey
+ */
+val e2eProfile = layout.buildDirectory.dir("e2e-profile")
+
+val e2e by tasks.registering(Test::class) {
+	group = "verification"
+	description = "Drives the real app end to end: read a chapter, reopen, resume where it left off."
+	testClassesDirs = sourceSets["test"].output.classesDirs
+	classpath = sourceSets["test"].runtimeClasspath
+
+	// Wiped each run. The point of the test is what survives a restart *within* one run; anything
+	// left over from the last one would be a false pass waiting to happen.
+	val profileDir = e2eProfile
+	doFirst { profileDir.get().asFile.deleteRecursively() }
+	systemProperty("ageha.data.dir", profileDir.get().asFile.absolutePath)
+
+	useJUnitPlatform {
+		includeTags("e2e")
+		// The live-source phase is opt-in, exactly as every other networked test in the build is.
+		if (!project.hasProperty("withNetwork")) excludeTags("network")
+	}
+	testLogging { events("passed", "skipped", "failed") }
+
+	// Never up-to-date. It exercises live state and the network; "no inputs changed" is not a
+	// reason to believe it would still pass.
+	outputs.upToDateWhen { false }
+}

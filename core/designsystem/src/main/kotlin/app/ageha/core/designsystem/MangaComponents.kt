@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.model.AgehaManga
 import coil3.compose.AsyncImage
@@ -62,6 +63,7 @@ fun MangaCard(
 ) {
 	Column(
 		modifier = modifier
+			.testTag(MANGA_CARD_TAG)
 			.clip(MaterialTheme.shapes.small)
 			.clickable(onClick = onClick)
 			.padding(AgehaSpacing.xs),
@@ -291,3 +293,12 @@ fun EmptyState(
 		}
 	}
 }
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * Every grid of manga in Ageha is built from [MangaCard], so one tag finds a search result, a
+ * library entry and a source listing alike -- and the driver does not need to know which titles a
+ * live source will return today.
+ */
+const val MANGA_CARD_TAG = "manga-card"

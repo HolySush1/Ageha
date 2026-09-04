@@ -37,6 +37,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.ContinueEntry
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
@@ -157,6 +158,7 @@ private fun ContinueRow(
 	Row(
 		Modifier
 			.fillMaxWidth()
+			.testTag(CONTINUE_ROW_TAG)
 			.hoverable(interaction)
 			.background(
 				if (isHovered) MaterialTheme.colorScheme.surfaceContainerLow else Color.Transparent,
@@ -344,3 +346,11 @@ private fun ShelfCard(entry: ContinueEntry, imageHeaders: Map<String, String>, o
 		Spacer(Modifier.height(1.dp))
 	}
 }
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * The row is a manga title, a source name and a relative timestamp, none of which the driver can
+ * predict before it has read something.
+ */
+const val CONTINUE_ROW_TAG = "continue-row"

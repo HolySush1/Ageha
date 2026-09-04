@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.CoverShape
@@ -251,6 +252,7 @@ private fun ChapterRow(chapter: AgehaChapter, onClick: () -> Unit, onDownload: (
 	Row(
 		Modifier
 			.fillMaxWidth()
+			.testTag(CHAPTER_ROW_TAG)
 			.clickable(onClick = onClick)
 			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
 		verticalAlignment = Alignment.CenterVertically,
@@ -326,3 +328,11 @@ private fun String.stripHtml(): String = this
 	.replace("&#39;", "'")
 	.replace("&nbsp;", " ")
 	.trim()
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * A chapter row is named by whatever the source calls it, so there is no fixed string to find it
+ * by. See [SOURCE_ROW_TAG] for the reasoning.
+ */
+const val CHAPTER_ROW_TAG = "chapter-row"

@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.ReaderBackground
@@ -118,8 +119,14 @@ fun ReaderScreen(
 			ReaderTopBar(state, chrome, background, doublePage, coverOffset, onSetMode, onSetScale,
 				onSetBackground, onToggleDoublePage, onToggleCoverOffset, onClose)
 		}
+		// The status bar waits for pages; the top bar above does not.
+		//
+		// Everything it says is derived from a page list, so before that list arrives it reads
+		// "1 / 0" and "Chapter 1 of 0" -- confidently, and wrongly, for however long a source
+		// takes to answer. The top bar stays up because Close and the mode controls are exactly
+		// what someone wants while a slow chapter is still loading.
 		AnimatedVisibility(
-			visible = state.isChromeVisible,
+			visible = state.isChromeVisible && state.pages.isNotEmpty(),
 			enter = fadeIn(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			exit = fadeOut(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			modifier = Modifier.align(Alignment.BottomCenter),
@@ -377,6 +384,7 @@ private fun ReaderStatusBar(state: ReaderUiState, chrome: ReaderChrome) {
 			"${state.currentPage + 1} / ${state.pageCount}",
 			style = AgehaTextStyles.readerHud,
 			color = chrome.content,
+			modifier = Modifier.testTag(PAGE_COUNTER_TAG),
 		)
 		Text(
 			"Chapter ${state.chapterIndex + 1} of ${state.chapterCount}",
@@ -403,3 +411,12 @@ fun AutoHideChrome(activity: Any?, isVisible: Boolean, onHide: () -> Unit) {
 
 /** How long the chrome stays up after the last interaction. */
 private const val CHROME_IDLE_MS = 2_500L
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * This counter is the single thing that says where the reader actually is, so it is what the
+ * driver asserts on after a resume. Its text is derived state, not a fixed string, which is why it
+ * needs a tag rather than a text finder.
+ */
+const val PAGE_COUNTER_TAG = "page-counter"

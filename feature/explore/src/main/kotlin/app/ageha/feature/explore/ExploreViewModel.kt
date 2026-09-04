@@ -26,6 +26,14 @@ data class ExploreUiState(
 	val parsersVersion: String = "",
 	val totalCount: Int = 0,
 	val enabledCount: Int = 0,
+	/**
+	 * How many sources the same search would find with the filter set to [SourceFilter.ALL].
+	 *
+	 * Carried so the screen can tell "nothing is called that" apart from "nothing you have turned
+	 * on is called that". They look identical to a user and they need opposite advice, and on a
+	 * fresh installation -- where nothing is enabled yet -- it is always the second one.
+	 */
+	val matchesInAllSources: Int = 0,
 	val isLoading: Boolean = true,
 )
 
@@ -60,8 +68,9 @@ class ExploreViewModel(
 			// answer instead of assuming Ageha broke.
 			SourceFilter.BROKEN -> all.filter { it.descriptor.isBroken }
 		}
+		val found = sources.search(visible, text, lang).sortedWith(SOURCE_ORDER)
 		ExploreUiState(
-			sources = sources.search(visible, text, lang).sortedWith(SOURCE_ORDER),
+			sources = found,
 			query = text,
 			filter = which,
 			locale = lang,
@@ -69,6 +78,14 @@ class ExploreViewModel(
 			parsersVersion = sources.parsersVersion,
 			totalCount = all.size,
 			enabledCount = all.count { it.isEnabled },
+			// Only computed when this filter came back with nothing, which is the only time the
+			// screen asks. Running the same search over 1360 entries on every keystroke to answer
+			// a question nobody asked would be the one expensive thing on this screen.
+			matchesInAllSources = if (found.isNotEmpty() || which == SourceFilter.ALL) {
+				0
+			} else {
+				sources.search(all, text, lang).size
+			},
 			isLoading = false,
 		)
 	}.stateIn(scope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ExploreUiState())
