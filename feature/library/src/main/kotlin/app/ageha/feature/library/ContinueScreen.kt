@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
@@ -38,6 +39,7 @@ import app.ageha.core.data.ContinueEntry
 import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.CoverBanner
 import app.ageha.core.designsystem.EmptyState
 import app.ageha.core.designsystem.MangaThumbnail
 import java.util.concurrent.TimeUnit
@@ -263,6 +265,87 @@ internal fun relativeTime(epochMillis: Long, now: Long = System.currentTimeMilli
  * in `LibraryScreen` so that the shelf and the screen cannot drift apart -- they are two views of
  * one list, and the shelf's job is to make the screen unnecessary most of the time.
  */
+/**
+ * The most recent thing the user was reading, drawn large.
+ *
+ * The shelf answers "what else was I reading"; this answers "what was I reading", which is the
+ * question the app is opened to settle and the one that deserves more than a 112dp thumbnail. It
+ * is the first thing on the library screen for the same reason Continue Reading is second in the
+ * navigation: resuming is the most common intent, not browsing.
+ *
+ * The artwork runs to the right edge and the text sits on the left, over a horizontal scrim that
+ * is opaque where the words are and gone by the time it reaches the art. A scrim across the whole
+ * banner would dim the cover to make room for four words, which is the wrong trade on the one
+ * screen whose subject is the cover.
+ */
+@Composable
+fun ContinueHero(
+	entry: ContinueEntry,
+	imageHeaders: Map<String, String>,
+	onOpen: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	Box(
+		modifier
+			.fillMaxWidth()
+			.height(HERO_HEIGHT)
+			.clip(MaterialTheme.shapes.large)
+			.clickable(onClick = onOpen)
+			.testTag(HERO_TAG),
+	) {
+		CoverBanner(entry.manga, imageHeaders, Modifier.fillMaxSize())
+		Box(
+			Modifier.fillMaxSize().background(
+				Brush.horizontalGradient(
+					0f to MaterialTheme.colorScheme.surface,
+					HERO_SCRIM_END to Color.Transparent,
+				),
+			),
+		)
+		Column(
+			Modifier
+				.align(Alignment.CenterStart)
+				.fillMaxWidth(HERO_TEXT_WIDTH)
+				.padding(AgehaSpacing.xl),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Text(
+				if (entry.isCaughtUp) "CAUGHT UP" else "CONTINUE READING",
+				style = AgehaTextStyles.metadata,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+			Text(
+				entry.manga.title,
+				style = MaterialTheme.typography.headlineMedium,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Text(
+				listOfNotNull(entry.sourceTitle, entry.chapterLabel).joinToString("  -  "),
+				style = AgehaTextStyles.metadata,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			TextButton(onClick = onOpen) {
+				Text(if (entry.isCaughtUp) "Reopen" else "Resume")
+			}
+		}
+	}
+}
+
+/** Tall enough for a headline and a line of metadata, short enough to leave the grid visible. */
+private val HERO_HEIGHT = 220.dp
+
+/** Where the text scrim has finished fading, as a fraction of the banner's width. */
+private const val HERO_SCRIM_END = 0.72f
+
+/** How much of the banner the text column may occupy before it starts covering the art. */
+private const val HERO_TEXT_WIDTH = 0.55f
+
+const val HERO_TAG = "continue-hero"
+
 @Composable
 fun ContinueShelf(
 	entries: List<ContinueEntry>,

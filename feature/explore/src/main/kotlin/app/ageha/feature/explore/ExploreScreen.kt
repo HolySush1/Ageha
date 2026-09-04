@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,10 +40,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.SourceListing
 import app.ageha.core.designsystem.AgehaAccent
+import app.ageha.core.designsystem.AgehaGlass
+import app.ageha.core.designsystem.GlassTone
 import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
+import app.ageha.core.designsystem.glassSurface
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.designsystem.SourceFailureNotice
@@ -55,6 +59,13 @@ import app.ageha.core.model.AgehaSortOrder
  * A list rather than a grid: sources have names and languages, not covers, and a grid of text
  * tiles is a grid for its own sake. Each row carries the switch that enables it, so turning
  * sources on is done from the same place they are found rather than in a separate settings screen.
+ *
+ * The header is where the catalogue becomes usable. 1360 sources in every language, some of them
+ * broken and some of them pornographic, is not a list anyone can browse -- so the view chips pick
+ * a slice, and the filter menu beside them narrows it by language, by whether upstream has flagged
+ * the source broken, and by whether adult sources are shown at all. Whatever those filters remove
+ * is counted out loud underneath, because a filtered list that does not say it is filtered is
+ * indistinguishable from a catalogue that is missing things.
  */
 @Composable
 fun SourcePickerScreen(
@@ -63,52 +74,73 @@ fun SourcePickerScreen(
 	onSearch: (String) -> Unit,
 	onFilter: (SourceFilter) -> Unit,
 	onLocale: (String?) -> Unit,
+	onHideBroken: (Boolean) -> Unit,
+	onShowAdult: (Boolean) -> Unit,
 	onSetEnabled: (String, Boolean) -> Unit,
 	modifier: Modifier = Modifier,
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
 	Column(modifier.fillMaxSize()) {
-		Row(
-			Modifier.fillMaxWidth().padding(AgehaSpacing.md),
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
-			verticalAlignment = Alignment.CenterVertically,
+		Column(
+			Modifier
+				.fillMaxWidth()
+				.glassSurface(RoundedCornerShape(0.dp), GlassTone.CHROME)
+				.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 		) {
-			AgehaSearchField(
-				value = state.query,
-				onValueChange = onSearch,
-				placeholder = "Search ${state.totalCount} sources",
-				modifier = Modifier.weight(1f).focusRequester(searchFocus),
-			)
-			LocaleMenu(state.locale, state.availableLocales, onLocale)
-		}
-		Row(
-			Modifier.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.xs),
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			for (option in SourceFilter.entries) {
-				FilterChip(
-					selected = state.filter == option,
-					onClick = { onFilter(option) },
-					label = {
-						Text(
-							if (option == SourceFilter.ENABLED) {
-								"${option.label} (${state.enabledCount})"
-							} else {
-								option.label
-							},
-						)
-					},
+			Row(
+				Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				AgehaSearchField(
+					value = state.query,
+					onValueChange = onSearch,
+					placeholder = "Search ${state.totalCount} sources",
+					modifier = Modifier.weight(1f).focusRequester(searchFocus),
+				)
+				FilterMenu(state, onLocale, onHideBroken, onShowAdult)
+			}
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				for (option in SourceFilter.entries) {
+					FilterChip(
+						selected = state.filter == option,
+						onClick = { onFilter(option) },
+						shape = AgehaGlass.PillShape,
+						label = {
+							Text(
+								if (option == SourceFilter.ENABLED) {
+									"${option.label} (${state.enabledCount})"
+								} else {
+									option.label
+								},
+							)
+						},
+					)
+				}
+				Box(Modifier.weight(1f))
+				Text(
+					"parsers ${state.parsersVersion}",
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
 				)
 			}
-			Box(Modifier.weight(1f))
-			Text(
-				"parsers ${state.parsersVersion}",
-				style = AgehaTextStyles.metadata,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-			)
+			// Said out loud, every time. See ExploreUiState.hiddenAdultCount for why.
+			if (state.hasHiddenSources) {
+				Text(
+					listOfNotNull(
+						state.hiddenAdultCount.takeIf { it > 0 }?.let { "$it 18+ hidden" },
+						state.hiddenBrokenCount.takeIf { it > 0 }?.let { "$it known broken hidden" },
+					).joinToString(" - "),
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.testTag(HIDDEN_COUNT_TAG),
+				)
+			}
 		}
-		HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 		when {
 			state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
 
@@ -135,6 +167,18 @@ fun SourcePickerScreen(
 				action = { TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") } },
 			)
 
+			// Nothing matches *here*, but a filter is withholding rows. Offering the search term
+			// back without mentioning the filter would be the app hiding its own doing.
+			state.sources.isEmpty() && state.hasHiddenSources -> EmptyState(
+				title = "No sources match",
+				detail = "Nothing here matches that search, and " +
+					listOfNotNull(
+						state.hiddenAdultCount.takeIf { it > 0 }?.let { "$it 18+ source(s)" },
+						state.hiddenBrokenCount.takeIf { it > 0 }?.let { "$it known broken source(s)" },
+					).joinToString(" and ") +
+					" are hidden by your filters.",
+			)
+
 			state.sources.isEmpty() -> EmptyState(
 				title = "No sources match",
 				detail = "Nothing here matches that search and filter.",
@@ -147,6 +191,96 @@ fun SourcePickerScreen(
 			}
 		}
 	}
+}
+
+/**
+ * The three filters that are not a view: language, broken, and adult.
+ *
+ * A menu rather than three more chips in the bar. Chips are for the slice being shown and read as
+ * one exclusive choice; these are independent switches that mostly stay where the user put them,
+ * and putting six controls in a row makes the two that matter harder to find rather than easier.
+ *
+ * The button says how many are active, so a filtered catalogue is legible without opening it.
+ */
+@Composable
+private fun FilterMenu(
+	state: ExploreUiState,
+	onLocale: (String?) -> Unit,
+	onHideBroken: (Boolean) -> Unit,
+	onShowAdult: (Boolean) -> Unit,
+) {
+	var expanded by remember { mutableStateOf(false) }
+	val active = listOf(state.locale != null, state.hideBroken, state.showAdult).count { it }
+	Box {
+		TextButton(onClick = { expanded = true }, modifier = Modifier.testTag(FILTER_MENU_TAG)) {
+			Text(if (active == 0) "Filters" else "Filters ($active)")
+		}
+		DropdownMenu(
+			expanded = expanded,
+			onDismissRequest = { expanded = false },
+			modifier = Modifier.glassSurface(MaterialTheme.shapes.medium, GlassTone.RAISED),
+		) {
+			ToggleItem(
+				label = "Hide known broken",
+				detail = "Sources upstream has flagged as not currently working.",
+				checked = state.hideBroken,
+				onToggle = { onHideBroken(!state.hideBroken) },
+			)
+			ToggleItem(
+				label = "Show 18+ sources",
+				detail = "Adult sources are hidden until you ask for them.",
+				checked = state.showAdult,
+				onToggle = { onShowAdult(!state.showAdult) },
+				testTag = ADULT_TOGGLE_TAG,
+			)
+			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+			DropdownMenuItem(
+				text = { Text("Any language") },
+				trailingIcon = { if (state.locale == null) Text("*", style = AgehaTextStyles.metadata) },
+				onClick = { onLocale(null); expanded = false },
+			)
+			for (option in state.availableLocales) {
+				DropdownMenuItem(
+					text = { Text("${option.displayName} (${option.count})") },
+					trailingIcon = {
+						if (state.locale == option.tag) Text("*", style = AgehaTextStyles.metadata)
+					},
+					onClick = { onLocale(option.tag); expanded = false },
+				)
+			}
+		}
+	}
+}
+
+/**
+ * A switch inside the filter menu.
+ *
+ * The whole row toggles, and the switch itself is passed a null handler so it renders as state
+ * rather than as a second, smaller target sitting inside the first one.
+ */
+@Composable
+private fun ToggleItem(
+	label: String,
+	detail: String,
+	checked: Boolean,
+	onToggle: () -> Unit,
+	testTag: String? = null,
+) {
+	DropdownMenuItem(
+		modifier = if (testTag != null) Modifier.testTag(testTag) else Modifier,
+		text = {
+			Column {
+				Text(label, style = MaterialTheme.typography.bodyMedium)
+				Text(
+					detail,
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+		},
+		trailingIcon = { Switch(checked = checked, onCheckedChange = null) },
+		onClick = onToggle,
+	)
 }
 
 @Composable
@@ -174,6 +308,15 @@ private fun SourceRow(
 					style = MaterialTheme.typography.bodyLarge,
 					color = MaterialTheme.colorScheme.onSurface,
 				)
+				// Only reachable with the 18+ filter switched on, and marked anyway. Someone who
+				// turned adult sources on still has to be able to tell which ones they are.
+				if (listing.descriptor.isAdult) {
+					Text(
+						"18+",
+						style = AgehaTextStyles.metadata,
+						color = MaterialTheme.colorScheme.tertiary,
+					)
+				}
 				// Upstream's own "this source is currently broken" flag. Shown rather than hidden:
 				// the user finds out here instead of by watching it fail.
 				if (listing.descriptor.isBroken) {
@@ -214,26 +357,9 @@ private fun SourceRow(
  */
 const val SOURCE_ROW_TAG = "source-row"
 const val SOURCE_TOGGLE_TAG = "source-toggle"
-
-@Composable
-private fun LocaleMenu(selected: String?, available: List<String>, onSelect: (String?) -> Unit) {
-	var expanded by remember { mutableStateOf(false) }
-	Box {
-		TextButton(onClick = { expanded = true }) { Text(selected?.uppercase() ?: "Any language") }
-		DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-			DropdownMenuItem(
-				text = { Text("Any language") },
-				onClick = { onSelect(null); expanded = false },
-			)
-			for (tag in available) {
-				DropdownMenuItem(
-					text = { Text(tag.uppercase()) },
-					onClick = { onSelect(tag); expanded = false },
-				)
-			}
-		}
-	}
-}
+const val FILTER_MENU_TAG = "source-filter-menu"
+const val ADULT_TOGGLE_TAG = "source-adult-toggle"
+const val HIDDEN_COUNT_TAG = "source-hidden-count"
 
 /**
  * Browsing one source.

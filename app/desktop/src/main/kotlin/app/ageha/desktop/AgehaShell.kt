@@ -1,6 +1,14 @@
 package app.ageha.desktop
 
 import androidx.compose.foundation.background
+import app.ageha.core.designsystem.glassSurface
+import app.ageha.core.designsystem.GlassTone
+import app.ageha.core.designsystem.GlassBar
+import app.ageha.core.designsystem.AgehaGlass
+import app.ageha.core.designsystem.AgehaBackdrop
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.TooltipArea
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -100,7 +108,26 @@ fun AgehaShell(
 	val globalSearchViewModel = remember {
 		GlobalSearchViewModel(application.catalog, application.sources, scope)
 	}
-	val exploreViewModel = remember { ExploreViewModel(application.sources, scope) }
+	// Seeded from preferences and reporting back into them. The filters are a setting, not screen
+	// state: hiding adult sources again on every launch would be a switch that does not stay set.
+	val exploreViewModel = remember {
+		ExploreViewModel(
+			sources = application.sources,
+			scope = scope,
+			hideBroken = preferences.hideBrokenSources,
+			showAdult = preferences.showAdultSources,
+			locale = preferences.sourceLanguage,
+			onFiltersChanged = { hideBroken, showAdult, locale ->
+				onPreferencesChange(
+					preferences.copy(
+						hideBrokenSources = hideBroken,
+						showAdultSources = showAdult,
+						sourceLanguage = locale,
+					),
+				)
+			},
+		)
+	}
 	val browseViewModel = remember { BrowseViewModel(application.catalog, application.sources, scope) }
 	val detailsViewModel = remember {
 		DetailsViewModel(application.catalog, application.library, scope)
@@ -177,280 +204,318 @@ fun AgehaShell(
 		}
 	}
 
+	// What the backdrop shows. The user's own library rather than a stock image: whatever they
+	// were last reading, blurred and scrimmed behind the interface. Null on a fresh installation,
+	// where AgehaBackdrop falls back to the brand gradient rather than to a grey void.
+	val recent by continueViewModel.state.collectAsState()
+	val recentHeaders by continueViewModel.imageHeaders.collectAsState()
+	val newest = recent.entries.firstOrNull()
+	val backdropCover = newest?.manga?.coverUrl
+	// Headers are per source -- a cover URL fetched without its source's Referer is a 403, and a
+	// 403 here is a backdrop that silently falls back to the gradient.
+	val backdropHeaders = newest?.let { recentHeaders[it.manga.sourceName] }.orEmpty()
+
 	// Boxed so notices can float over whatever screen is current. They are application-level --
 	// a backup import's report outlives the screen that started it -- so they are anchored to the
 	// window rather than owned by a screen.
 	Box(modifier.fillMaxSize()) {
-		Row(Modifier.fillMaxSize()) {
-			// The reader takes the whole window. Chrome around a page is chrome over somebody's
-			// manga, and the rail is the app talking about itself while they are trying to read.
-			if (!navigator.isImmersive) NavigationRail(navigator)
-			Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-				Column(Modifier.fillMaxSize()) {
-					when (val destination = navigator.current) {
-						Destination.Library -> {
-							val state by libraryViewModel.state.collectAsState()
-							val headers by libraryViewModel.imageHeaders.collectAsState()
-							LibraryScreen(
-								state = state,
-								imageHeaders = headers,
-								onOpenManga = navigator::openManga,
-								onContinue = { continueViewModel.open(it.mangaId) },
-								onSeeAllContinue = navigator::openContinue,
-								onSelectCategory = libraryViewModel::selectCategory,
-								onSearch = libraryViewModel::search,
-								onSort = libraryViewModel::setSort,
-								onNeedHeaders = libraryViewModel::ensureHeaders,
-								onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
-								searchFocus = searchFocus,
-							)
-						}
+		// The reader takes the whole window. Chrome around a page is chrome over somebody's manga,
+		// and both the navigation and the backdrop are the app talking about itself while they are
+		// trying to read -- cover art behind a page would be the tinted-wash mistake rule 8 exists
+		// to prevent, one layer further back. One check suppresses both.
+		if (!navigator.isImmersive) {
+			AgehaBackdrop(
+				coverUrl = backdropCover,
+				imageHeaders = backdropHeaders,
+				modifier = Modifier.fillMaxSize(),
+			) {}
+		}
+		Column(
+			Modifier
+				.fillMaxSize()
+				// The navigation floats over the content rather than beside it, so the content has
+				// to be told to start below it. Without this the first row of every screen sits
+				// under the pill, which looks like a layout bug rather than like a layer.
+				.padding(top = if (navigator.isImmersive) 0.dp else NAV_CLEARANCE),
+		) {
+			when (val destination = navigator.current) {
+				Destination.Library -> {
+					val state by libraryViewModel.state.collectAsState()
+					val headers by libraryViewModel.imageHeaders.collectAsState()
+					LibraryScreen(
+						state = state,
+						imageHeaders = headers,
+						onOpenManga = navigator::openManga,
+						onContinue = { continueViewModel.open(it.mangaId) },
+						onSeeAllContinue = navigator::openContinue,
+						onSelectCategory = libraryViewModel::selectCategory,
+						onSearch = libraryViewModel::search,
+						onSort = libraryViewModel::setSort,
+						onNeedHeaders = libraryViewModel::ensureHeaders,
+						onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
+						searchFocus = searchFocus,
+					)
+				}
 
-						Destination.Continue -> {
-							val state by continueViewModel.state.collectAsState()
-							val headers by continueViewModel.imageHeaders.collectAsState()
-							ContinueScreen(
-								state = state,
-								imageHeaders = headers,
-								onOpen = { continueViewModel.open(it.mangaId) },
-								onSearch = continueViewModel::search,
-								onRemove = continueViewModel::remove,
-								onFindElsewhere = { entry ->
-									navigator.searchAllSources(entry.manga.title, subject = entry.manga.title)
-								},
-								onNeedHeaders = continueViewModel::ensureHeaders,
-								onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
-								searchFocus = searchFocus,
-							)
-						}
+				Destination.Continue -> {
+					val state by continueViewModel.state.collectAsState()
+					val headers by continueViewModel.imageHeaders.collectAsState()
+					ContinueScreen(
+						state = state,
+						imageHeaders = headers,
+						onOpen = { continueViewModel.open(it.mangaId) },
+						onSearch = continueViewModel::search,
+						onRemove = continueViewModel::remove,
+						onFindElsewhere = { entry ->
+							navigator.searchAllSources(entry.manga.title, subject = entry.manga.title)
+						},
+						onNeedHeaders = continueViewModel::ensureHeaders,
+						onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
+						searchFocus = searchFocus,
+					)
+				}
 
-						is Destination.SearchAll -> {
-							LaunchedEffect(destination.query, destination.subject) {
-								globalSearchViewModel.search(destination.query, destination.subject)
+				is Destination.SearchAll -> {
+					LaunchedEffect(destination.query, destination.subject) {
+						globalSearchViewModel.search(destination.query, destination.subject)
+					}
+					val state by globalSearchViewModel.state.collectAsState()
+					val headers by libraryViewModel.imageHeaders.collectAsState()
+					Column(Modifier.fillMaxSize()) {
+						BreadcrumbBar(navigator, "Search all sources")
+						GlobalSearchScreen(
+							state = state,
+							imageHeaders = headers,
+							onQuery = globalSearchViewModel::setQuery,
+							onSubmit = { globalSearchViewModel.search(state.query, state.subject) },
+							onOpenManga = navigator::openManga,
+							onOpenSource = navigator::openSource,
+							onNeedHeaders = libraryViewModel::ensureHeaders,
+							searchFocus = searchFocus,
+						)
+					}
+				}
+
+				Destination.Downloads -> {
+					val queued by downloadQueue.jobs.collectAsState()
+					DownloadsScreen(
+						jobs = queued,
+						onCancel = downloadQueue::cancel,
+						onRetry = downloadQueue::retry,
+						onCancelAll = downloadQueue::cancelAll,
+						onClearFinished = downloadQueue::clearFinished,
+					)
+				}
+
+				Destination.Settings -> {
+					val parsersState by parsersViewModel.state.collectAsState()
+					val syncState by syncViewModel.state.collectAsState()
+					// The count comes from the same live list Continue Reading draws, so the
+					// confirm button cannot offer to clear a number that is no longer true.
+					val continueState by continueViewModel.state.collectAsState()
+					SettingsScreen(
+						theme = preferences.theme,
+						readerBackground = preferences.readerBackground,
+						doublePage = preferences.doublePage,
+						coverOffset = preferences.coverOffset,
+						parsers = parsersState,
+						jsRuntime = application.jsRuntime,
+						parsersDescription = parsersViewModel::describe,
+						onTheme = { onPreferencesChange(preferences.copy(theme = it)) },
+						onReaderBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+						onDoublePage = { onPreferencesChange(preferences.copy(doublePage = it)) },
+						onCoverOffset = { onPreferencesChange(preferences.copy(coverOffset = it)) },
+						onUpdatePolicy = parsersViewModel::setPolicy,
+						onCheckForUpdate = parsersViewModel::checkForUpdate,
+						onRollBack = parsersViewModel::rollBack,
+						onPin = parsersViewModel::pin,
+						onImportBackup = onImportBackup,
+						onExportBackup = onExportBackup,
+						appUpdates = AppUpdatesUiState(
+							policy = preferences.appUpdatePolicy,
+							currentVersion = AgehaVersion.NAME,
+							isChecking = appUpdateChecking,
+							lastResult = appUpdateResult,
+						),
+						onAppUpdatePolicy = { onPreferencesChange(preferences.copy(appUpdatePolicy = it)) },
+						onCheckForAppUpdate = {
+							appUpdateChecking = true
+							appUpdateResult = null
+							scope.launch {
+								appUpdateResult = application.appUpdates.check().describe()
+								appUpdateChecking = false
 							}
-							val state by globalSearchViewModel.state.collectAsState()
-							val headers by libraryViewModel.imageHeaders.collectAsState()
-							Column(Modifier.fillMaxSize()) {
-								BreadcrumbBar(navigator, "Search all sources")
-								GlobalSearchScreen(
-									state = state,
-									imageHeaders = headers,
-									onQuery = globalSearchViewModel::setQuery,
-									onSubmit = { globalSearchViewModel.search(state.query, state.subject) },
-									onOpenManga = navigator::openManga,
-									onOpenSource = navigator::openSource,
-									onNeedHeaders = libraryViewModel::ensureHeaders,
-									searchFocus = searchFocus,
+						},
+						sync = syncState,
+						onSignIn = syncViewModel::signIn,
+						onSignOut = syncViewModel::signOut,
+						onSyncNow = syncViewModel::syncNow,
+						onSyncOnStart = syncViewModel::setSyncOnStart,
+						initialSection = initialSettingsSection,
+						onClearHistory = {
+							scope.launch {
+								val cleared = application.history.clearAll()
+								application.notices.post(
+									"Reading history cleared",
+									"$cleared entries removed. Your library, favourites and " +
+										"downloads are untouched.",
 								)
 							}
-						}
+						},
+						historyCount = continueState.totalCount,
+						hideBrokenSources = preferences.hideBrokenSources,
+						showAdultSources = preferences.showAdultSources,
+						onHideBrokenSources = {
+							exploreViewModel.setHideBroken(it)
+							onPreferencesChange(preferences.copy(hideBrokenSources = it))
+						},
+						onShowAdultSources = {
+							exploreViewModel.setShowAdult(it)
+							onPreferencesChange(preferences.copy(showAdultSources = it))
+						},
+					)
+				}
 
-						Destination.Downloads -> {
-							val queued by downloadQueue.jobs.collectAsState()
-							DownloadsScreen(
-								jobs = queued,
-								onCancel = downloadQueue::cancel,
-								onRetry = downloadQueue::retry,
-								onCancelAll = downloadQueue::cancelAll,
-								onClearFinished = downloadQueue::clearFinished,
-							)
-						}
+				Destination.Sources -> {
+					val state by exploreViewModel.state.collectAsState()
+					SourcePickerScreen(
+						state = state,
+						onOpenSource = navigator::openSource,
+						onSearch = exploreViewModel::search,
+						onFilter = exploreViewModel::setFilter,
+						onLocale = exploreViewModel::setLocale,
+						onHideBroken = exploreViewModel::setHideBroken,
+						onShowAdult = exploreViewModel::setShowAdult,
+						onSetEnabled = exploreViewModel::setEnabled,
+						searchFocus = searchFocus,
+					)
+				}
 
-						Destination.Settings -> {
-							val parsersState by parsersViewModel.state.collectAsState()
-							val syncState by syncViewModel.state.collectAsState()
-							// The count comes from the same live list Continue Reading draws, so the
-							// confirm button cannot offer to clear a number that is no longer true.
-							val continueState by continueViewModel.state.collectAsState()
-							SettingsScreen(
-								theme = preferences.theme,
-								readerBackground = preferences.readerBackground,
-								doublePage = preferences.doublePage,
-								coverOffset = preferences.coverOffset,
-								parsers = parsersState,
-								jsRuntime = application.jsRuntime,
-								parsersDescription = parsersViewModel::describe,
-								onTheme = { onPreferencesChange(preferences.copy(theme = it)) },
-								onReaderBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
-								onDoublePage = { onPreferencesChange(preferences.copy(doublePage = it)) },
-								onCoverOffset = { onPreferencesChange(preferences.copy(coverOffset = it)) },
-								onUpdatePolicy = parsersViewModel::setPolicy,
-								onCheckForUpdate = parsersViewModel::checkForUpdate,
-								onRollBack = parsersViewModel::rollBack,
-								onPin = parsersViewModel::pin,
-								onImportBackup = onImportBackup,
-								onExportBackup = onExportBackup,
-								appUpdates = AppUpdatesUiState(
-									policy = preferences.appUpdatePolicy,
-									currentVersion = AgehaVersion.NAME,
-									isChecking = appUpdateChecking,
-									lastResult = appUpdateResult,
-								),
-								onAppUpdatePolicy = { onPreferencesChange(preferences.copy(appUpdatePolicy = it)) },
-								onCheckForAppUpdate = {
-									appUpdateChecking = true
-									appUpdateResult = null
-									scope.launch {
-										appUpdateResult = application.appUpdates.check().describe()
-										appUpdateChecking = false
+				is Destination.Browse -> {
+					// Keyed on the source name so switching sources restarts the listing
+					// rather than appending one source's results to another's.
+					LaunchedEffect(destination.sourceName) { browseViewModel.open(destination.sourceName) }
+					val state by browseViewModel.state.collectAsState()
+					Column(Modifier.fillMaxSize()) {
+						BreadcrumbBar(navigator, state.sourceTitle)
+						BrowseScreen(
+							state = state,
+							onOpenManga = navigator::openManga,
+							onSort = browseViewModel::setSort,
+							onSearch = browseViewModel::search,
+							onSubmitSearch = browseViewModel::submitSearch,
+							onLoadMore = { browseViewModel.loadMore() },
+							onRetry = browseViewModel::retry,
+							searchFocus = searchFocus,
+						)
+					}
+				}
+
+				is Destination.Read -> {
+					LaunchedEffect(destination.chapter.id, destination.startPage) {
+						readerViewModel.open(
+							destination.manga,
+							destination.chapter,
+							destination.startPage,
+						)
+					}
+					val state by readerViewModel.state.collectAsState()
+					// The reader owns the keyboard while it is open. Registering the handler
+					// here rather than in the window means the bindings live with the screen
+					// that defines them, and unregister themselves when it goes away.
+					androidx.compose.runtime.DisposableEffect(state.mode, state.pageCount) {
+						keyRouter.install { event ->
+							ReaderKeys.handle(
+								event = event,
+								mode = state.mode,
+								pageCount = state.pageCount,
+								actions = object : ReaderActions {
+									override fun nextPage() = readerViewModel.nextPage()
+									override fun previousPage() = readerViewModel.previousPage()
+									override fun nextChapter() = readerViewModel.nextChapter()
+									override fun previousChapter() = readerViewModel.previousChapter()
+									override fun goToPage(index: Int) = readerViewModel.goToPage(index)
+									override fun setScale(scale: app.ageha.core.model.PageScale) =
+										readerViewModel.setScale(scale)
+									override fun toggleChrome() = readerViewModel.toggleChrome()
+									override fun toggleFullscreen() = onToggleFullscreen()
+									override fun close() {
+										navigator.back()
 									}
 								},
-								sync = syncState,
-								onSignIn = syncViewModel::signIn,
-								onSignOut = syncViewModel::signOut,
-								onSyncNow = syncViewModel::syncNow,
-								onSyncOnStart = syncViewModel::setSyncOnStart,
-								initialSection = initialSettingsSection,
-								onClearHistory = {
-									scope.launch {
-										val cleared = application.history.clearAll()
-										application.notices.post(
-											"Reading history cleared",
-											"$cleared entries removed. Your library, favourites and " +
-												"downloads are untouched.",
-										)
-									}
-								},
-								historyCount = continueState.totalCount,
 							)
 						}
+						onDispose { keyRouter.clear() }
+					}
+					// Flush the position when the reader goes away. The debounce that keeps
+					// page turns from being one write each would otherwise lose the last one.
+					androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
+						onDispose { readerViewModel.savePositionNow() }
+					}
+					ReaderScreen(
+						state = state,
+						background = preferences.readerBackground,
+						doublePage = preferences.doublePage,
+						coverOffset = preferences.coverOffset,
+						onPageChange = readerViewModel::goToPage,
+						onScroll = readerViewModel::recordScroll,
+						onNextPage = readerViewModel::nextPage,
+						onPreviousPage = readerViewModel::previousPage,
+						onSetMode = readerViewModel::setMode,
+						onSetScale = readerViewModel::setScale,
+						onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
+						onToggleDoublePage = {
+							onPreferencesChange(preferences.copy(doublePage = !preferences.doublePage))
+						},
+						onToggleCoverOffset = {
+							onPreferencesChange(preferences.copy(coverOffset = !preferences.coverOffset))
+						},
+						onToggleChrome = readerViewModel::toggleChrome,
+						onRetry = readerViewModel::retry,
+						onClose = { navigator.back() },
+						webtoonZoom = preferences.webtoonZoom,
+						onSetWebtoonZoom = {
+							onPreferencesChange(preferences.copy(webtoonZoom = it))
+						},
+						// Auto-hide moved into the reader, because the signals it needs --
+						// pointer movement, and the pointer being over the bar itself --
+						// only exist down there. Driving it from here meant the timer knew
+						// about page turns and nothing else.
+						onHideChrome = { readerViewModel.setChromeVisible(false) },
+					)
+				}
 
-						Destination.Sources -> {
-							val state by exploreViewModel.state.collectAsState()
-							SourcePickerScreen(
-								state = state,
-								onOpenSource = navigator::openSource,
-								onSearch = exploreViewModel::search,
-								onFilter = exploreViewModel::setFilter,
-								onLocale = exploreViewModel::setLocale,
-								onSetEnabled = exploreViewModel::setEnabled,
-								searchFocus = searchFocus,
-							)
-						}
-
-						is Destination.Browse -> {
-							// Keyed on the source name so switching sources restarts the listing
-							// rather than appending one source's results to another's.
-							LaunchedEffect(destination.sourceName) { browseViewModel.open(destination.sourceName) }
-							val state by browseViewModel.state.collectAsState()
-							Column(Modifier.fillMaxSize()) {
-								BreadcrumbBar(navigator, state.sourceTitle)
-								BrowseScreen(
-									state = state,
-									onOpenManga = navigator::openManga,
-									onSort = browseViewModel::setSort,
-									onSearch = browseViewModel::search,
-									onSubmitSearch = browseViewModel::submitSearch,
-									onLoadMore = { browseViewModel.loadMore() },
-									onRetry = browseViewModel::retry,
-									searchFocus = searchFocus,
-								)
-							}
-						}
-
-						is Destination.Read -> {
-							LaunchedEffect(destination.chapter.id, destination.startPage) {
-								readerViewModel.open(
-									destination.manga,
-									destination.chapter,
-									destination.startPage,
-								)
-							}
-							val state by readerViewModel.state.collectAsState()
-							// The reader owns the keyboard while it is open. Registering the handler
-							// here rather than in the window means the bindings live with the screen
-							// that defines them, and unregister themselves when it goes away.
-							androidx.compose.runtime.DisposableEffect(state.mode, state.pageCount) {
-								keyRouter.install { event ->
-									ReaderKeys.handle(
-										event = event,
-										mode = state.mode,
-										pageCount = state.pageCount,
-										actions = object : ReaderActions {
-											override fun nextPage() = readerViewModel.nextPage()
-											override fun previousPage() = readerViewModel.previousPage()
-											override fun nextChapter() = readerViewModel.nextChapter()
-											override fun previousChapter() = readerViewModel.previousChapter()
-											override fun goToPage(index: Int) = readerViewModel.goToPage(index)
-											override fun setScale(scale: app.ageha.core.model.PageScale) =
-												readerViewModel.setScale(scale)
-											override fun toggleChrome() = readerViewModel.toggleChrome()
-											override fun toggleFullscreen() = onToggleFullscreen()
-											override fun close() {
-												navigator.back()
-											}
-										},
-									)
-								}
-								onDispose { keyRouter.clear() }
-							}
-							// Flush the position when the reader goes away. The debounce that keeps
-							// page turns from being one write each would otherwise lose the last one.
-							androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
-								onDispose { readerViewModel.savePositionNow() }
-							}
-							ReaderScreen(
-								state = state,
-								background = preferences.readerBackground,
-								doublePage = preferences.doublePage,
-								coverOffset = preferences.coverOffset,
-								onPageChange = readerViewModel::goToPage,
-								onScroll = readerViewModel::recordScroll,
-								onNextPage = readerViewModel::nextPage,
-								onPreviousPage = readerViewModel::previousPage,
-								onSetMode = readerViewModel::setMode,
-								onSetScale = readerViewModel::setScale,
-								onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
-								onToggleDoublePage = {
-									onPreferencesChange(preferences.copy(doublePage = !preferences.doublePage))
-								},
-								onToggleCoverOffset = {
-									onPreferencesChange(preferences.copy(coverOffset = !preferences.coverOffset))
-								},
-								onToggleChrome = readerViewModel::toggleChrome,
-								onRetry = readerViewModel::retry,
-								onClose = { navigator.back() },
-								webtoonZoom = preferences.webtoonZoom,
-								onSetWebtoonZoom = {
-									onPreferencesChange(preferences.copy(webtoonZoom = it))
-								},
-								// Auto-hide moved into the reader, because the signals it needs --
-								// pointer movement, and the pointer being over the bar itself --
-								// only exist down there. Driving it from here meant the timer knew
-								// about page turns and nothing else.
-								onHideChrome = { readerViewModel.setChromeVisible(false) },
-							)
-						}
-
-						is Destination.Details -> {
-							LaunchedEffect(destination.manga.id, destination.manga.sourceName) {
-								detailsViewModel.open(destination.manga)
-							}
-							val state by detailsViewModel.state.collectAsState()
-							Column(Modifier.fillMaxSize()) {
-								BreadcrumbBar(navigator, state.manga?.title ?: destination.manga.title)
-								DetailsScreen(
-									state = state,
-									onOpenChapter = { chapter ->
-										state.manga?.let { navigator.read(it, chapter) }
-									},
-									onDownloadChapter = { chapter ->
-										state.manga?.let { downloadQueue.enqueue(it, listOf(chapter)) }
-									},
-									onDownloadAll = {
-										state.manga?.let { downloadQueue.enqueue(it, state.chapters) }
-									},
-									onToggleCategory = detailsViewModel::toggleCategory,
-									onAddToLibrary = detailsViewModel::addToDefaultCategory,
-									onRemoveFromLibrary = detailsViewModel::removeFromLibrary,
-									onSelectBranch = detailsViewModel::selectBranch,
-									onRetry = detailsViewModel::retry,
-								)
-							}
-						}
+				is Destination.Details -> {
+					LaunchedEffect(destination.manga.id, destination.manga.sourceName) {
+						detailsViewModel.open(destination.manga)
+					}
+					val state by detailsViewModel.state.collectAsState()
+					Column(Modifier.fillMaxSize()) {
+						BreadcrumbBar(navigator, state.manga?.title ?: destination.manga.title)
+						DetailsScreen(
+							state = state,
+							onOpenChapter = { chapter ->
+								state.manga?.let { navigator.read(it, chapter) }
+							},
+							onDownloadChapter = { chapter ->
+								state.manga?.let { downloadQueue.enqueue(it, listOf(chapter)) }
+							},
+							onDownloadAll = {
+								state.manga?.let { downloadQueue.enqueue(it, state.chapters) }
+							},
+							onToggleCategory = detailsViewModel::toggleCategory,
+							onAddToLibrary = detailsViewModel::addToDefaultCategory,
+							onRemoveFromLibrary = detailsViewModel::removeFromLibrary,
+							onSelectBranch = detailsViewModel::selectBranch,
+							onRetry = detailsViewModel::retry,
+						)
 					}
 				}
 			}
+		}
+
+		if (!navigator.isImmersive) {
+			FloatingNav(navigator, Modifier.align(Alignment.TopCenter))
 		}
 
 		NoticeOverlay(
@@ -462,51 +527,69 @@ fun AgehaShell(
 }
 
 /**
- * The navigation rail.
+ * The floating navigation.
  *
- * The seal sits at the top as the app's mark. This is one of the places brand colour belongs --
- * navigation and library chrome, never the reader.
+ * A pill over the backdrop rather than a rail beside it. The rail spent 84dp of a desktop window's
+ * width permanently, on five words that never change, in an app whose signature view is a grid of
+ * covers that wants every pixel of that width. Floating it costs nothing horizontally and puts the
+ * seal and the sections in the place the eye already goes first.
+ *
+ * The rail could afford to print each section's keyboard shortcut under its label. A pill cannot,
+ * and deleting them would quietly remove the only place the shortcuts were discoverable -- so they
+ * move into tooltips instead. On a desktop the rail is the discoverable path and the shortcut is
+ * the one people actually use, which makes losing them worse than losing the rail.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NavigationRail(navigator: Navigator) {
-	Column(
-		Modifier
-			.width(84.dp)
-			.fillMaxHeight()
-			.background(MaterialTheme.colorScheme.surfaceContainer)
-			.padding(vertical = AgehaSpacing.md),
-		horizontalAlignment = Alignment.CenterHorizontally,
-		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+private fun FloatingNav(navigator: Navigator, modifier: Modifier = Modifier) {
+	Row(
+		modifier
+			.padding(top = AgehaSpacing.md)
+			.glassSurface(AgehaGlass.PillShape, GlassTone.CHROME)
+			.padding(horizontal = AgehaSpacing.sm, vertical = AgehaSpacing.xs),
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xxs),
+		verticalAlignment = Alignment.CenterVertically,
 	) {
+		// One of the places brand colour belongs -- navigation and library chrome, never the reader.
 		androidx.compose.foundation.Image(
 			painter = BrandAssets.painter("icon-64.png"),
 			contentDescription = "Ageha",
-			modifier = Modifier.size(32.dp).padding(bottom = AgehaSpacing.xs),
+			modifier = Modifier.size(20.dp).padding(end = AgehaSpacing.xs),
 		)
-		Spacer(Modifier.height(AgehaSpacing.sm))
 		for (section in Section.entries) {
-			RailItem(
-				label = section.label,
-				hint = section.shortcutHint,
-				isSelected = navigator.section == section,
-				onClick = { navigator.switchTo(section) },
-			)
+			TooltipArea(tooltip = { ShortcutTooltip(section) }) {
+				NavPillItem(
+					label = section.label,
+					isSelected = navigator.section == section,
+					onClick = { navigator.switchTo(section) },
+				)
+			}
 		}
 	}
 }
 
+/** The shortcut hint the rail used to print under every label. */
 @Composable
-private fun RailItem(label: String, hint: String, isSelected: Boolean, onClick: () -> Unit) {
-	Column(
+private fun ShortcutTooltip(section: Section) {
+	Box(Modifier.glassSurface(MaterialTheme.shapes.small, GlassTone.RAISED).padding(AgehaSpacing.sm)) {
+		Text(
+			"${section.label} - ${section.shortcutHint}",
+			style = AgehaTextStyles.metadata,
+			color = MaterialTheme.colorScheme.onSurface,
+		)
+	}
+}
+
+@Composable
+private fun NavPillItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+	Box(
 		Modifier
-			.width(72.dp)
-			.clip(MaterialTheme.shapes.small)
+			.clip(AgehaGlass.PillShape)
 			.background(
 				if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
 			)
 			.clickable(onClick = onClick)
-			.padding(vertical = AgehaSpacing.sm),
-		horizontalAlignment = Alignment.CenterHorizontally,
+			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
 	) {
 		Text(
 			label,
@@ -517,9 +600,17 @@ private fun RailItem(label: String, hint: String, isSelected: Boolean, onClick: 
 				MaterialTheme.colorScheme.onSurfaceVariant
 			},
 		)
-		Text(hint, style = AgehaTextStyles.metadata, color = MaterialTheme.colorScheme.onSurfaceVariant)
 	}
 }
+
+/**
+ * How much room the floating navigation needs above the content.
+ *
+ * The pill's own height plus the gap it floats in. Hard-coded rather than measured because the
+ * alternative is a layout pass that exists only to tell the content what it already knows, and
+ * this number changes exactly when someone changes the pill.
+ */
+private val NAV_CLEARANCE = 64.dp
 
 /**
  * Where you are, and the way back.
@@ -529,12 +620,8 @@ private fun RailItem(label: String, hint: String, isSelected: Boolean, onClick: 
  */
 @Composable
 private fun BreadcrumbBar(navigator: Navigator, title: String) {
-	Row(
-		Modifier
-			.fillMaxWidth()
-			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	GlassBar(
+		contentPadding = PaddingValues(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
 	) {
 		if (navigator.canGoBack) {
 			Text(

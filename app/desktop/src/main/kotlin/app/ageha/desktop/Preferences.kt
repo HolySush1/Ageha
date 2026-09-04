@@ -62,6 +62,31 @@ data class Preferences(
 	 * on all three platforms and exposes no runtime switch. See [AppUpdatePolicy].
 	 */
 	val appUpdatePolicy: AppUpdatePolicy = AppUpdatePolicy.AUTOMATIC,
+	/**
+	 * Whether the source picker hides sources upstream has flagged broken.
+	 *
+	 * On by default. A broken source cannot return anything, so leaving thirty of them scattered
+	 * through a list of 1360 costs the user attention for no possible gain -- and the
+	 * "Known broken" view is still there for the one case where they matter, which is working out
+	 * why a source that used to work no longer does.
+	 */
+	val hideBrokenSources: Boolean = true,
+	/**
+	 * Whether the source picker shows adult sources.
+	 *
+	 * Off by default, and this is the direction the default has to point. Ageha opens on a desktop
+	 * that may be in an office or a shared room, and a catalogue that volunteers pornography to
+	 * someone scrolling for a manga source is a much worse failure than one that makes an
+	 * interested user find a switch. The switch is one click away in the picker's filter menu and
+	 * again in Settings.
+	 *
+	 * This governs *visibility in the picker*, not capability: a source the user has deliberately
+	 * enabled keeps working everywhere, global search included. Suppressing results from a source
+	 * the user turned on would make it look broken rather than filtered.
+	 */
+	val showAdultSources: Boolean = false,
+	/** The picker's language filter, as an upstream tag. Null means every language. */
+	val sourceLanguage: String? = null,
 )
 
 /**

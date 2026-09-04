@@ -122,6 +122,21 @@ enum class AgehaContentType {
 	OTHER,
 	;
 
+	/**
+	 * Whether a source carrying this type is an adult source.
+	 *
+	 * Deliberately `HENTAI` alone, mirroring upstream exactly: the parsers library's own
+	 * `AbstractMangaParser.isNsfwSource` is `source.contentType == ContentType.HENTAI`, and
+	 * agreeing with it is the only way this stays correct as sources are added upstream.
+	 *
+	 * The temptation is to widen it to DOUJINSHI, IMAGE_SET, ARTIST_CG and GAME_CG, which *sound*
+	 * adult. They are not source types in practice -- they appear in a source's list of available
+	 * filter categories, so a general catalogue that happens to carry a doujinshi section would be
+	 * caught by the wider rule. Hiding a legitimate source is the worse error of the two: a user
+	 * hunting a source that Ageha has silently withheld has no way to discover why.
+	 */
+	val isAdult: Boolean get() = this == HENTAI
+
 	companion object {
 		fun of(name: String?): AgehaContentType =
 			name?.let { n -> entries.firstOrNull { it.name == n } } ?: OTHER

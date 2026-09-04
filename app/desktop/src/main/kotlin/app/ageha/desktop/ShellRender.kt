@@ -60,7 +60,13 @@ fun main(args: Array<String>) {
 		renderSettingsPanels(app, outDir)
 		renderSearchAll(app, outDir)
 		renderReader(app, outDir)
-		println("sources visible to the UI: ${app.sources.allDescriptors().size}")
+		val descriptors = app.sources.allDescriptors()
+		println("sources visible to the UI: ${descriptors.size}")
+		// The picker hides both of these by default, so a build where either count collapses to zero
+		// is a build where the classification stopped working -- and the symptom of *that* is adult
+		// sources appearing in a catalogue that promises it is hiding them.
+		println("  adult (18+): ${descriptors.count { it.isAdult }}")
+		println("  known broken: ${descriptors.count { it.isBroken }}")
 	} finally {
 		app.close()
 	}

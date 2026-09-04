@@ -91,6 +91,11 @@ fun SettingsScreen(
 	onSyncOnStart: (Boolean) -> Unit,
 	onClearHistory: () -> Unit,
 	historyCount: Int,
+	/** The source picker's filters, mirrored here because this is where people look for them. */
+	hideBrokenSources: Boolean,
+	showAdultSources: Boolean,
+	onHideBrokenSources: (Boolean) -> Unit,
+	onShowAdultSources: (Boolean) -> Unit,
 	modifier: Modifier = Modifier,
 	/**
 	 * Which panel opens first.
@@ -128,6 +133,8 @@ fun SettingsScreen(
 					parsers, jsRuntime, parsersDescription,
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
 					appUpdates, onAppUpdatePolicy, onCheckForAppUpdate,
+					hideBrokenSources, showAdultSources,
+					onHideBrokenSources, onShowAdultSources,
 				)
 				SettingsSection.LIBRARY -> LibraryPanel(
 					onImportBackup, onExportBackup, onClearHistory, historyCount,
@@ -273,6 +280,10 @@ private fun ParsersPanel(
 	appUpdates: AppUpdatesUiState,
 	onAppUpdatePolicy: (AppUpdatePolicy) -> Unit,
 	onCheckForAppUpdate: () -> Unit,
+	hideBrokenSources: Boolean,
+	showAdultSources: Boolean,
+	onHideBrokenSources: (Boolean) -> Unit,
+	onShowAdultSources: (Boolean) -> Unit,
 ) {
 	PanelTitle("Sources and updates")
 	Explain(
@@ -280,6 +291,26 @@ private fun ParsersPanel(
 			"independently of the app. Sites change constantly, so this is the update that " +
 			"matters most -- and it does not need a new version of Ageha.",
 	)
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	Text("What the source list shows", style = MaterialTheme.typography.titleMedium)
+	Explain(
+		"The same two switches live in the source picker's filter menu. They change what the " +
+			"catalogue offers you, not what Ageha can do: a source you have already turned on " +
+			"keeps working everywhere, including search across every source.",
+	)
+	Row(verticalAlignment = Alignment.CenterVertically) {
+		Switch(checked = hideBrokenSources, onCheckedChange = onHideBrokenSources)
+		Text("Hide sources known to be broken", Modifier.padding(start = AgehaSpacing.sm))
+	}
+	Row(verticalAlignment = Alignment.CenterVertically) {
+		Switch(checked = showAdultSources, onCheckedChange = onShowAdultSources)
+		Text("Show 18+ sources", Modifier.padding(start = AgehaSpacing.sm))
+	}
+	Explain(
+		"Adult sources are hidden until you ask for them. The source list always says how many " +
+			"it is holding back, so a filter never looks like a missing source.",
+	)
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	SelectionContainer {
 		Column {
 			Text("Active build: ${state.activeVersion}", style = AgehaTextStyles.readerHud)

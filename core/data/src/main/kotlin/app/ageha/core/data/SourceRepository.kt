@@ -6,6 +6,7 @@ import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.model.AgehaContentType
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.source.MangaSourceRegistry
+import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -111,6 +112,14 @@ class SourceRepository(
 		query: String,
 		locale: String? = null,
 		contentType: AgehaContentType? = null,
+		/**
+		 * Whether adult sources are included. Off by default so that every caller which has not
+		 * thought about it gets the safe answer -- the failure mode of the opposite default is a
+		 * screen full of pornography on somebody's work laptop.
+		 */
+		includeAdult: Boolean = false,
+		/** Whether sources upstream has flagged broken are included. */
+		includeBroken: Boolean = true,
 	): List<SourceListing> {
 		val needle = query.trim().lowercase()
 		return listings.filter { listing ->
@@ -118,11 +127,40 @@ class SourceRepository(
 			(needle.isEmpty() || descriptor.title.lowercase().contains(needle) ||
 				descriptor.name.lowercase().contains(needle)) &&
 				(locale == null || descriptor.locale == locale) &&
-				(contentType == null || descriptor.contentType == contentType)
+				(contentType == null || descriptor.contentType == contentType) &&
+				(includeAdult || !descriptor.isAdult) &&
+				(includeBroken || !descriptor.isBroken)
 		}
 	}
 
-	/** The locales present in the catalogue, for the picker's filter. */
-	fun availableLocales(): List<String> =
-		registry.availableSources().mapNotNull { it.locale }.distinct().sorted()
+	/**
+	 * The languages present in [listings], with how many sources each has.
+	 *
+	 * Takes the list rather than reading the whole catalogue so the counts describe what the user
+	 * can actually reach: with adult sources hidden, offering "Japanese (94)" and then showing
+	 * eleven of them is a menu that lies. Callers pass the set *before* locale filtering, since a
+	 * language menu filtered by the selected language would only ever offer one entry.
+	 *
+	 * Display names come from the JDK rather than a table of our own. `Locale.forLanguageTag`
+	 * returns a locale with an empty display language for a tag it does not recognise, and upstream
+	 * tags are not guaranteed to be well formed, so an unrecognised tag falls back to showing the
+	 * tag itself rather than a blank row.
+	 */
+	fun availableLocales(listings: List<SourceListing>): List<LocaleOption> = listings
+		.mapNotNull { it.descriptor.locale }
+		.groupingBy { it }
+		.eachCount()
+		.map { (tag, count) -> LocaleOption(tag = tag, displayName = displayLanguage(tag), count = count) }
+		.sortedBy { it.displayName.lowercase() }
+
+	private fun displayLanguage(tag: String): String =
+		Locale.forLanguageTag(tag).getDisplayLanguage(Locale.ENGLISH).ifEmpty { tag.uppercase() }
 }
+
+/** One language the catalogue offers, as the picker's menu needs to show it. */
+data class LocaleOption(
+	/** The upstream tag. The only part that is persisted or compared; the rest is presentation. */
+	val tag: String,
+	val displayName: String,
+	val count: Int,
+)

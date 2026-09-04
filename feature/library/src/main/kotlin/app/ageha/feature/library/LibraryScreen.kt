@@ -123,8 +123,20 @@ private fun LibraryContent(
 		// Hidden while filtering: the shelf is ordered by when you last read, so leaving it above
 		// a filtered grid shows results that do not match the query the user just typed.
 		if (state.recent.isNotEmpty() && state.query.isEmpty()) {
+			val newest = state.recent.first()
+			ContinueHero(
+				entry = newest,
+				imageHeaders = imageHeaders[newest.manga.sourceName].orEmpty(),
+				onOpen = { onContinue(newest) },
+				modifier = Modifier.padding(
+					horizontal = AgehaSpacing.md,
+					vertical = AgehaSpacing.sm,
+				),
+			)
+			// The hero already carries the newest entry, so the shelf starts at the second. Showing
+			// it twice, at two sizes, one above the other, reads as a rendering fault.
 			ContinueShelf(
-				entries = state.recent,
+				entries = state.recent.drop(1),
 				imageHeaders = imageHeaders,
 				onOpen = onContinue,
 				onSeeAll = onSeeAllContinue,

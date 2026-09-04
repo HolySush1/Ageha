@@ -25,4 +25,13 @@ data class SourceDescriptor(
 	 * Surface it in the UI rather than letting the user discover it by failure.
 	 */
 	val isBroken: Boolean,
-)
+) {
+	/**
+	 * Whether this is an adult source, by upstream's own definition. See [AgehaContentType.isAdult].
+	 *
+	 * Derived rather than stored: it is a reading of [contentType], and a second persisted field
+	 * saying the same thing is a second field that can disagree with the first after a parsers
+	 * bump.
+	 */
+	val isAdult: Boolean get() = contentType.isAdult
+}
