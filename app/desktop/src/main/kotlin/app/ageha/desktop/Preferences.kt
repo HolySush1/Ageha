@@ -44,6 +44,15 @@ data class Preferences(
 	 */
 	val webtoonZoom: Float = 1f,
 	val window: WindowGeometry = WindowGeometry(),
+	/**
+	 * Whether the library's shelf rail is folded down to a strip of initials.
+	 *
+	 * Stored rather than kept as screen state, and that is the whole reason it is in this file: a
+	 * rail that unfolded itself on every launch is a control that does not stay where it was put,
+	 * which is worse than not having the control at all. Expanded by default -- someone who has
+	 * never seen the rail should meet it with its shelf names showing.
+	 */
+	val libraryRailCollapsed: Boolean = false,
 	val lastCategoryId: Int = -1,
 	val minimiseToTray: Boolean = false,
 	/**
