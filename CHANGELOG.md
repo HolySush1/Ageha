@@ -6,7 +6,73 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A source listing stopped after its first page.** Browsing any source showed twenty titles and
+  then nothing, however far you scrolled. The view model was correct; the bug was one composition
+  above it. `BrowseScreen` hoisted a `derivedStateOf` out of a `remember(manga.size, hasMore)` and
+  collected it from a `LaunchedEffect` keyed only on the source, so the coroutine went on observing
+  the *first* derived state forever — the one that had captured `manga.size == 0` and therefore
+  evaluated `true` permanently. `snapshotFlow` emits only on change, so it emitted once, while the
+  first page was already in flight and the request returned early, and never again.
+  - The predicate now reads the state from inside the flow through `rememberUpdatedState`, and
+    mirrors the view model's own in-flight guards, so it goes false while a page loads and true
+    again for the next one.
+  - `BrowsePagingTest` scrolls a real composition through the grid's own `ScrollToIndex` semantics
+    and fails if paging stops. Verified against the old code, where it reports exactly the symptom
+    that was reported: "2 pages before scrolling, 2 after".
+
+### Changed
+
+- **The window background is the theme now, and only the theme.** The backdrop used to be the most
+  recent Continue Reading cover, blurred and scrimmed. Three problems, each enough on its own:
+  Settings > Appearance became a half-truth when the window was tinted by whatever you last read;
+  a few-hundred-pixel cover thumbnail scaled to fill a 1280×860 window is mush that blur only
+  partly hides; and finishing a chapter re-tinted the whole application. It is now
+  `surfaceDim → surface → primaryContainer` at 35% over an opaque `surface`, and it changes when
+  the theme changes and at no other time.
+  - `AgehaGlass.BACKDROP_SCRIM` and `BACKDROP_BLUR` are gone with it. `AgehaContrastTest` no longer
+    composites glass over scrimmed black and white — it composites over the backdrop's actual
+    gradient stops, because a test asserting a stack the app no longer builds proves nothing about
+    the app. `RAISED` is still held to the harsher over-raw-artwork case, which is real: menus open
+    over the cover grid.
+- **The Continue Reading hero shows the cover instead of stretching it.** It was the cover cropped
+  to a wide band and upscaled to the window's width behind a horizontal scrim — a 2:3 portrait
+  letterboxed, at the largest size anywhere in the app, from a source-supplied thumbnail. The cover
+  is now drawn once at its own proportions, flush right, never scaled past the panel's height, and
+  the rest of the panel is filled with the cover's own average colour.
+  - `CoverAccent` averages the cover **in linear light** — averaging sRGB directly lands visibly
+    dark on the black-ink-on-white-paper covers that are most of them — then keeps the hue, clamps
+    saturation, and moves lightness onto the current theme's rail. It *measures* WCAG contrast on
+    the result and picks paper or sumi accordingly, so the panel's readability is a computed number
+    rather than a hope about the artwork.
+  - `CoverAccentTest` runs that end to end over the RGB cube in both themes — 653 cases — and holds
+    both the title and the faded metadata line to 4.5:1. The metadata line is the one that binds
+    the constants.
+  - `renderShell` now draws the hero in both themes against a real decoded cover, because the
+    neutral fallback looks entirely plausible in a screenshot and a silent extraction failure would
+    otherwise ship.
+- **The library shelf rail is glass, and it folds.** It was the last opaque panel in the window
+  after the navigation became a floating pill, and it charged a fixed 210dp for a list most people
+  change a few times a day. It is now a glass card in the same layer as the rest of the chrome,
+  collapsible to a 60dp strip of initials and counts — roughly one more column of covers on a
+  laptop. Selection is a filled pill *and* a `primary` bar down the leading edge, because collapsed
+  there is no label to read; rows answer the pointer on hover and announce themselves through
+  `selectable` with `Role.Tab`. The fold is a preference, not screen state.
+
 ### Added
+
+- **A search icon in the navigation pill: one query, every enabled source.** Cross-source search
+  existed but had exactly one way in — clicking a Continue Reading entry whose source the current
+  parsers build no longer had — which made the broadest search in the app reachable only by
+  accident, and only by people whose history had already broken. It is now a magnifier at the end
+  of the pill, a **Ctrl+Shift+F** shortcut, and a View menu item.
+  - In the pill rather than as a sixth section, because the sections are *places* and search is an
+    action taken on the place you are already in. It is pushed onto the current section's stack, so
+    Escape returns where you were.
+  - The icon carries an accessible name and a tooltip, and lights up while its results are on
+    screen — otherwise it would be the one destination you can be looking at while the navigation
+    claims you are somewhere else.
 
 - **Sorting the source catalogue out: broken, 18+ and language.** The picker had one exclusive
   three-way filter and a dropdown of raw locale tags. It now has three independent filters in a
@@ -26,19 +92,21 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   - Scope is picker *visibility*, not capability: a source you enabled keeps working everywhere,
     global search included. All three filters persist, and the two switches are mirrored in
     Settings > Sources and updates.
-- **Glass chrome, over a backdrop of your own library.** A translucent navigation pill, breadcrumb
-  and filter bars, and menus, floating over the cover of whatever you were last reading -- blurred,
-  scrimmed, with a brand-gradient fallback on a fresh installation. The 84dp navigation rail is
-  gone; the shortcuts it printed under every label moved into tooltips rather than disappearing.
-  The library screen opens on a hero for the newest Continue Reading entry.
+- **Glass chrome, over a live backdrop.** A translucent navigation pill, breadcrumb and filter
+  bars, menus and the library's shelf rail, floating over a backdrop drawn low in the stack. The
+  84dp navigation rail is gone; the shortcuts it printed under every label moved into tooltips
+  rather than disappearing. The library screen opens on a hero for the newest Continue Reading
+  entry.
   - Compose Desktop has no `backdrop-filter`, so this is the two-layer construction that predates
-    one: the artwork is blurred *once*, low in the stack, and panels are translucent fills over it.
+    one: one backdrop, drawn once and low, with translucent fills over it. Depth comes from the
+    fill, a hairline specular edge and a cast shadow.
   - The alphas are derived from WCAG AA rather than from a screenshot, which is why they are much
-    higher than the usual 10-30% glassmorphism figure. `AgehaContrastTest` composites artwork,
-    scrim and fill over pure black and pure white in all three themes on every build.
+    higher than the usual 10-30% glassmorphism figure. `AgehaContrastTest` composites fill over
+    backdrop in all three themes on every build.
   - No new colour: fills come from the scheme's container ramp. **The reader draws neither glass
-    nor backdrop** -- the same `isImmersive` check suppresses both, and cover art behind a page is
-    the tinted-wash mistake the reader rule exists to prevent.
+    nor backdrop** -- the same `isImmersive` check suppresses both.
+  - *That backdrop was originally the blurred cover of whatever you were last reading; see the
+    Changed section below for why it is now derived from the theme alone.*
 
 - **A real Windows installer, built and verified by installing it.** `./gradlew :app:desktop:packageMsi`
   produces `Ageha-<version>.msi`: a per-user install needing no administrator prompt, with a Start

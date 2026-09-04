@@ -406,43 +406,79 @@ web or for SwiftUI assumes that primitive, so none of them port.
 
 What Ageha does instead is the two-layer construction that predates backdrop filters:
 
-1. `AgehaBackdrop` draws the artwork **once**, blurred and scrimmed, low in the stack.
+1. `AgehaBackdrop` draws **one gradient**, built from the active scheme, low in the stack.
 2. Panels are translucent fills over it.
 
-The blur is real — it is applied to the backdrop image, which is the case `Modifier.blur` handles
-— it just happens once rather than per panel. Same look, a fraction of the cost.
+Depth comes from the fill, the hairline specular edge and the cast shadow — all of which
+`Modifier` can express — rather than from a per-panel blur that Compose Desktop cannot.
 
-### 8.2 The alphas come from contrast, not from a screenshot
+### 8.2 The backdrop is the theme, and nothing else
 
-The usual glassmorphism figure is 10–30% white. At that opacity, body text takes its contrast from
-whatever cover art happens to sit behind it — which is to say it has no contrast guarantee at all.
+It was not always. The first version drew the most recent Continue Reading cover here, blurred at
+48dp and scrimmed to 78% — the app as a room furnished with your own library. The idea was good and
+the execution was wrong on three counts, each sufficient on its own:
 
-`AgehaBackdrop` bounds the problem by scrimming arbitrary artwork to 78%, clamping backdrop
-luminance into a narrow band around the theme's own surface. That premise is what lets the tones
-be as transparent as they are:
+- **It made Appearance a half-truth.** Choosing Light and getting a window tinted by whatever you
+  last read is a setting that does not settle the question it claims to settle.
+- **The source material could not carry it.** Sources serve cover thumbnails a few hundred pixels
+  wide; scaled to fill a 1280×860 window they are mush, and blur disguises only so much of that
+  before the whole window looks out of focus rather than deliberately soft.
+- **The background changed when nothing the user did should have changed it.** Finishing a chapter
+  re-tinted the entire application.
+
+So the backdrop is `surfaceDim → surface → primaryContainer` at 35%, painted over an opaque
+`surface`, and it changes only when the theme does. The cover art moved to the one place it can be
+shown at the resolution it was actually published at: the Continue Reading hero (§8.4).
+
+### 8.3 The alphas come from contrast, not from a screenshot
+
+The usual glassmorphism figure is 10–30% white. At that opacity a panel takes its contrast from
+whatever happens to sit behind it — which is to say it has no contrast guarantee at all.
+
+The backdrop bounds the problem: it is three of the scheme's own tokens, so backdrop luminance sits
+within a step or two of `surface` by construction. That premise is what lets the tones be as
+transparent as they are:
 
 | Tone | Fill | Alpha | Used for |
 |---|---|---|---|
 | `CHROME` | `surfaceContainer` | 0.58 | Navigation pill, breadcrumb and filter bars |
-| `PANEL` | `surfaceContainerHigh` | 0.66 | Cards and inline panels |
+| `PANEL` | `surfaceContainerHigh` | 0.66 | Cards, inline panels, the library shelf rail |
 | `RAISED` | `surfaceContainerHighest` | 0.88 | Menus, popovers, dialogs |
 
 `RAISED` is nearly opaque because it is the one tone that floats over **content** rather than over
-the scrimmed backdrop, so it gets none of the scrim's help and must hold its own over an arbitrary
-grid of covers.
+the backdrop, so it gets none of the palette's help and must hold its own over an arbitrary grid of
+covers.
 
-`AgehaContrastTest` composites the whole stack — artwork, scrim, fill — over pure black and pure
-white in all three themes and holds the result to the same 4.5:1 floor as any other body text. It
-is the test that stops someone lowering an alpha because it looked better on one screenshot.
+`AgehaContrastTest` composites the whole stack over each of the backdrop's gradient stops in all
+three themes — and `RAISED` over pure black and pure white besides — holding every result to the
+same 4.5:1 floor as any other body text. It is the test that stops someone lowering an alpha
+because it looked better on one screenshot.
 
-### 8.3 No new colour, and not in the reader
+### 8.4 Cover colour, where the artwork can carry it
+
+The Continue Reading hero is the one component in Ageha whose colours come from an image rather
+than from the palette. `CoverAccent` samples the cover at 24×36, averages it **in linear light**
+(averaging sRGB directly lands visibly dark on the black-ink-on-white-paper covers that are most of
+them), keeps the hue, clamps saturation to 0.14–0.46, and moves lightness onto the theme's rail —
+0.20 in a dark theme, 0.84 in a light one. It then *measures* the contrast of paper and sumi
+against the result and uses whichever clears AA.
+
+The cover itself is drawn beside that fill at its own 2:3, never scaled past the panel's height.
+That is the whole difference from the banner it replaced, which cropped a portrait into a letterbox
+and upscaled a thumbnail to the width of the window.
+
+`CoverAccentTest` runs the derivation over the RGB cube in both themes and fails on any seed whose
+panel drops below 4.5:1 — including the faded metadata line, which is the number that actually
+binds the constants above.
+
+### 8.5 No new colour, and not in the reader
 
 Glass introduces no hex. Fills come from the active scheme's container ramp, so it follows light,
 dark and AMOLED for free and §2's rule holds. The only non-scheme values are the white and black
 alphas on the specular edge, which are light rather than pigment.
 
-The reader draws no backdrop and no glass. Cover art behind a page is the tinted-wash mistake §6
-exists to prevent, one layer further back — and the same `isImmersive` check suppresses both the
+The reader draws no backdrop and no glass. Brand colour behind a page is the tinted-wash mistake
+§6 exists to prevent, one layer further back — and the same `isImmersive` check suppresses both the
 navigation and the backdrop.
 
 ---

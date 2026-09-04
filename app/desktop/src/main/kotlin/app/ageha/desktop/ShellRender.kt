@@ -1,13 +1,19 @@
 package app.ageha.desktop
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import app.ageha.core.data.ContinueEntry
 import app.ageha.core.data.LocalArchive
+import app.ageha.core.designsystem.AgehaBackdrop
+import app.ageha.core.model.ArchiveUrl
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.feature.library.ContinueHero
 import app.ageha.feature.settings.SettingsSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -58,7 +64,9 @@ fun main(args: Array<String>) {
 			}
 		}
 		renderSettingsPanels(app, outDir)
+		renderCollapsedRail(app, outDir)
 		renderSearchAll(app, outDir)
+		renderContinueHero(app, outDir)
 		renderReader(app, outDir)
 		val descriptors = app.sources.allDescriptors()
 		println("sources visible to the UI: ${descriptors.size}")
@@ -115,6 +123,40 @@ private fun renderSettingsPanels(app: AgehaApplication, outDir: File) {
 }
 
 /**
+ * Renders the library with its shelf rail folded down.
+ *
+ * The collapsed rail is a different composition, not a narrower copy of the expanded one -- an
+ * initial over a count instead of a name beside one -- and it is behind a preference, which means
+ * it is only ever seen by someone who has already clicked the chevron. That is precisely the kind
+ * of state that composes wrong for a release and is found by a user rather than by CI.
+ */
+private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
+	val navigator = Navigator().apply { switchTo(Section.LIBRARY) }
+	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
+		AgehaTheme(mode = AgehaThemeMode.DARK) {
+			AgehaShell(
+				app,
+				navigator,
+				FocusRequester(),
+				Modifier.fillMaxSize(),
+				preferences = Preferences(libraryRailCollapsed = true),
+			)
+		}
+	}
+	try {
+		scene.render()
+		runBlocking { delay(RENDER_SETTLE_MS) }
+		val image = scene.render()
+		File(outDir, "shell-library-rail-collapsed.png").writeBytes(
+			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
+		)
+		println("wrote shell-library-rail-collapsed.png")
+	} finally {
+		scene.close()
+	}
+}
+
+/**
  * Renders the cross-source search, which nothing else reaches.
  *
  * It is the destination a Continue Reading entry lands on when its source has gone from the
@@ -147,6 +189,75 @@ private fun renderSearchAll(app: AgehaApplication, outDir: File) {
 		println("wrote shell-search-all.png")
 	} finally {
 		scene.close()
+	}
+}
+
+/**
+ * Renders the Continue Reading hero, in both themes, against a real cover.
+ *
+ * The hero is the one component in Ageha whose colours are computed from an *image* rather than
+ * from the palette, and it only appears when there is reading history -- which a fresh render
+ * profile does not have. So this composes it directly, on a cover built on the spot in a colour
+ * chosen to be obvious, and proves three things a unit test cannot:
+ *
+ *  - the cover ends up beside the text at its own 2:3 proportions rather than stretched across the
+ *    panel, which is the specific regression this hero was rebuilt to fix;
+ *  - `CoverAccent` gets a real decode from a real `ImageLoader` and comes back with the cover's
+ *    hue, not with the neutral fallback -- the fallback looks perfectly fine in a screenshot,
+ *    which is exactly why a silent failure here would ship;
+ *  - the same seed lands dark in the dark theme and pale in the light one.
+ */
+private fun renderContinueHero(app: AgehaApplication, outDir: File) {
+	// A saturated cover rather than the reader sample's greys: a grey cover is the one case
+	// CoverAccent deliberately leaves achromatic, so it would prove nothing about hue.
+	val archive = File(outDir, "hero-cover.cbz")
+	writeSampleArchive(archive, colours = listOf(0xFF1E6F5C.toInt()), pageSize = 600 to 900)
+	val (manga, _) = app.reader.localManga(archive)
+	// `localManga` leaves the cover null -- a local archive has no cover *url*, only pages -- so
+	// the first page is pointed at through the same `cbz://` scheme the reader uses. Without this
+	// the hero draws its title fallback and CoverAccent returns the neutral theme colour, which
+	// looks entirely plausible in a screenshot and proves nothing.
+	val entry = ContinueEntry(
+		manga = manga.copy(coverUrl = ArchiveUrl.of(archive, "001.png")),
+		sourceTitle = "Local archive",
+		isSourceAvailable = true,
+		lastReadAt = System.currentTimeMillis(),
+		progressPercent = 0.62f,
+		chapterNumber = 34f,
+		chapterName = null,
+	)
+	for ((name, mode) in listOf("dark" to AgehaThemeMode.DARK, "light" to AgehaThemeMode.LIGHT)) {
+		val scene = ImageComposeScene(width = 1000, height = 320, density = Density(1f)) {
+			AgehaTheme(mode = mode) {
+				AgehaBackdrop(Modifier.fillMaxSize()) {
+					ContinueHero(
+						entry = entry,
+						imageHeaders = emptyMap(),
+						onOpen = {},
+						modifier = Modifier.padding(24.dp),
+					)
+				}
+			}
+		}
+		try {
+			// Frame by frame, on a clock that actually moves. The accent arrives from a suspending
+			// decode and is then crossed in with `animateColorAsState`, and an animation advances
+			// with the frame time it is handed -- not with wall-clock delays. Rendering thirty
+			// frames at the default nanoTime would capture thirty copies of frame zero, which is
+			// the neutral fallback, on a hero whose colour extraction had worked perfectly.
+			var nanos = 0L
+			var image = scene.render(nanos)
+			repeat(RENDER_FRAMES) {
+				runBlocking { delay(RENDER_FRAME_GAP_MS) }
+				nanos += RENDER_FRAME_GAP_MS * 1_000_000
+				image = scene.render(nanos)
+			}
+			val file = "shell-continue-hero-$name.png"
+			File(outDir, file).writeBytes(checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes)
+			println("wrote $file")
+		} finally {
+			scene.close()
+		}
 	}
 }
 
@@ -187,18 +298,27 @@ private fun renderReader(app: AgehaApplication, outDir: File) {
 	}
 }
 
-/** Four numbered pages, each a distinct flat colour, so page order is visible in the render. */
-private fun writeSampleArchive(target: File) {
-	val colours = listOf(0xFF3A3A3A.toInt(), 0xFF5A5A5A.toInt(), 0xFF7A7A7A.toInt(), 0xFF9A9A9A.toInt())
+/** Numbered pages, each a distinct flat colour, so page order is visible in the render. */
+private fun writeSampleArchive(
+	target: File,
+	colours: List<Int> = listOf(
+		0xFF3A3A3A.toInt(),
+		0xFF5A5A5A.toInt(),
+		0xFF7A7A7A.toInt(),
+		0xFF9A9A9A.toInt(),
+	),
+	pageSize: Pair<Int, Int> = 600 to 900,
+) {
+	val (width, height) = pageSize
 	java.util.zip.ZipOutputStream(target.outputStream()).use { zip ->
 		colours.forEachIndexed { index, colour ->
-			val page = java.awt.image.BufferedImage(600, 900, java.awt.image.BufferedImage.TYPE_INT_RGB)
+			val page = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_RGB)
 			val g = page.createGraphics()
 			g.color = java.awt.Color(colour)
-			g.fillRect(0, 0, 600, 900)
+			g.fillRect(0, 0, width, height)
 			g.color = java.awt.Color.WHITE
 			g.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, 96)
-			g.drawString("${index + 1}", 260, 480)
+			g.drawString("${index + 1}", width * 4 / 10, height / 2)
 			g.dispose()
 			zip.putNextEntry(java.util.zip.ZipEntry("%03d.png".format(index + 1)))
 			javax.imageio.ImageIO.write(page, "png", zip)
