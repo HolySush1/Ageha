@@ -13,12 +13,25 @@ import java.awt.GraphicsEnvironment
  * Type. Restrained and editorial rather than techy: a transitional or humanist serif for titles
  * and manga names, a neutral sans for chrome and metadata.
  *
- * **Nothing is bundled yet, on purpose.** Full CJK faces run 10-20MB each and Ageha needs four
- * scripts' worth of coverage, which would put 40MB of binary into the repository before the
- * design has even been reviewed. Instead the families below are an explicit, ordered preference
- * chain resolved against what is actually installed, and [FontCoverage] reports what was found so
- * the gap is visible rather than theoretical. Bundling a subset lands with packaging in milestone
- * 9, when there is a real installer to put it in.
+ * **Nothing is bundled, and after packaging landed that is now a settled decision rather than a
+ * deferral.** It was written here as "bundling lands with milestone 9"; milestone 9 came and the
+ * answer changed, so this records why rather than leaving a promise nobody kept.
+ *
+ * Full CJK faces run 10-20MB each and Ageha wants four scripts' worth, so bundling is ~40MB added
+ * to every download on every platform. What that buys is nothing at all on Windows and macOS,
+ * where Skia's per-glyph fallback already reaches past the chosen family for glyphs it lacks and
+ * the system ships CJK coverage regardless. It buys something only on a Linux machine with no CJK
+ * font installed — where the right fix is the distribution's own font package, not 40MB carried by
+ * every user of every platform to help a subset of one.
+ *
+ * So the families below stay an explicit, ordered preference chain resolved against what is
+ * actually installed, and [FontCoverage] reports what was found. Settings > Appearance names any
+ * script with no font in red, because a user seeing boxes where a Korean title should be needs to
+ * know it is a missing font and not a broken source. That turns the remaining gap from a mystery
+ * into a one-line instruction.
+ *
+ * Revisit if a Linux user reports tofu in practice: declaring a font dependency in the `.deb` is
+ * the next step and costs no bytes, and bundling is the step after that.
  *
  * Compose Desktop's `FontFamily(String)` resolves a family by name through Skia's font manager,
  * which also supplies automatic per-glyph fallback: a Japanese title inside a Latin-only family

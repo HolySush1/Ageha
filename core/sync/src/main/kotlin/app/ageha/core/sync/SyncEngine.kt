@@ -4,6 +4,7 @@ import app.ageha.core.database.AgehaDatabase
 import app.ageha.core.database.dao.RestorePayload
 import app.ageha.core.database.entity.MangaEntity
 import app.ageha.core.database.entity.MangaTagsEntity
+import app.ageha.core.model.AgehaVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -56,7 +57,7 @@ class SyncEngine(
 	private val database: AgehaDatabase,
 	private val api: SyncApi,
 	private val accounts: SyncAccountStore,
-	private val appVersion: Int = APP_VERSION,
+	private val appVersion: Int = AgehaVersion.CODE,
 	private val databaseVersion: Int = app.ageha.core.database.AGEHA_DATABASE_VERSION,
 	private val now: () -> Long = System::currentTimeMillis,
 ) {
@@ -257,9 +258,6 @@ class SyncEngine(
 		 * bound, since the protocol re-sends everything on every sync.
 		 */
 		val TOMBSTONE_RETENTION_MS: Long = TimeUnit.DAYS.toMillis(4)
-
-		/** Sent as `X-App-Version`. Ageha's, not the Android app's. */
-		const val APP_VERSION = 1
 	}
 }
 

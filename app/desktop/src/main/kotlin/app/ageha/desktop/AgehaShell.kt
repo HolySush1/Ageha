@@ -35,6 +35,7 @@ import app.ageha.core.data.CatalogRepository
 import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryRepository
 import app.ageha.core.data.SourceRepository
+import app.ageha.core.model.AgehaVersion
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.BrandAssets
@@ -282,7 +283,7 @@ fun AgehaShell(
 								onExportBackup = onExportBackup,
 								appUpdates = AppUpdatesUiState(
 									policy = preferences.appUpdatePolicy,
-									currentVersion = AgehaVersion.CURRENT,
+									currentVersion = AgehaVersion.NAME,
 									isChecking = appUpdateChecking,
 									lastResult = appUpdateResult,
 								),

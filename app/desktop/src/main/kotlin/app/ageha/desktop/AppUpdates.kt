@@ -1,5 +1,6 @@
 package app.ageha.desktop
 
+import app.ageha.core.model.AgehaVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -7,26 +8,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
-
-/**
- * Ageha's own version.
- *
- * A hand-written constant with a build-time check behind it, exactly as
- * `BundledParsers.VERSION` is: `./gradlew :app:desktop:checkAppVersion` fails if this disagrees
- * with the version in `build.gradle.kts`. Reading it from a generated resource would be less
- * typing and would also make the version invisible in source, which is the thing most worth being
- * able to grep for when a user reports a bug against "the latest".
- *
- * A packaged build's version comes from the git tag rather than from here (see `docs/UPDATING.md`),
- * so these agree at release time because the tag and the build file are bumped together.
- */
-object AgehaVersion {
-
-	const val CURRENT = "0.1.0"
-
-	/** `owner/repo`, matching `app.vcs-url` in `conveyor.conf`. */
-	const val REPO = "Kotatsu-Redo/Ageha"
-}
 
 /** What a check found. */
 sealed interface AppUpdateOutcome {
@@ -42,7 +23,7 @@ sealed interface AppUpdateOutcome {
 	fun describe(): String = when (this) {
 		is UpToDate -> "Ageha " + version + " is the newest release."
 		is Available -> "Ageha " + version + " is available. You are running " +
-			AgehaVersion.CURRENT + ".\n" + url
+			AgehaVersion.NAME + ".\n" + url
 		is Failed -> "Could not check for updates: " + reason
 	}
 }
@@ -62,7 +43,7 @@ sealed interface AppUpdateOutcome {
 class AppUpdateChecker(
 	private val httpClient: OkHttpClient,
 	private val repo: String = AgehaVersion.REPO,
-	private val currentVersion: String = AgehaVersion.CURRENT,
+	private val currentVersion: String = AgehaVersion.NAME,
 	private val apiBase: String = "https://api.github.com",
 ) {
 

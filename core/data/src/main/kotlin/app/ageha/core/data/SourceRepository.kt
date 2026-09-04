@@ -1,5 +1,6 @@
 package app.ageha.core.data
 
+import app.ageha.core.model.AgehaVersion
 import app.ageha.core.database.dao.SourcesDao
 import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.model.AgehaContentType
@@ -78,10 +79,10 @@ class SourceRepository(
 					source = name,
 					isEnabled = enabled,
 					sortKey = sources.nextSortKey(),
-					// `added_in` records the app version that first saw this source, so a later
-					// release can offer "sources added since you last looked". 0 until versioning
-					// lands with packaging in milestone 9.
-					addedIn = 0,
+					// The release that first saw this source, so a later one can offer "sources
+					// added since you last looked". Rows written before Ageha had a version
+					// carry 0, which reads as "unknown" rather than as release zero.
+					addedIn = AgehaVersion.CODE,
 					lastUsedAt = 0,
 					isPinned = false,
 					cfState = 0,

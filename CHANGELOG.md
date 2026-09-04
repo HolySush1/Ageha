@@ -182,6 +182,15 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     not rewritten on every page turn. The `chapters` table had existed since Milestone 4 with
     nothing writing to it; it is what lets the last chapter be *named* and the next one *found*
     with no network call.
+- **One app version, in `:core:model`.** Four unrelated places need it -- the backup index, sync's
+  `X-App-Version` header, the `added_in` column recording which release first saw a source, and the
+  update check -- and three had grown their own copy while this work was going on. Two constants
+  that must agree and do not have to are a bug with a delay on it. `NAME` and `CODE` are separate
+  because two formats Ageha does not own insist on an integer, and `CODE` is not derived from
+  `NAME`: deriving it would mean inventing an encoding and then being stuck with it.
+  - `added_in` now records a real release instead of a hardcoded 0, which was waiting on versioning
+    that the packaging milestone was supposed to bring and did not.
+
 - **Layer 2 gets its settings toggle**, which the brief asked for and which was the last thing on
   its list still missing. Settings > Sources and updates > Ageha itself: check quietly, check and
   tell me, or never check.
@@ -357,8 +366,13 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - All three themes pass WCAG AA on body text, asserted on every build rather than checked once.
 - Nothing brand-coloured reaches the reader, and a test enforces it: reader colours carry under 6%
   chroma and are never a design-system token.
-- Fonts are **not** bundled yet. The families are an explicit preference chain resolved against
-  what is installed, and the gallery reports per-script CJK coverage so the gap is visible.
+- Fonts are **not** bundled, and now deliberately rather than pending. ~40MB of CJK faces would buy
+  nothing on Windows or macOS, where Skia's per-glyph fallback already reaches past the chosen
+  family and the system ships coverage anyway; it buys something only on a Linux machine with no
+  CJK font, where the distribution's own font package is the right fix. The families stay an
+  explicit preference chain resolved against what is installed, and Settings > Appearance names any
+  script with no font **in red**, so a user seeing boxes knows it is a missing font and not a
+  broken source.
 - Sources start **disabled**. Ageha ships 1360 and only ever contacts the ones a user turns on.
 - The library grid uses `GridCells.Adaptive`, not a fixed column count: this is a resizable
   desktop window, not a phone.

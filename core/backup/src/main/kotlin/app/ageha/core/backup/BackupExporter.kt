@@ -3,6 +3,7 @@ package app.ageha.core.backup
 import app.ageha.core.database.AgehaDatabase
 import app.ageha.core.database.dao.ExportDao
 import app.ageha.core.database.entity.MangaEntity
+import app.ageha.core.model.AgehaVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -67,7 +68,7 @@ class BackupExporter(
 	private val database: AgehaDatabase,
 	/** Stamped into the archive index. Injected so a test can assert an exact value. */
 	private val appId: String = APP_ID,
-	private val appVersion: Int = APP_VERSION,
+	private val appVersion: Int = AgehaVersion.CODE,
 	private val now: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -276,10 +277,5 @@ class BackupExporter(
 		 */
 		const val APP_ID = "app.ageha"
 
-		/**
-		 * A version *code*, because the field is an Int upstream. Nothing reads it yet; it is here
-		 * so a future importer can tell which Ageha wrote a file it is having trouble with.
-		 */
-		const val APP_VERSION = 1
 	}
 }

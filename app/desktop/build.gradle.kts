@@ -91,19 +91,19 @@ tasks.register<JavaExec>("renderShell") {
  */
 val checkAppVersion by tasks.registering {
 	group = "verification"
-	description = "Fails if AgehaVersion.CURRENT disagrees with the project version."
+	description = "Fails if AgehaVersion.NAME disagrees with the project version."
 	val declared = project.version.toString().substringBefore("-SNAPSHOT")
-	val source = layout.projectDirectory
-		.file("src/main/kotlin/app/ageha/desktop/AppUpdates.kt").asFile
+	val source = rootProject.layout.projectDirectory
+		.file("core/model/src/main/kotlin/app/ageha/core/model/AgehaVersion.kt").asFile
 	inputs.file(source)
 	inputs.property("declared", declared)
 	outputs.upToDateWhen { true }
 	doLast {
-		val found = Regex("""const val CURRENT = "([^"]+)"""")
+		val found = Regex("""const val NAME = "([^"]+)"""")
 			.find(source.readText())?.groupValues?.get(1)
 		if (found != declared) {
 			throw GradleException(
-				"AgehaVersion.CURRENT is \"$found\" but the project version is \"$declared\". " +
+				"AgehaVersion.NAME is \"$found\" but the project version is \"$declared\". " +
 					"They name the same release and must match.",
 			)
 		}
