@@ -31,6 +31,18 @@ data class Preferences(
 	val doublePage: Boolean = false,
 	/** Whether the first page stands alone in double-page mode. See PageLayout for why. */
 	val coverOffset: Boolean = true,
+	/**
+	 * How wide the webtoon strip is drawn, as a multiple of the source's own pixel width.
+	 *
+	 * 1.0 means one image pixel per screen pixel -- what the source actually published, and the
+	 * only width that is never an interpolation of somebody else's line art. It is stored rather
+	 * than being per-chapter because the first thing a reader on a large monitor does is widen the
+	 * strip, and having to do that again at every chapter break would make the control feel broken.
+	 *
+	 * Clamped where it is used, not here: the strip is also capped to the window, so the same
+	 * stored number gives a sensible width on a laptop and on a 27-inch display.
+	 */
+	val webtoonZoom: Float = 1f,
 	val window: WindowGeometry = WindowGeometry(),
 	val lastCategoryId: Int = -1,
 	val minimiseToTray: Boolean = false,

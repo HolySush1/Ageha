@@ -60,7 +60,6 @@ import app.ageha.feature.settings.SettingsScreen
 import app.ageha.feature.settings.AppUpdatesUiState
 import app.ageha.feature.settings.SettingsSection
 import app.ageha.feature.settings.SyncViewModel
-import app.ageha.feature.reader.AutoHideChrome
 import app.ageha.feature.reader.ReaderActions
 import app.ageha.feature.reader.ReaderKeys
 import app.ageha.feature.reader.ReaderScreen
@@ -390,11 +389,6 @@ fun AgehaShell(
 							androidx.compose.runtime.DisposableEffect(destination.chapter.id) {
 								onDispose { readerViewModel.savePositionNow() }
 							}
-							AutoHideChrome(
-								activity = state.currentPage to state.chapter?.id,
-								isVisible = state.isChromeVisible,
-								onHide = { readerViewModel.setChromeVisible(false) },
-							)
 							ReaderScreen(
 								state = state,
 								background = preferences.readerBackground,
@@ -416,6 +410,15 @@ fun AgehaShell(
 								onToggleChrome = readerViewModel::toggleChrome,
 								onRetry = readerViewModel::retry,
 								onClose = { navigator.back() },
+								webtoonZoom = preferences.webtoonZoom,
+								onSetWebtoonZoom = {
+									onPreferencesChange(preferences.copy(webtoonZoom = it))
+								},
+								// Auto-hide moved into the reader, because the signals it needs --
+								// pointer movement, and the pointer being over the bar itself --
+								// only exist down there. Driving it from here meant the timer knew
+								// about page turns and nothing else.
+								onHideChrome = { readerViewModel.setChromeVisible(false) },
 							)
 						}
 
