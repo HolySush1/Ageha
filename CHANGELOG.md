@@ -90,6 +90,49 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Fixed
 
+- **Reader pages were decoded at window size, so zooming magnified a blur.** Coil sizes a decode to
+  the composable that asked for it, and off Android it resamples with the three-argument
+  `Canvas.drawImageRect`, which takes no `SamplingMode` and so uses no mipmaps. A 2000px scan in a
+  900px viewport therefore became a 900px bitmap, badly resampled, and that bitmap was all the
+  reader had -- zooming enlarged the raster instead of revealing the detail that had been decoded
+  away. Reader pages now go through `AgehaImages.readerRequest`, which decodes at the source's own
+  resolution, and are drawn at `FilterQuality.Medium` (mipmapped, cached) rather than the default
+  bilinear. Covers deliberately keep the sized request.
+- **The webtoon strip was stretched to the width of the window.** A webtoon page is around 800px;
+  filling a 1920px window with one is a 2.4x upscale of somebody's line art. The strip is now a
+  centred column of the source's own width, never enlarged past it by default. This is also five
+  times *faster*: `:app:desktop:webtoonProfile` goes from p50 8.99ms to 1.81ms, because not
+  upscaling on every frame is cheaper than upscaling on every frame.
+- **Ctrl+wheel did nothing in webtoon mode.** The handler read the wheel on the Main pointer pass,
+  by which point the `LazyColumn`'s own scrollable had already consumed the event, so Ctrl+wheel
+  scrolled. It is now read on the Initial pass and changes the strip's width -- 40% to 400% of the
+  source, capped at the window, remembered in preferences and shown in the top bar. Scaling the
+  list with a `graphicsLayer` instead was tried and rejected: it scales the viewport too, so the
+  edges clip and one notch of wheel travels a different distance at every zoom level.
+- **A page reserved no height until its image arrived**, so an unloaded page in the webtoon strip
+  was zero pixels tall, the list composed a long run of them at once, and the strip lurched every
+  time one resolved. Each item now reserves space from an aspect ratio learned as the chapter
+  decodes. The file's own comment had claimed this for some time; it is now true.
+- **Wheel scrolling stepped a whole notch per frame.** The strip now eases each notch across a few
+  frames. It travels exactly the distance the wheel asked for -- deliberately not a fling, which
+  would overshoot the panel you were scrolling towards.
+- **A zoomed page could not be panned at all.** `ZoomPanState.onContentChanged` was never called
+  from anywhere, so the content size stayed zero, both pan bounds computed as zero, and every drag
+  was clamped straight back to the origin. Zoom worked and panning silently did nothing.
+- **The reader's top bar vanished while you were reaching for it.** The auto-hide timer counted
+  page turns and nothing else, so a bar revealed by a click counted down regardless. It now waits
+  for the pointer to actually move before starting, and stops entirely while the pointer is over
+  the chrome.
+- **Typing in any search box put the caret in front of the letter.** Every query is hoisted into a
+  view model and read back through a `StateFlow`, so the text a field is handed lags its own
+  keystroke; the `String` overload of a text field pairs its internal caret with whatever value it
+  is given, and on the frame where the caret is new and the text is still old, the caret is clamped
+  to zero. All five search fields now use `AgehaSearchField`, which owns its own `TextFieldValue`
+  and adopts an external value only when it is a genuine outside change. Note that this fix is by
+  construction and is **not** covered by a reproducing test: `performTextInput` drives a field
+  through the semantics layer, below which the desync happens, so the defect cannot be expressed in
+  a Compose UI test.
+
 - **Uninstalling Ageha deleted the user's entire library.** jpackage derives the install directory
   from the package name, so a per-user install landed in `%LOCALAPPDATA%\Ageha` -- byte for byte
   the directory `AgehaPaths` keeps the database, cookies and preferences in. Installing dropped
