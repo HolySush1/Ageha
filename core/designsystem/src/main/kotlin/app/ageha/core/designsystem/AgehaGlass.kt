@@ -33,18 +33,18 @@ import androidx.compose.ui.unit.dp
  * written for the web or for SwiftUI assumes that primitive, and none of them port.
  *
  * What Ageha does instead is the two-layer construction that predates backdrop filters and still
- * looks right: [AgehaBackdrop] draws the artwork once, blurred and scrimmed, and panels are
- * translucent fills over it. The blur is real -- it is applied to the backdrop image, which is the
- * case `Modifier.blur` does handle -- it just happens once, low in the stack, rather than per
- * panel. The visible result is the same at a fraction of the cost.
+ * looks right: [AgehaBackdrop] draws one calm, theme-derived gradient across the window, and
+ * panels are translucent fills over it. Depth comes from the fill, the specular edge and the cast
+ * shadow rather than from a per-panel blur nobody can afford.
  *
  * ## Why the alphas are so much higher than a web recipe's
  *
- * The usual glassmorphism figure is 10-30% white. At that opacity, body text on the panel takes
- * its contrast from whatever cover art happens to be behind it, which is to say it has no
- * contrast guarantee at all. Ageha's floor is WCAG AA on body text in every theme over every
- * possible backdrop, so the alphas here are derived from that constraint rather than from a
- * screenshot, and `AgehaContrastTest` composites them over the worst case on every build.
+ * The usual glassmorphism figure is 10-30% white. At that opacity a panel takes its contrast from
+ * whatever happens to be behind it, which is to say it has no contrast guarantee at all. Ageha's
+ * floor is WCAG AA on body text in every theme, so the alphas here are derived from that
+ * constraint rather than from a screenshot, and `AgehaContrastTest` composites them over the
+ * backdrop's own gradient stops -- and, for [GlassTone.RAISED], over raw cover art -- on every
+ * build.
  *
  * Nothing here introduces a colour. Fills come from the active scheme's container ramp, so glass
  * follows light, dark and AMOLED for free and rule 7 stays intact. The only non-scheme values are
@@ -68,9 +68,9 @@ enum class GlassTone {
 	 * Menus, popovers and dialogs.
 	 *
 	 * Nearly opaque, and deliberately so: these float over *content* rather than over the
-	 * scrimmed backdrop, so they get no help from [AgehaGlass.BACKDROP_SCRIM] and have to hold
-	 * their own contrast over an arbitrary grid of cover art. A dropdown you can read the list
-	 * through is a dropdown nobody can read.
+	 * backdrop, so they get none of the palette's help and have to hold their own contrast over
+	 * an arbitrary grid of cover art. A dropdown you can read the list through is a dropdown
+	 * nobody can read.
 	 */
 	RAISED,
 	;
@@ -96,21 +96,19 @@ enum class GlassTone {
 object AgehaGlass {
 
 	/**
-	 * How much of [AgehaBackdrop]'s scrim covers the artwork.
+	 * How much brand tint reaches the corner of [AgehaBackdrop]'s gradient. A hint, not a wash.
 	 *
-	 * This is the number that makes the rest of the system safe. Cover art is arbitrary -- it can
-	 * be a black gutter or a white page -- and without a bound on backdrop luminance no panel
-	 * alpha can promise anything. Scrimming to 78% clamps the backdrop into a narrow band around
-	 * the theme's own surface colour, which is what lets [GlassTone.CHROME] be as transparent as
-	 * it is and still pass AA.
+	 * This is the number that makes the rest of the system safe. The backdrop is built from theme
+	 * tokens alone -- `surfaceDim`, `surface`, and this much `primaryContainer` -- so backdrop
+	 * luminance is bounded to a narrow band around the theme's own surface colour, which is what
+	 * lets [GlassTone.CHROME] be as transparent as it is and still pass AA.
 	 *
-	 * 22% of the artwork survives. Enough to read as a room the app is sitting in; not enough to
-	 * compete with the covers in the grid, which are the actual subject.
+	 * It used to be a scrim over the user's cover art instead, at 0.78. Arbitrary artwork behind
+	 * the interface needed a scrim that heavy to bound it at all; nothing is drawn back there any
+	 * more, so the bound comes from the palette, and the artwork keeps its own resolution in the
+	 * Continue Reading hero. See [AgehaBackdrop] for why that changed.
 	 */
-	const val BACKDROP_SCRIM = 0.78f
-
-	/** Blur radius on the backdrop image. Large enough that no detail survives as a distraction. */
-	val BACKDROP_BLUR: Dp = 48.dp
+	internal const val BACKDROP_BRAND_WASH = 0.35f
 
 	/** The specular edge: brighter along the top, fading to a shadow by the bottom. */
 	internal const val EDGE_HIGHLIGHT = 0.22f

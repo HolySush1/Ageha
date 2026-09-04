@@ -7,72 +7,59 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.layout.ContentScale
-import app.ageha.core.image.AgehaImages
-import coil3.compose.AsyncImage
+import androidx.compose.ui.graphics.Color
 
 /**
  * The layer everything else is glass *over*.
  *
- * Three things stacked, in this order, and each one earns its place:
+ * An opaque surface with a gradient over it, both built entirely from the active colour scheme.
+ * Which scheme that is comes from Settings -> Appearance and from nowhere else, so the window's
+ * background is a setting the user chose rather than a side effect of what they last read.
  *
- *  1. **A brand gradient**, always drawn. It is what a fresh installation sees, and it is what
- *     shows through wherever the artwork does not reach. Without it the first launch is a grey
- *     void with a floating pill on it.
- *  2. **The artwork**, blurred, when there is any. This is the only place in Ageha that puts
- *     cover art behind the interface, and it is deliberately the *user's own* cover -- whatever
- *     they were last reading -- rather than a stock image. The app is a room furnished with their
- *     library.
- *  3. **The scrim**, at [AgehaGlass.BACKDROP_SCRIM].
+ * ## It used to be the user's cover art, and that was a mistake
  *
- * The scrim is not a matter of taste. Cover art is arbitrary: it can be a black gutter or a white
- * page, and glass panels drawn over an unbounded backdrop have no contrast guarantee whatsoever.
- * Scrimming clamps backdrop luminance into a narrow band around the theme's own surface colour,
- * which is the premise the alphas in [GlassTone] are derived from and that `AgehaContrastTest`
- * checks on every build. Lowering it without re-deriving those alphas breaks readability quietly,
- * on somebody else's artwork, which is the worst way for it to break.
+ * The first version drew the most recent Continue Reading cover here, blurred and scrimmed. The
+ * idea -- the app as a room furnished with your own library -- was a good one, and the execution
+ * had three problems, any one of which is enough on its own:
+ *
+ *  - **It made Appearance a half-truth.** Choosing Light and getting a window tinted by whatever
+ *    was read last is a setting that does not settle the question it claims to settle.
+ *  - **The source material could not carry it.** Sources serve cover thumbnails a few hundred
+ *    pixels wide. Scaled to fill a 1280x860 window they are mush, and blur only disguises so much
+ *    of that before the whole window looks out of focus.
+ *  - **The background changed when nothing the user did should have changed it.** Finishing a
+ *    chapter re-tinted the entire application.
+ *
+ * The cover art is not gone; it moved to where it belongs. The Continue Reading hero is *about*
+ * one book, so it draws that book's cover at the cover's own size and takes its panel colour from
+ * [CoverAccent] -- the same idea, at the one scale the artwork can actually support.
+ *
+ * ## What the glass alphas now sit on
+ *
+ * With arbitrary artwork gone, backdrop luminance is bounded by the theme's own tokens rather
+ * than by a scrim over somebody's cover, and those tokens sit within a step or two of `surface`
+ * by construction. [GlassTone]'s alphas therefore hold with more margin than before rather than
+ * less, and `AgehaContrastTest` composites them over [backdropStops] instead of over scrimmed
+ * black and white.
  *
  * ## Not in the reader
  *
- * The reader never draws this. Cover art behind a page is exactly the tinted-wash mistake rule 8
- * exists to prevent, one layer further back -- and the shell already suppresses the backdrop under
- * the same `isImmersive` check that hides the navigation.
+ * The reader never draws this. Brand colour behind a page is the tinted-wash mistake rule 8 exists
+ * to prevent, one layer further back -- and the shell suppresses the backdrop under the same
+ * `isImmersive` check that hides the navigation.
  */
 @Composable
 fun AgehaBackdrop(
-	coverUrl: String?,
-	imageHeaders: Map<String, String>,
 	modifier: Modifier = Modifier,
 	content: @Composable BoxScope.() -> Unit,
 ) {
 	Box(modifier) {
+		// Opaque first, gradient second. The brand stop is deliberately translucent, and a
+		// translucent gradient painted straight onto the window shows the toolkit's own clear
+		// colour through that corner -- white, in a dark theme, which reads as a rendering fault.
+		Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
 		Box(Modifier.fillMaxSize().background(backdropGradient()))
-
-		if (!coverUrl.isNullOrEmpty()) {
-			AsyncImage(
-				model = AgehaImages.request(coverUrl, imageHeaders),
-				contentDescription = null,
-				contentScale = ContentScale.Crop,
-				modifier = Modifier
-					.fillMaxSize()
-					// Rectangle edge treatment rather than the default: a blur that is allowed to
-					// bleed past its bounds leaves a soft transparent halo down the window edges,
-					// which reads as a rendering fault rather than as depth.
-					.blur(AgehaGlass.BACKDROP_BLUR, BlurredEdgeTreatment.Rectangle),
-			)
-		}
-
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					MaterialTheme.colorScheme.surface.copy(alpha = AgehaGlass.BACKDROP_SCRIM),
-				),
-		)
-
 		content()
 	}
 }
@@ -83,16 +70,29 @@ fun AgehaBackdrop(
  * Brand colour belongs here -- this is navigation and library chrome, which DESIGN.md names as
  * the place for it. It stays a wash rather than a statement: `surfaceDim` into `surface` with the
  * primary container barely present in one corner, so the indigo is something you would only
- * notice if you looked for it.
+ * notice if you went looking for it.
  */
 @Composable
 private fun backdropGradient(): Brush = Brush.linearGradient(
-	listOf(
-		MaterialTheme.colorScheme.surfaceDim,
-		MaterialTheme.colorScheme.surface,
-		MaterialTheme.colorScheme.primaryContainer.copy(alpha = BRAND_WASH),
+	backdropStops(
+		surfaceDim = MaterialTheme.colorScheme.surfaceDim,
+		surface = MaterialTheme.colorScheme.surface,
+		primaryContainer = MaterialTheme.colorScheme.primaryContainer,
 	),
 )
 
-/** How much brand tint reaches the corner of the gradient. A hint, not a colour wash. */
-private const val BRAND_WASH = 0.35f
+/**
+ * The gradient's three stops, as a pure function of the scheme.
+ *
+ * Split out so `AgehaContrastTest` can composite glass over exactly the colours the window draws,
+ * rather than over a second derivation of them that is free to drift.
+ */
+internal fun backdropStops(
+	surfaceDim: Color,
+	surface: Color,
+	primaryContainer: Color,
+): List<Color> = listOf(
+	surfaceDim,
+	surface,
+	primaryContainer.copy(alpha = AgehaGlass.BACKDROP_BRAND_WASH),
+)

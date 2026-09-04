@@ -99,19 +99,35 @@ class AgehaContrastTest {
 	 * Glass, composited.
 	 *
 	 * Translucent chrome has no fixed background, so none of the pairs above say anything about
-	 * it. What makes it testable is that [AgehaBackdrop] bounds the problem: it scrims arbitrary
-	 * artwork down to [AgehaGlass.BACKDROP_SCRIM], so the worst backdrop a panel can ever sit on
-	 * is the scrim applied to pure black or pure white. Everything real falls between those two.
+	 * it. What makes it testable is that [AgehaBackdrop] bounds the problem: it draws nothing but
+	 * a gradient between three of this scheme's own tokens, so the worst backdrop a panel can sit
+	 * on is one of [backdropStops] and everything real falls between them.
 	 *
-	 * So this composites the actual stack -- artwork, scrim, glass fill -- and holds the result to
-	 * the same 4.5:1 floor as any other body text. It is the test that stops someone lowering an
-	 * alpha because it looked better on one screenshot.
+	 * So this composites the actual stack -- gradient stop, then glass fill -- and holds the
+	 * result to the same 4.5:1 floor as any other body text. It is the test that stops someone
+	 * lowering an alpha because it looked better on one screenshot.
+	 *
+	 * It used to composite over cover art scrimmed at 0.78, because the backdrop used to *be*
+	 * cover art. That is no longer what the window draws, and a test asserting a stack the app no
+	 * longer builds proves nothing about the app.
 	 */
 	private fun over(backdrop: Color, fill: Color, alpha: Float) = Color(
 		red = fill.red * alpha + backdrop.red * (1 - alpha),
 		green = fill.green * alpha + backdrop.green * (1 - alpha),
 		blue = fill.blue * alpha + backdrop.blue * (1 - alpha),
 	)
+
+	/**
+	 * Every colour the backdrop can put behind a panel.
+	 *
+	 * Taken from the same function the window draws with, so the two cannot drift. The brand stop
+	 * is translucent, and the backdrop paints it over an opaque `surface`, so it is composited the
+	 * same way here rather than tested as though it were solid.
+	 */
+	private fun backdropColors(s: AgehaScheme): List<Pair<String, Color>> =
+		backdropStops(s.surfaceDim, s.surface, s.primaryContainer).mapIndexed { index, stop ->
+			"stop $index" to over(s.surface, stop, stop.alpha)
+		}
 
 	private fun glassFill(s: AgehaScheme, tone: GlassTone) = when (tone) {
 		GlassTone.CHROME -> s.surfaceContainer
@@ -126,17 +142,16 @@ class AgehaContrastTest {
 	fun `body text on glass over the backdrop meets AA`(): List<DynamicTest> =
 		themes.flatMap { (name, s) ->
 			// RAISED is excluded here and tested on its own below: menus and dialogs float over
-			// content, not over the scrimmed backdrop, so they get none of the scrim's help and
-			// the honest test for them is the harsher one.
+			// content, not over the backdrop, so they get none of the palette's help and the
+			// honest test for them is the harsher one.
 			listOf(GlassTone.CHROME, GlassTone.PANEL).flatMap { tone ->
-				worstArtwork.map { (artLabel, art) ->
-					DynamicTest.dynamicTest("$name: onSurface on $tone over $artLabel") {
-						val backdrop = over(art, s.surface, AgehaGlass.BACKDROP_SCRIM)
+				backdropColors(s).map { (stopLabel, backdrop) ->
+					DynamicTest.dynamicTest("$name: onSurface on $tone over backdrop $stopLabel") {
 						val glass = over(backdrop, glassFill(s, tone), tone.fillAlpha)
 						val r = ratio(s.onSurface, glass)
 						assertTrue(r >= 4.5) {
-							"$name onSurface on $tone over $artLabel is %.2f:1, below the 4.5:1 AA floor"
-								.format(r)
+							("$name onSurface on $tone over backdrop $stopLabel is %.2f:1, " +
+								"below the 4.5:1 AA floor").format(r)
 						}
 					}
 				}
