@@ -86,18 +86,35 @@ class ZoomPanState {
 	 *
 	 * When the content is smaller than the viewport on an axis it is centred on that axis rather
 	 * than pinned to an edge; when it is larger, the offset is bounded so no gap can appear.
+	 *
+	 * **The viewport fallback is load-bearing, not defensive.** Nothing ever called
+	 * [onContentChanged] -- the drawn size of a page inside an `AsyncImage` is not something the
+	 * gesture modifier is told -- so [content] stayed `Size.Zero`, both bounds computed as zero,
+	 * and every pan was clamped straight back to the origin. Zooming worked and panning silently
+	 * did nothing, which is a strange enough combination that it read as the drag gesture being
+	 * broken. Falling back to the viewport treats the page as filling the window, which is what a
+	 * fitted page does on at least one axis; the worst case is a little slack on the other axis,
+	 * against a background the same colour as the letterbox.
 	 */
 	private fun clamp() {
 		if (viewport == Size.Zero) return
-		val scaledWidth = content.width * scale
-		val scaledHeight = content.height * scale
-		val maxX = max(0f, (scaledWidth - viewport.width) / 2f)
-		val maxY = max(0f, (scaledHeight - viewport.height) / 2f)
+		val bounds = if (content == Size.Zero) viewport else content
 		offset = Offset(
-			x = offset.x.coerceIn(-maxX, maxX),
-			y = offset.y.coerceIn(-maxY, maxY),
+			x = clampAxis(offset.x, max(0f, (bounds.width * scale - viewport.width) / 2f)),
+			y = clampAxis(offset.y, max(0f, (bounds.height * scale - viewport.height) / 2f)),
 		)
 	}
+
+	/**
+	 * One axis, bounded to plus or minus [bound].
+	 *
+	 * The zero case is spelled out rather than left to `coerceIn(-0f, 0f)`, which answers -0.0 for
+	 * any negative input. Nothing renders differently, but -0.0 is not equal to 0.0 under
+	 * `Offset`'s packed-float equality, so an axis with nothing to pan would compare as having
+	 * moved -- which is exactly the kind of thing that makes a later equality check mystifying.
+	 */
+	private fun clampAxis(value: Float, bound: Float): Float =
+		if (bound == 0f) 0f else value.coerceIn(-bound, bound)
 
 	companion object {
 		const val MIN_SCALE = 1f
