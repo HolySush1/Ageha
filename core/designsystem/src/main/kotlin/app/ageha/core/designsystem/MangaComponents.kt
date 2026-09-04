@@ -105,23 +105,12 @@ fun MangaCard(
 	}
 }
 
-/**
- * A cover drawn as a wide banner rather than as a card.
- *
- * Same image, same fallback, no aspect ratio of its own -- the caller decides the shape and the
- * art is cropped to fill it. This exists so a hero can use the *sharp* cover while
- * [AgehaBackdrop] uses the blurred one; two different treatments of one image, from one loader.
+/*
+ * `CoverBanner` used to live here: a cover with no aspect ratio of its own, cropped to whatever
+ * shape the caller asked for. Its only caller was the Continue Reading hero, and cropping a 2:3
+ * cover into a wide band is exactly the mistake that hero was rebuilt to stop making. Nothing
+ * else ever wanted a cover at an arbitrary shape, so it is gone rather than left as a trap.
  */
-@Composable
-fun CoverBanner(
-	manga: AgehaManga,
-	imageHeaders: Map<String, String>,
-	modifier: Modifier = Modifier,
-) {
-	Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-		CoverImage(manga, imageHeaders)
-	}
-}
 
 @Composable
 private fun CoverImage(manga: AgehaManga, imageHeaders: Map<String, String>) {

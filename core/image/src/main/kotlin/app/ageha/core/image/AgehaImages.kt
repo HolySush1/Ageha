@@ -82,6 +82,30 @@ object AgehaImages {
 			.build()
 
 	/**
+	 * A request for a cover decoded down to a handful of pixels.
+	 *
+	 * For `CoverAccent`, which averages a cover to a single colour and has no use for the other
+	 * half-million pixels. Sizing the *decode* rather than downscaling afterwards is the point:
+	 * the bytes come from the same shared disk cache the library grid already filled, so this
+	 * costs no extra network request, and Skia never materialises a full-resolution bitmap that
+	 * is thrown away a line later.
+	 *
+	 * `EXACT` because the caller reads a fixed grid of pixels out of the result; a source serving
+	 * a square cover would otherwise hand back a bitmap of a shape nobody planned for.
+	 */
+	fun sampleRequest(
+		url: String,
+		headers: Map<String, String>,
+		width: Int,
+		height: Int,
+	): ImageRequest = ImageRequest.Builder(PlatformContext.INSTANCE)
+		.data(url)
+		.httpHeaders(headers.toNetworkHeaders())
+		.size(width, height)
+		.precision(Precision.EXACT)
+		.build()
+
+	/**
 	 * A request for a page in the reader, decoded at the source's own resolution.
 	 *
 	 * This is [request] with the sizing turned off, and the reason is not subtlety about quality --

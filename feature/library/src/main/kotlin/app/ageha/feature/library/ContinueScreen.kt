@@ -1,5 +1,7 @@
 package app.ageha.feature.library
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,18 +36,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.ContinueEntry
+import app.ageha.core.designsystem.AgehaMotion
 import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
-import app.ageha.core.designsystem.CoverBanner
+import app.ageha.core.designsystem.CoverAccent
+import app.ageha.core.designsystem.CoverAccentColors
 import app.ageha.core.designsystem.EmptyState
 import app.ageha.core.designsystem.MangaThumbnail
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 /**
  * Continue Reading: everything read, most recent first.
@@ -273,10 +280,19 @@ internal fun relativeTime(epochMillis: Long, now: Long = System.currentTimeMilli
  * is the first thing on the library screen for the same reason Continue Reading is second in the
  * navigation: resuming is the most common intent, not browsing.
  *
- * The artwork runs to the right edge and the text sits on the left, over a horizontal scrim that
- * is opaque where the words are and gone by the time it reaches the art. A scrim across the whole
- * banner would dim the cover to make room for four words, which is the wrong trade on the one
- * screen whose subject is the cover.
+ * ## The cover is shown, not stretched
+ *
+ * This used to be the cover itself, cropped to a wide band and blown up to the width of the
+ * window behind a horizontal scrim. Sources serve covers a few hundred pixels wide; upscaled that
+ * far they are mush, and cropping a 2:3 portrait to a letterbox throws away the half of the
+ * artwork that carries the title. Both were on display at the largest size anywhere in the app.
+ *
+ * So the cover is drawn **once, at its own proportions**, flush to the right edge and no taller
+ * than the panel -- never scaled past what the source actually published. The rest of the panel is
+ * a flat fill taken from the cover's own average colour by [CoverAccent], which is what keeps the
+ * hero visibly about *this* book without asking a thumbnail to do a wallpaper's job. Every text
+ * colour on it comes from that same derivation, so contrast here is a measured number rather than
+ * a hope about what the artwork happened to be.
  */
 @Composable
 fun ContinueHero(
@@ -285,64 +301,125 @@ fun ContinueHero(
 	onOpen: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
-	Box(
+	val accent = CoverAccent.rememberFor(entry.manga.coverUrl, imageHeaders)
+	// The fill arrives a frame or two after the panel, once the cover has been sampled. Crossed
+	// rather than swapped: a panel that changes colour instantly reads as a flash.
+	val container by animateColorAsState(
+		targetValue = accent.container,
+		animationSpec = tween(AgehaMotion.TRANSITION_MS),
+		label = "continue-hero-fill",
+	)
+	Row(
 		modifier
 			.fillMaxWidth()
 			.height(HERO_HEIGHT)
 			.clip(MaterialTheme.shapes.large)
+			.background(container)
 			.clickable(onClick = onOpen)
 			.testTag(HERO_TAG),
+		verticalAlignment = Alignment.CenterVertically,
 	) {
-		CoverBanner(entry.manga, imageHeaders, Modifier.fillMaxSize())
-		Box(
-			Modifier.fillMaxSize().background(
-				Brush.horizontalGradient(
-					0f to MaterialTheme.colorScheme.surface,
-					HERO_SCRIM_END to Color.Transparent,
-				),
-			),
-		)
 		Column(
-			Modifier
-				.align(Alignment.CenterStart)
-				.fillMaxWidth(HERO_TEXT_WIDTH)
-				.padding(AgehaSpacing.xl),
+			Modifier.weight(1f).padding(AgehaSpacing.xl),
 			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 		) {
 			Text(
 				if (entry.isCaughtUp) "CAUGHT UP" else "CONTINUE READING",
 				style = AgehaTextStyles.metadata,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				color = accent.mutedContent,
 			)
 			Text(
 				entry.manga.title,
 				style = MaterialTheme.typography.headlineMedium,
-				color = MaterialTheme.colorScheme.onSurface,
+				color = accent.content,
 				maxLines = 2,
 				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
-				listOfNotNull(entry.sourceTitle, entry.chapterLabel).joinToString("  -  "),
+				listOfNotNull(entry.sourceTitle, entry.chapterLabel).joinToString("  ·  "),
 				style = AgehaTextStyles.metadata,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				color = accent.mutedContent,
 				maxLines = 1,
 				overflow = TextOverflow.Ellipsis,
 			)
-			TextButton(onClick = onOpen) {
+			entry.progressPercent?.let { HeroProgress(it, accent) }
+			Button(
+				onClick = onOpen,
+				// Inverted out of the panel rather than coloured from the palette. A brand-filled
+				// button on a panel tinted by somebody's cover is two unrelated colours arguing;
+				// these two are the pair CoverAccent has already measured against each other.
+				colors = ButtonDefaults.buttonColors(
+					containerColor = accent.content,
+					contentColor = accent.container,
+				),
+			) {
 				Text(if (entry.isCaughtUp) "Reopen" else "Resume")
 			}
 		}
+		MangaThumbnail(
+			manga = entry.manga,
+			imageHeaders = imageHeaders,
+			// Both axes given, and they already satisfy the 2:3 the thumbnail asks for.
+			//
+			// `fillMaxHeight()` alone is not enough and is worth saying why: `Modifier.aspectRatio`
+			// resolves against the *width* first whenever the incoming maxWidth is bounded, and in
+			// a Row the unweighted child is offered the row's whole width -- so the cover would
+			// have taken the entire panel and been 1.5 times taller than it. Naming the width is
+			// what pins it to the panel's height instead.
+			modifier = Modifier.width(HERO_COVER_WIDTH).fillMaxHeight(),
+		)
+	}
+}
+
+/**
+ * How far through, as a bar and a number.
+ *
+ * Both, because neither is enough alone: a bar at 90% and a bar at 96% look identical, and "96%"
+ * with nothing beside it is a statistic rather than a position. The bar is drawn in the panel's
+ * own text colour rather than in the brand accent -- vermillion here would be a fourth place for
+ * it, and this panel already belongs to the cover.
+ */
+@Composable
+private fun HeroProgress(progress: Float, accent: CoverAccentColors) {
+	Row(
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
+		Box(
+			Modifier
+				.width(HERO_PROGRESS_WIDTH)
+				.height(HERO_PROGRESS_HEIGHT)
+				.clip(MaterialTheme.shapes.extraSmall)
+				.background(accent.content.copy(alpha = HERO_PROGRESS_TRACK_ALPHA)),
+		) {
+			Box(
+				Modifier
+					.fillMaxWidth(progress.coerceIn(0f, 1f))
+					.height(HERO_PROGRESS_HEIGHT)
+					.clip(MaterialTheme.shapes.extraSmall)
+					.background(accent.content),
+			)
+		}
+		Text(
+			"${(progress.coerceIn(0f, 1f) * 100).roundToInt()}%",
+			style = AgehaTextStyles.metadata,
+			color = accent.mutedContent,
+		)
 	}
 }
 
 /** Tall enough for a headline and a line of metadata, short enough to leave the grid visible. */
-private val HERO_HEIGHT = 220.dp
+private val HERO_HEIGHT = 222.dp
 
-/** Where the text scrim has finished fading, as a fraction of the banner's width. */
-private const val HERO_SCRIM_END = 0.72f
+/** [HERO_HEIGHT] at a cover's 2:3. Stated rather than derived, so the two cannot round apart. */
+private val HERO_COVER_WIDTH = 148.dp
 
-/** How much of the banner the text column may occupy before it starts covering the art. */
-private const val HERO_TEXT_WIDTH = 0.55f
+/** The progress bar. Fixed width, so it does not stretch across an ultrawide window. */
+private val HERO_PROGRESS_WIDTH = 160.dp
+private val HERO_PROGRESS_HEIGHT = 4.dp
+
+/** The unfilled part of the track. Visible as a groove, never as a second bar. */
+private const val HERO_PROGRESS_TRACK_ALPHA = 0.24f
 
 const val HERO_TAG = "continue-hero"
 
