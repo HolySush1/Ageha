@@ -15,10 +15,20 @@ clients registered per service, which is explained in
 
 ## Running it
 
+**If you just want to use Ageha, read [docs/RUNNING.md](docs/RUNNING.md)** -- installing it, where
+your library is kept, what to expect on first launch, and how to get past the unsigned-app warning.
+Nothing below is needed for that.
+
+From a checkout:
+
 ```
-./gradlew :app:desktop:run             # the application
+./gradlew :app:desktop:run                    # the application
 ./gradlew :app:desktop:run --args=--gallery   # the design system gallery
+./gradlew :app:desktop:packageMsi             # a Windows installer
 ```
+
+Both `run` and the render tools use the same profile directory the installed app does. Set
+`AGEHA_DATA_DIR` to point a checkout at a scratch profile instead of the library you actually read.
 
 ## What it does
 
@@ -127,8 +137,11 @@ The configuration is [conveyor.conf](conveyor.conf); the release process, includ
 lack of code signing and the routes to fixing that, is in [docs/RELEASING.md](docs/RELEASING.md).
 
 **Releases are currently unsigned.** Windows SmartScreen and macOS Gatekeeper will warn on first
-run. [docs/RELEASING.md](docs/RELEASING.md) explains how to get past it and what signing would
-take.
+run. [docs/RUNNING.md](docs/RUNNING.md) has the click-through for a user;
+[docs/RELEASING.md](docs/RELEASING.md) covers what signing would take.
+
+Only the Windows installer has been built and tested so far -- installed, launched and uninstalled
+on a real machine. The macOS and Linux configuration resolves but has produced no artifact yet.
 
 ## Keeping up with the web
 
