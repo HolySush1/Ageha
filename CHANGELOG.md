@@ -8,6 +8,38 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **Sorting the source catalogue out: broken, 18+ and language.** The picker had one exclusive
+  three-way filter and a dropdown of raw locale tags. It now has three independent filters in a
+  menu beside the view chips. Against the real catalogue that is 296 adult sources and 428 broken
+  ones out of 1360, so the defaults matter: **broken hidden, 18+ hidden, every language shown.**
+  - "Hide known broken" is a switch rather than a view, so the useful direction finally exists.
+    The "Known broken" view still overrides it -- asking to see broken sources and getting an
+    empty list because of a switch elsewhere is the app appearing to lie.
+  - 18+ is `contentType == HENTAI`, mirroring upstream's own `isNsfwSource` exactly rather than
+    guessing wider. `DOUJINSHI`, `IMAGE_SET`, `ARTIST_CG` and `GAME_CG` are filter categories a
+    source *offers*, not what a source *is*, and hiding a legitimate catalogue is the worse error.
+  - Language shows names and counts -- "English (312)" -- and the counts describe what is
+    reachable after the other two filters, so the menu cannot offer a language whose sources are
+    all hidden.
+  - **What is hidden is always counted out loud**, on the screen and in the empty state. A filter
+    that silently removes rows is indistinguishable from a catalogue that never had them.
+  - Scope is picker *visibility*, not capability: a source you enabled keeps working everywhere,
+    global search included. All three filters persist, and the two switches are mirrored in
+    Settings > Sources and updates.
+- **Glass chrome, over a backdrop of your own library.** A translucent navigation pill, breadcrumb
+  and filter bars, and menus, floating over the cover of whatever you were last reading -- blurred,
+  scrimmed, with a brand-gradient fallback on a fresh installation. The 84dp navigation rail is
+  gone; the shortcuts it printed under every label moved into tooltips rather than disappearing.
+  The library screen opens on a hero for the newest Continue Reading entry.
+  - Compose Desktop has no `backdrop-filter`, so this is the two-layer construction that predates
+    one: the artwork is blurred *once*, low in the stack, and panels are translucent fills over it.
+  - The alphas are derived from WCAG AA rather than from a screenshot, which is why they are much
+    higher than the usual 10-30% glassmorphism figure. `AgehaContrastTest` composites artwork,
+    scrim and fill over pure black and pure white in all three themes on every build.
+  - No new colour: fills come from the scheme's container ramp. **The reader draws neither glass
+    nor backdrop** -- the same `isImmersive` check suppresses both, and cover art behind a page is
+    the tinted-wash mistake the reader rule exists to prevent.
+
 - **A real Windows installer, built and verified by installing it.** `./gradlew :app:desktop:packageMsi`
   produces `Ageha-<version>.msi`: a per-user install needing no administrator prompt, with a Start
   menu entry, a desktop shortcut, and an entry in Apps & Features. Installed, launched, and

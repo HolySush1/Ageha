@@ -393,7 +393,61 @@ only on macOS. Both formats fail quietly, so `IconContainersTest` parses them ba
 
 ---
 
-## 8. On the ui-ux-pro-max skill
+## 8. Glass
+
+The chrome is translucent: a floating navigation pill, breadcrumb and filter bars, menus and
+dialogs, all drawn over a live backdrop. Implemented in `AgehaGlass.kt` and `AgehaBackdrop.kt`.
+
+### 8.1 There is no backdrop filter, and that shapes everything
+
+Compose Desktop's `Modifier.blur` blurs a composable's **own content**, not what is behind it.
+There is no `backdrop-filter` and no `UIGlassEffect`. Every glassmorphism recipe written for the
+web or for SwiftUI assumes that primitive, so none of them port.
+
+What Ageha does instead is the two-layer construction that predates backdrop filters:
+
+1. `AgehaBackdrop` draws the artwork **once**, blurred and scrimmed, low in the stack.
+2. Panels are translucent fills over it.
+
+The blur is real — it is applied to the backdrop image, which is the case `Modifier.blur` handles
+— it just happens once rather than per panel. Same look, a fraction of the cost.
+
+### 8.2 The alphas come from contrast, not from a screenshot
+
+The usual glassmorphism figure is 10–30% white. At that opacity, body text takes its contrast from
+whatever cover art happens to sit behind it — which is to say it has no contrast guarantee at all.
+
+`AgehaBackdrop` bounds the problem by scrimming arbitrary artwork to 78%, clamping backdrop
+luminance into a narrow band around the theme's own surface. That premise is what lets the tones
+be as transparent as they are:
+
+| Tone | Fill | Alpha | Used for |
+|---|---|---|---|
+| `CHROME` | `surfaceContainer` | 0.58 | Navigation pill, breadcrumb and filter bars |
+| `PANEL` | `surfaceContainerHigh` | 0.66 | Cards and inline panels |
+| `RAISED` | `surfaceContainerHighest` | 0.88 | Menus, popovers, dialogs |
+
+`RAISED` is nearly opaque because it is the one tone that floats over **content** rather than over
+the scrimmed backdrop, so it gets none of the scrim's help and must hold its own over an arbitrary
+grid of covers.
+
+`AgehaContrastTest` composites the whole stack — artwork, scrim, fill — over pure black and pure
+white in all three themes and holds the result to the same 4.5:1 floor as any other body text. It
+is the test that stops someone lowering an alpha because it looked better on one screenshot.
+
+### 8.3 No new colour, and not in the reader
+
+Glass introduces no hex. Fills come from the active scheme's container ramp, so it follows light,
+dark and AMOLED for free and §2's rule holds. The only non-scheme values are the white and black
+alphas on the specular edge, which are light rather than pigment.
+
+The reader draws no backdrop and no glass. Cover art behind a page is the tinted-wash mistake §6
+exists to prevent, one layer further back — and the same `isImmersive` check suppresses both the
+navigation and the backdrop.
+
+---
+
+## 9. On the ui-ux-pro-max and liquid-glass-design skills
 
 The brief asks for design work to go through this skill, so it was run. Three things to report:
 
@@ -411,10 +465,20 @@ The brief asks for design work to go through this skill, so it was run. Three th
    components; the 4px spacing base; and its interaction-state model. Its palettes and component
    code were not used, and — as the brief instructs — its lack of a Compose Desktop stack was not
    allowed to push anything toward a web stack.
+4. **Its Compose stack table is effectively empty.** Queried for surface, elevation and layering
+   guidance it returns nothing; queried for `compose` at all it returns two rows, "use
+   `mutableStateOf`" and "use `animate*AsState`". Its `glassmorphism` entry is CSS
+   `backdrop-filter`. This is CLAUDE.md rule 6 being correct in advance.
+5. **`liquid-glass-design` is iOS 26 only, and none of it is used.** It documents
+   `.glassEffect()`, `UIGlassEffect`, `GlassEffectContainer` and WidgetKit rendering modes. None
+   exist off Apple platforms, and CLAUDE.md rule 4 rules out Swift interop regardless. What was
+   taken is its *material* argument — translucency over a live backdrop, a hairline specular edge,
+   layered depth, and glass reserved for chrome rather than sprayed over everything — all of which
+   §8 implements in Compose from scratch. **Said out loud, as CLAUDE.md requires.**
 
 ---
 
-## 9. Open items
+## 10. Open items
 
 - **Fonts are not bundled.** Deliberate (§3); revisit at milestone 9. Linux without a CJK package
   will show tofu, and the gallery names the missing script rather than failing silently.
