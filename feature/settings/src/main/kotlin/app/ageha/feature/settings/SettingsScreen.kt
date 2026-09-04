@@ -191,6 +191,16 @@ private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> 
 	Explain("Ageha uses whichever of its preferred families this machine has installed.")
 	Text("Titles: ${coverage.serif}", style = AgehaTextStyles.metadata)
 	Text("Interface: ${coverage.sans}", style = AgehaTextStyles.metadata)
+	if (coverage.usesBundledCjk) {
+		// Said out loud, because it explains why titles look different here than on a machine with
+		// its own CJK fonts -- and because someone who then installs their distribution's font
+		// package should know Ageha will stop using the bundled one.
+		Explain(
+			"This machine has no CJK font installed, so Ageha is using the face bundled with " +
+				"the Linux packages. Installing your distribution's Noto CJK package will take " +
+				"precedence over it.",
+		)
+	}
 	if (coverage.missingScripts.isNotEmpty()) {
 		// Named rather than hidden. A user seeing boxes where a Korean title should be needs to
 		// know it is a missing font and not a broken source.

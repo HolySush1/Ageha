@@ -1,3 +1,6 @@
+import java.net.URI
+import java.security.MessageDigest
+
 plugins {
 	alias(libs.plugins.compose)
 	alias(libs.plugins.compose.compiler)
@@ -72,6 +75,82 @@ compose.desktop {
 			// enumeration; java.sql for the bundled SQLite driver. Omitting either produces a
 			// build that starts and then fails the first time a user opens a file dialog.
 			modules("java.desktop", "java.sql", "java.naming")
+
+			/*
+			 * MSI, not EXE.
+			 *
+			 * jpackage's EXE target is a self-extracting wrapper around the same MSI, and the MSI
+			 * is the one Windows can upgrade in place, repair, and remove from Settings without
+			 * the original file. For an app nobody has signed, it is also the one whose publisher
+			 * and version a suspicious user can inspect before running it.
+			 */
+			targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi)
+
+			windows {
+				/*
+				 * Installs into the user's own profile, not Program Files.
+				 *
+				 * No administrator prompt, which matters twice over: Ageha is unsigned, so an
+				 * elevation dialog for an unverified publisher is exactly the moment a sensible
+				 * person cancels -- and a per-user install is one the same person can remove
+				 * again without one. It also lets the app update itself later without asking.
+				 */
+				perUserInstall = true
+
+				/*
+				 * Install under `Programs\`, NOT beside the user's data.
+				 *
+				 * jpackage derives the install directory from the package name, which for a
+				 * per-user install put the binaries in `%LOCALAPPDATA%\Ageha` -- byte for byte
+				 * the directory `AgehaPaths.dataDir` keeps the database, cookies and preferences
+				 * in. Installing dropped `app\`, `runtime\` and `Ageha.exe` on top of somebody's
+				 * library, and uninstalling then removed the install directory *and everything
+				 * else in it*: verified, on a real install and a real uninstall, and the whole
+				 * profile went.
+				 *
+				 * `%LOCALAPPDATA%\Programs\Ageha` is the convention every other per-user
+				 * Windows app follows, and it keeps the two apart, which is the actual
+				 * requirement: uninstalling an app must not take the reading history with it.
+				 *
+				 * One path segment, because a nested one does not survive the trip.
+				 *
+				 * `Programs\Ageha` would match what VS Code and friends do, and there is no way
+				 * to say it. jpackage takes its arguments in an @argfile whose parser treats a
+				 * backslash as an escape, so a single backslash vanishes and the app installs to
+				 * `%LOCALAPPDATA%\ProgramsAgeha` -- close enough to right in a build log to
+				 * miss. Doubling it gets a real backslash as far as WiX, which then fails with
+				 * light.exe exit code 204, as does a forward slash. All three were tried.
+				 *
+				 * So: one segment, next to the data directory rather than around it. The folder
+				 * name differs from the display name, which is ordinary on Windows -- VS Code
+				 * installs to "Microsoft VS Code".
+				 */
+				installationPath = "Ageha Reader"
+
+				// A Start-menu entry and a desktop shortcut, because this is the only way most
+				// people will ever launch it.
+				menu = true
+				menuGroup = "Ageha"
+				shortcut = true
+
+				// Constant for the life of the product, and load-bearing: Windows matches
+				// installs by this UUID, so changing it turns an upgrade into a second copy
+				// sitting alongside the first. Generated once; never regenerate it.
+				upgradeUuid = "9f2b41d6-3a7e-4c58-9b0d-6e1f5a7c2d84"
+
+				iconFile.set(rootProject.layout.projectDirectory.file("brand/generated/ageha.ico"))
+			}
+
+			macOS {
+				bundleID = "app.ageha"
+				iconFile.set(rootProject.layout.projectDirectory.file("brand/generated/ageha.icns"))
+			}
+
+			linux {
+				iconFile.set(
+					rootProject.layout.projectDirectory.file("brand/generated/linux/ageha-256.png"),
+				)
+			}
 		}
 	}
 }
@@ -207,4 +286,95 @@ val e2e by tasks.registering(Test::class) {
 	// Never up-to-date. It exercises live state and the network; "no inputs changed" is not a
 	// reason to believe it would still pass.
 	outputs.upToDateWhen { false }
+}
+
+/*
+ * The bundled CJK font, for Linux packages only.
+ *
+ * Windows and macOS both ship CJK coverage, so Skia's per-glyph fallback already has somewhere to
+ * go and bundling buys them nothing. A Linux machine with no CJK font package installed has
+ * nothing to fall back to and shows tofu where a Japanese, Korean or Chinese title should be --
+ * which, for a manga reader, is a large share of the library.
+ *
+ * `AgehaTypography` used to record "bundling costs ~40MB on every platform to help a subset of
+ * one". That arithmetic was right about the cost and wrong about the shape of the fix: this ships
+ * one 16MB file to the two machines that need it and nothing to the other four.
+ *
+ * One file rather than four. `NotoSansCJKjp-Regular.otf` is the Japanese-preferred build of the
+ * pan-CJK family, which means it carries the whole shared ideograph set plus kana plus hangul --
+ * verified, not assumed, by `CjkFontTest`. Its Latin is complete too, which is what lets the app
+ * fall back to it wholesale rather than trying to route text by script.
+ */
+val cjkFontUrl =
+	"https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf"
+
+/** Pinned by tag *and* by hash. A tag can be moved; a hash cannot. */
+val cjkFontSha256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
+
+val downloadCjkFont by tasks.registering {
+	group = "brand"
+	description = "Downloads the Noto Sans CJK face bundled with the Linux packages."
+	val target = layout.buildDirectory.file("fonts/NotoSansCJKjp-Regular.otf")
+	val url = cjkFontUrl
+	val expected = cjkFontSha256
+	outputs.file(target)
+
+	// The digest is inlined at both use sites rather than extracted to a helper. A build-script
+	// function is a "Gradle script object reference", which the configuration cache refuses to
+	// serialize -- so factoring this out is what breaks the build, not what tidies it.
+	val digest: (File) -> String = { file ->
+		MessageDigest.getInstance("SHA-256")
+			.digest(file.readBytes())
+			.joinToString("") { byte -> "%02x".format(byte) }
+	}
+
+	// Content-addressed, so re-running is free and a moved tag is caught rather than absorbed.
+	outputs.upToDateWhen {
+		val file = target.get().asFile
+		file.exists() && digest(file) == expected
+	}
+	doLast {
+		val file = target.get().asFile
+		file.parentFile.mkdirs()
+		if (!file.exists() || digest(file) != expected) {
+			logger.lifecycle("Downloading the bundled CJK font (16MB, once)...")
+			URI(url).toURL().openStream().use { input -> file.outputStream().use(input::copyTo) }
+		}
+		val actual = digest(file)
+		if (actual != expected) {
+			file.delete()
+			throw GradleException(
+				"The CJK font at $url hashed to $actual, expected $expected. " +
+					"The upstream tag has moved or the download was corrupted; refusing to " +
+					"package a font nobody has checked.",
+			)
+		}
+	}
+}
+
+/**
+ * The font, as a jar on the classpath.
+ *
+ * A jar rather than a loose file next to the binary, because a classpath resource is found the
+ * same way on every machine and in tests -- whereas a loose file has to be located relative to an
+ * install directory that differs between running from Gradle, from a `.deb` and from a tarball.
+ */
+val cjkFontJar by tasks.registering(Jar::class) {
+	group = "brand"
+	description = "Packages the bundled CJK font as a classpath resource."
+	archiveBaseName.set("ageha-fonts-cjk")
+	destinationDirectory.set(layout.buildDirectory.dir("fonts"))
+	from(downloadCjkFont) { into("fonts") }
+}
+
+dependencies {
+	// Linux only. The other four machines resolve CJK from the system and are not asked to carry
+	// this. `AgehaFonts` treats the resource as optional and is what decides whether to use it.
+	"linuxAmd64"(files(cjkFontJar))
+	"linuxAarch64"(files(cjkFontJar))
+
+	// On the test classpath too, so `CjkFontTest` checks the same artifact that ships rather than
+	// a copy of it. This is the only way the claim "one file covers four scripts" gets verified
+	// on a machine that is not Linux -- which is every machine this is developed on.
+	testRuntimeOnly(files(cjkFontJar))
 }

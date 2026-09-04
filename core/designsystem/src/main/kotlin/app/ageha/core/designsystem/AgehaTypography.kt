@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import java.awt.GraphicsEnvironment
@@ -13,25 +14,29 @@ import java.awt.GraphicsEnvironment
  * Type. Restrained and editorial rather than techy: a transitional or humanist serif for titles
  * and manga names, a neutral sans for chrome and metadata.
  *
- * **Nothing is bundled, and after packaging landed that is now a settled decision rather than a
- * deferral.** It was written here as "bundling lands with milestone 9"; milestone 9 came and the
- * answer changed, so this records why rather than leaving a promise nobody kept.
+ * **One CJK face is bundled, and only with the Linux packages.**
  *
- * Full CJK faces run 10-20MB each and Ageha wants four scripts' worth, so bundling is ~40MB added
- * to every download on every platform. What that buys is nothing at all on Windows and macOS,
- * where Skia's per-glyph fallback already reaches past the chosen family for glyphs it lacks and
- * the system ships CJK coverage regardless. It buys something only on a Linux machine with no CJK
- * font installed — where the right fix is the distribution's own font package, not 40MB carried by
- * every user of every platform to help a subset of one.
+ * This file previously argued that bundling costs ~40MB on every platform to help a subset of one,
+ * and settled on shipping nothing. The arithmetic was right about the cost and wrong about the
+ * shape of the fix. Windows and macOS ship CJK coverage, so Skia's per-glyph fallback always has
+ * somewhere to go there and a bundled face buys them nothing. A Linux machine with no CJK font
+ * package installed has nowhere to fall back to and shows tofu -- which, in a manga library, is a
+ * large share of the titles.
  *
- * So the families below stay an explicit, ordered preference chain resolved against what is
- * actually installed, and [FontCoverage] reports what was found. Settings > Appearance names any
- * script with no font in red, because a user seeing boxes where a Korean title should be needs to
- * know it is a missing font and not a broken source. That turns the remaining gap from a mystery
- * into a one-line instruction.
+ * So the Linux packages, and only the Linux packages, carry one 16MB file: `NotoSansCJKjp-Regular`,
+ * the Japanese-preferred build of the pan-CJK family, which also carries hangul, both Chinese
+ * variants' ideographs and a complete Latin set. Four scripts from one file, verified rather than
+ * assumed -- see `CjkFontTest`. The other four machines download nothing extra.
  *
- * Revisit if a Linux user reports tofu in practice: declaring a font dependency in the `.deb` is
- * the next step and costs no bytes, and bundling is the step after that.
+ * Because its Latin is complete, the fallback is wholesale rather than per-script: on a machine
+ * with a gap, *both* families become the bundled face. Routing individual runs of text by script
+ * would preserve Inter for the Latin parts, at the cost of a script detector in every text style
+ * and two faces mixed inside one title. Uniform and correct beats mixed and clever here.
+ *
+ * The chains below still decide everything on a machine that has fonts, and [FontCoverage] still
+ * reports what was found. Settings > Appearance names any script with no font in red, because a
+ * user seeing boxes where a Korean title should be needs to know it is a missing font and not a
+ * broken source.
  *
  * Compose Desktop's `FontFamily(String)` resolves a family by name through Skia's font manager,
  * which also supplies automatic per-glyph fallback: a Japanese title inside a Latin-only family
@@ -101,17 +106,70 @@ object AgehaFonts {
 	private fun resolve(chain: List<String>, fallback: FontFamily): FontFamily =
 		chain.firstOrNull { it in installed }?.let { FontFamily(it) } ?: fallback
 
+	/**
+	 * The bundled face, as a classpath resource.
+	 *
+	 * Present only in the Linux packages -- `:app:desktop` adds the jar carrying it to the
+	 * `linuxAmd64` and `linuxAarch64` configurations and to nothing else. Everywhere else this
+	 * resolves to null and nothing below changes.
+	 *
+	 * A classpath resource rather than a file beside the binary, because the install layout
+	 * differs between a `.deb`, a tarball and a run from Gradle, and a resource is found the same
+	 * way in all three.
+	 */
+	const val BUNDLED_CJK_RESOURCE = "fonts/NotoSansCJKjp-Regular.otf"
+
+	/** True when this build shipped [BUNDLED_CJK_RESOURCE]. */
+	val hasBundledCjk: Boolean by lazy {
+		AgehaFonts::class.java.classLoader?.getResource(BUNDLED_CJK_RESOURCE) != null
+	}
+
+	private val bundledCjk: FontFamily? by lazy {
+		if (!hasBundledCjk) {
+			null
+		} else {
+			// Never fatal. A font that will not parse is a worse-looking app, not a broken one,
+			// and a reader that refuses to start because of a typeface would be absurd.
+			runCatching { FontFamily(Font(BUNDLED_CJK_RESOURCE)) }.getOrNull()
+		}
+	}
+
+	/** Scripts this machine has no font for at all. Empty on Windows and macOS in practice. */
+	fun missingCjkScripts(): List<String> =
+		cjkCoverage().filterValues { it == null }.keys.toList()
+
+	/**
+	 * Whether to hand both roles to the bundled face.
+	 *
+	 * Only when there is a real gap. A Linux user who has installed their distribution's CJK fonts
+	 * keeps Inter and Source Serif; the bundled face is a floor, not a preference.
+	 */
+	val usesBundledCjk: Boolean by lazy {
+		bundledCjk != null && missingCjkScripts().isNotEmpty()
+	}
+
 	/** Titles, manga names, and anything meant to be *read* rather than operated. */
-	val serif: FontFamily by lazy { resolve(SERIF_CHAIN, FontFamily.Serif) }
+	val serif: FontFamily by lazy {
+		bundledCjk.takeIf { usesBundledCjk } ?: resolve(SERIF_CHAIN, FontFamily.Serif)
+	}
 
 	/** UI chrome, metadata, numbers. */
-	val sans: FontFamily by lazy { resolve(SANS_CHAIN, FontFamily.SansSerif) }
+	val sans: FontFamily by lazy {
+		bundledCjk.takeIf { usesBundledCjk } ?: resolve(SANS_CHAIN, FontFamily.SansSerif)
+	}
 
 	/** Which named family each role actually resolved to, for the gallery and for bug reports. */
-	fun resolvedNames(): Map<String, String> = mapOf(
-		"serif" to (SERIF_CHAIN.firstOrNull { it in installed } ?: "(generic serif)"),
-		"sans" to (SANS_CHAIN.firstOrNull { it in installed } ?: "(generic sans)"),
-	)
+	fun resolvedNames(): Map<String, String> = if (usesBundledCjk) {
+		mapOf("serif" to BUNDLED_CJK_NAME, "sans" to BUNDLED_CJK_NAME)
+	} else {
+		mapOf(
+			"serif" to (SERIF_CHAIN.firstOrNull { it in installed } ?: "(generic serif)"),
+			"sans" to (SANS_CHAIN.firstOrNull { it in installed } ?: "(generic sans)"),
+		)
+	}
+
+	/** What the About dialog and the gallery call the bundled face. */
+	const val BUNDLED_CJK_NAME = "Noto Sans CJK JP (bundled)"
 
 	/** Per-script CJK coverage on this machine: the family found, or null if none is installed. */
 	fun cjkCoverage(): Map<String, String?> =
@@ -123,8 +181,18 @@ data class FontCoverage(
 	val serif: String,
 	val sans: String,
 	val cjk: Map<String, String?>,
+	/** True when the Linux packages' bundled face is standing in for missing system fonts. */
+	val usesBundledCjk: Boolean = false,
 ) {
-	val missingScripts: List<String> get() = cjk.filterValues { it == null }.keys.toList()
+	/**
+	 * Scripts that will genuinely render as boxes.
+	 *
+	 * Empty when the bundled face is in use, because it covers all four -- and telling a user
+	 * "no font installed for Korean" while Korean is rendering correctly from the bundled face
+	 * would be a warning about nothing.
+	 */
+	val missingScripts: List<String>
+		get() = if (usesBundledCjk) emptyList() else cjk.filterValues { it == null }.keys.toList()
 
 	companion object {
 		fun detect(): FontCoverage {
@@ -133,6 +201,7 @@ data class FontCoverage(
 				serif = names.getValue("serif"),
 				sans = names.getValue("sans"),
 				cjk = AgehaFonts.cjkCoverage(),
+				usesBundledCjk = AgehaFonts.usesBundledCjk,
 			)
 		}
 	}

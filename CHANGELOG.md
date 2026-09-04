@@ -8,6 +8,17 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **A real Windows installer, built and verified by installing it.** `./gradlew :app:desktop:packageMsi`
+  produces `Ageha-<version>.msi`: a per-user install needing no administrator prompt, with a Start
+  menu entry, a desktop shortcut, and an entry in Apps & Features. Installed, launched, and
+  uninstalled on a real machine rather than inspected in a build log.
+- **A CJK font, bundled with the Linux packages only.** Windows and macOS ship CJK coverage and get
+  nothing extra; Linux packages carry one 16MB `NotoSansCJKjp-Regular.otf`, which `CjkFontTest`
+  verifies covers Japanese kana and kanji, Korean hangul, both Chinese variants and Latin. Fetched
+  at build time from a tag-and-hash-pinned URL rather than committed. `AgehaFonts` uses it only
+  where a script has no system font, so a Linux user with their own Noto package keeps Inter and
+  Source Serif; Settings > Appearance says which is in play.
+
 - **An end-to-end journey test that drives the real app.** `:app:desktop:e2e` boots the whole
   application, renders the real shell, and walks the path a person actually takes: open a chapter,
   turn pages with the keyboard, close the application, open a *new* one against the same profile,
@@ -78,6 +89,19 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   application runtime classpath.
 
 ### Fixed
+
+- **Uninstalling Ageha deleted the user's entire library.** jpackage derives the install directory
+  from the package name, so a per-user install landed in `%LOCALAPPDATA%\Ageha` -- byte for byte
+  the directory `AgehaPaths` keeps the database, cookies and preferences in. Installing dropped
+  `app\`, `runtime\` and `Ageha.exe` on top of somebody's library, and uninstalling removed the
+  directory and everything else in it. Found by installing the MSI and then uninstalling it, with
+  the profile backed up first; the binaries now live in `%LOCALAPPDATA%\Ageha Reader` and the
+  full install, launch and uninstall cycle has been re-run to confirm the library survives.
+- **`conveyor.conf` had never parsed.** It used `/* */` block comments, which HOCON does not have,
+  so the file that was "only ever syntax-checked" failed on the first line Conveyor read. Also
+  pinned `app.version`, since the Gradle plugin hands over `0.1.0-SNAPSHOT` and no installer
+  format accepts a snapshot suffix. `conveyor json` now resolves the whole configuration, and
+  confirms the CJK font reaches the two Linux machines and none of the other four.
 
 - **The reader claimed "1 / 0" while a chapter was still loading.** Everything the status bar shows
   is derived from the page list, but it was drawn outside the `isLoading` guard -- so a chapter
