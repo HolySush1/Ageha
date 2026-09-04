@@ -3,6 +3,7 @@ package app.ageha.core.database
 import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import app.ageha.core.database.dao.ExportDao
 import app.ageha.core.database.dao.FavouritesDao
 import app.ageha.core.database.dao.HistoryDao
 import app.ageha.core.database.dao.MangaDao
@@ -63,4 +64,6 @@ abstract class AgehaDatabase : RoomDatabase() {
 	abstract fun mangaPrefsDao(): MangaPrefsDao
 
 	abstract fun restoreDao(): RestoreDao
+
+	abstract fun exportDao(): ExportDao
 }

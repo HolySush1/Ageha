@@ -37,7 +37,18 @@ class BackupArchiveBuilder {
 
 	companion object {
 
-		fun index(appVersion: Int = 1234) =
+		/**
+		 * The `index` section, **array-wrapped**, which is how a real archive holds it.
+		 *
+		 * This fixture used to write a bare object, and that was the bug: the Android app writes
+		 * every section through one `writeJsonArray` helper, index included, so no genuine backup
+		 * has ever contained the shape this test was asserting against. See
+		 * `BackupImporter.decodeIndex`.
+		 */
+		fun index(appVersion: Int = 1234) = "[" + indexObject(appVersion) + "]"
+
+		/** The bare object, for the test that pins the other accepted shape. */
+		fun indexObject(appVersion: Int = 1234) =
 			"""{"app_id":"org.koitharu.kotatsu","app_version":$appVersion,"created_at":1756900000000}"""
 
 		/**

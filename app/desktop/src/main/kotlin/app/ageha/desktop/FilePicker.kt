@@ -39,4 +39,26 @@ object FilePicker {
 		val name = dialog.file ?: return null
 		return File(directory, name).takeIf { it.isFile }
 	}
+
+	/**
+	 * Ask where to write a file.
+	 *
+	 * Returns the chosen path whether or not anything is there yet -- unlike [openFile], which
+	 * only returns files that exist. The caller must be prepared to overwrite: `FileDialog.SAVE`
+	 * asks the platform's own "replace it?" question on Windows and macOS, so a path coming back
+	 * from here has already been confirmed, and asking again in-app would be a second dialog
+	 * saying the same thing. Linux's Swing implementation does not ask, which is the same
+	 * behaviour every other GTK-era Java app has there.
+	 *
+	 * @param defaultName pre-filled in the name field. Worth supplying: a save dialog opening on
+	 *   an empty name is a dialog the user has to think about.
+	 */
+	fun saveFile(title: String, defaultName: String): File? {
+		val dialog = FileDialog(null as Frame?, title, FileDialog.SAVE)
+		dialog.file = defaultName
+		dialog.isVisible = true
+		val directory = dialog.directory ?: return null
+		val name = dialog.file ?: return null
+		return File(directory, name)
+	}
 }

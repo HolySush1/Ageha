@@ -77,6 +77,7 @@ fun SettingsScreen(
 	onRollBack: () -> Unit,
 	onPin: (String?) -> Unit,
 	onImportBackup: () -> Unit,
+	onExportBackup: () -> Unit,
 	onClearHistory: () -> Unit,
 	historyCount: Int,
 	modifier: Modifier = Modifier,
@@ -108,7 +109,9 @@ fun SettingsScreen(
 					parsers, jsRuntime, parsersDescription,
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
 				)
-				SettingsSection.LIBRARY -> LibraryPanel(onImportBackup, onClearHistory, historyCount)
+				SettingsSection.LIBRARY -> LibraryPanel(
+					onImportBackup, onExportBackup, onClearHistory, historyCount,
+				)
 				SettingsSection.ABOUT -> AboutPanel(parsers)
 			}
 		}
@@ -345,7 +348,12 @@ private fun JavaScriptStatus(jsRuntime: JsRuntime) {
 }
 
 @Composable
-private fun LibraryPanel(onImportBackup: () -> Unit, onClearHistory: () -> Unit, historyCount: Int) {
+private fun LibraryPanel(
+	onImportBackup: () -> Unit,
+	onExportBackup: () -> Unit,
+	onClearHistory: () -> Unit,
+	historyCount: Int,
+) {
 	PanelTitle("Library and backup")
 	Explain(
 		"Ageha reads the backup file the Android app produces: library, categories, favourites, " +
@@ -387,10 +395,14 @@ private fun LibraryPanel(onImportBackup: () -> Unit, onClearHistory: () -> Unit,
 		}
 	}
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	PanelTitle("Export")
 	Explain(
-		"Ageha's own backup export lands with the sync work. Until then the database file is " +
-			"portable on its own -- copying it moves your whole library.",
+		"Writes your library, favourites, categories, reading history and enabled sources to a " +
+			"backup file. It is the same format the Android app uses, so it restores into Ageha " +
+			"and back into Kotatsu-Redo on a phone. Downloaded chapters are not included -- they " +
+			"are ordinary CBZ files already, and copying the folder moves them.",
 	)
+	Button(onClick = onExportBackup) { Text("Export a backup") }
 }
 
 @Composable

@@ -24,6 +24,7 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import app.ageha.core.backup.defaultBackupFileName
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.BrandAssets
@@ -170,6 +171,7 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				}
 				Separator()
 				Item("Import Android backup...") { importBackup(app, navigator) }
+				Item("Export backup...") { exportBackup(app) }
 				Separator()
 				Item("Quit", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Q, ctrl = true), onClick = onExit)
 			}
@@ -219,6 +221,7 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				keyRouter = keyRouter,
 				onToggleFullscreen = { isFullscreen = !isFullscreen },
 				onImportBackup = { importBackup(app, navigator) },
+				onExportBackup = { exportBackup(app) },
 			)
 		}
 	}
@@ -250,6 +253,33 @@ private fun importBackup(app: AgehaApplication, navigator: Navigator) {
 			.onFailure { failure ->
 				app.notices.post(
 					title = "Could not import ${file.name}",
+					detail = failure.message,
+					isError = true,
+				)
+			}
+	}
+}
+
+/**
+ * Pick a destination and write a backup.
+ *
+ * The counterpart of [importBackup], and it takes the same shape for the same reasons: the picker
+ * is modal on the calling thread, the work goes to the application scope. Nothing navigates
+ * afterwards -- an export leaves the user exactly where they were, and yanking them to another
+ * screen to prove a file was written would be worse than the notice that says so.
+ */
+private fun exportBackup(app: AgehaApplication) {
+	val file = FilePicker.saveFile("Export a backup", defaultBackupFileName()) ?: return
+	app.scope.launch {
+		runCatching { app.backupExporter.export(file) }
+			.onSuccess { result ->
+				// Per-section counts, not "done". Someone exporting a library they cannot afford
+				// to lose is entitled to see that the favourites count matches what they have.
+				app.notices.post("Backup saved", result.describe())
+			}
+			.onFailure { failure ->
+				app.notices.post(
+					title = "Could not export to " + file.name,
 					detail = failure.message,
 					isError = true,
 				)

@@ -81,6 +81,7 @@ fun AgehaShell(
 	keyRouter: KeyRouter = remember { KeyRouter() },
 	onToggleFullscreen: () -> Unit = {},
 	onImportBackup: () -> Unit = {},
+	onExportBackup: () -> Unit = {},
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember {
@@ -254,6 +255,7 @@ fun AgehaShell(
 								onRollBack = parsersViewModel::rollBack,
 								onPin = parsersViewModel::pin,
 								onImportBackup = onImportBackup,
+								onExportBackup = onExportBackup,
 								onClearHistory = {
 									scope.launch {
 										val cleared = application.history.clearAll()

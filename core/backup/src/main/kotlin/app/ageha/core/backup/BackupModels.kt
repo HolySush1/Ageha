@@ -181,3 +181,88 @@ const val RATING_UNKNOWN = -1f
 
 /** The archive's sentinel for "reading progress unknown". */
 const val PROGRESS_NONE = -1f
+
+/*
+ * The other direction: entities to archive shapes.
+ *
+ * Deliberately here, beside the `toEntity()` each one mirrors, rather than in a file of their own.
+ * The pairs have to agree field for field -- a backup Ageha writes and then reads back must come
+ * out identical -- and two functions that must agree are easier to keep honest when they are four
+ * lines apart than when they are in different files.
+ *
+ * Note what is *not* carried out:
+ *
+ *  - `HistoryEntity.pageCount` has no archive field. It is Ageha's own column (schema 30) and
+ *    inventing a key for it would produce an archive the Android app does not understand, for the
+ *    sake of a value that reads as "unknown" anyway. A round trip through a backup therefore
+ *    forgets it, exactly as importing an Android backup arrives without it.
+ *  - `deletedAt` is not carried out either, because nothing soft-deleted is exported at all.
+ *  - `MangaSourceEntity.cfState` is per-installation Cloudflare state. Upstream drops it on the
+ *    way in for that reason; Ageha drops it on the way out for the same one.
+ */
+
+fun TagEntity.toBackup() = TagBackup(
+	id = id,
+	title = title,
+	key = key,
+	source = source,
+	isPinned = isPinned,
+)
+
+fun MangaEntity.toBackup(tags: Set<TagBackup>) = MangaBackup(
+	id = id,
+	title = title,
+	altTitles = altTitles,
+	url = url,
+	publicUrl = publicUrl,
+	rating = rating,
+	isNsfw = isNsfw,
+	contentRating = contentRating,
+	coverUrl = coverUrl,
+	largeCoverUrl = largeCoverUrl,
+	state = state,
+	authors = authors,
+	source = source,
+	tags = tags,
+)
+
+fun HistoryEntity.toBackup(manga: MangaBackup) = HistoryBackup(
+	mangaId = mangaId,
+	createdAt = createdAt,
+	updatedAt = updatedAt,
+	chapterId = chapterId,
+	page = page,
+	scroll = scroll,
+	percent = percent,
+	chaptersCount = chaptersCount,
+	manga = manga,
+)
+
+fun FavouriteCategoryEntity.toBackup() = CategoryBackup(
+	categoryId = categoryId,
+	createdAt = createdAt,
+	sortKey = sortKey,
+	title = title,
+	order = order,
+	track = track,
+	isVisibleInLibrary = isVisibleInLibrary,
+)
+
+fun FavouriteEntity.toBackup(manga: MangaBackup) = FavouriteBackup(
+	mangaId = mangaId,
+	// Int in the column, Long in the archive -- the reverse of the trap named above.
+	categoryId = categoryId.toLong(),
+	sortKey = sortKey,
+	isPinned = isPinned,
+	createdAt = createdAt,
+	manga = manga,
+)
+
+fun MangaSourceEntity.toBackup() = SourceBackup(
+	source = source,
+	sortKey = sortKey,
+	lastUsedAt = lastUsedAt,
+	addedIn = addedIn,
+	isPinned = isPinned,
+	isEnabled = isEnabled,
+)

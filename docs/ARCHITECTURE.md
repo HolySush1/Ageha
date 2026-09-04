@@ -490,6 +490,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 3 | Layer 1 dynamic loading + tests | **done.** Bridge-based isolation (§4.1), SHA-based updates, gate with a designed rejection path, two builds proven to coexist in one JVM |
 | 4 | Database + library/history persistence | **done.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
 | 4b | **Android backup import** | **done.** History, favourites, categories and sources restore from a real archive; unsupported sections and dropped rows are reported, not hidden |
+| 4c | **Backup export** (not in the brief) | **done.** The same format, written. The brief asked only for import, which left a desktop library with no supported way off the disk it was on -- see 7c |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list and the §1.4 risk is now **closed by measurement** -- 200 pages, every frame inside budget, heap bounded |
@@ -561,6 +562,54 @@ answer. Three things about it are not obvious:
 Because none of this leaves the machine, it works offline, needs no account, and cannot leak a
 reading history to a third party. The reader's own progress already survives a backup round trip,
 so nothing here is lost when moving between installations.
+
+---
+
+## 7c. Backup export, and why it writes someone else's format
+
+The brief asked for import only, which is the right priority — migration is what decides whether
+someone tries the app. It leaves a hole that only shows up later: a library built *on* the desktop
+had no supported way off it. History, favourites and categories lived in one SQLite file, and the
+honest advice in Settings was "copy the database file". That is a data-loss hole, not a missing
+feature, and it is the one that costs a user something they cannot get back.
+
+**The archive Ageha writes is upstream's, not its own.** That constraint is worth three things:
+
+- The migration runs **both ways**. Moving to the desktop stops being a one-way door, which is a
+  different proposition from moving to it and being stuck.
+- The format has exactly **one reader** in this project. An export is verified by importing it
+  through the same `BackupImporter` real Android archives go through, so the round trip is a test
+  rather than an inspection — and a field the exporter forgets or misspells fails that test without
+  anyone having had to think of that field in advance.
+- A user holding archives from both apps has **one kind of file**.
+
+The cost is matching the parts that look like mistakes, and matching them exactly. The `index`
+section is a JSON array containing a single object, because upstream writes it through the same
+`writeJsonArray` helper as every other section. Reading upstream's writer to get that right is
+what turned up the import bug recorded in the changelog: Ageha had been decoding that entry as a
+bare object and swallowing the failure, so every genuine Android backup reported no index at all,
+under a test suite whose fixture wrote the shape the parser wanted. **A format test written from
+the reader's assumptions tests nothing.**
+
+Three properties of the writer that are not obvious:
+
+- **It streams.** A backup embeds the full manga record with its tags inside every history row and
+  again inside every favourite row, so a library is several times its own size once expanded.
+  Rows are read in windows of 64 and each entry is serialised and written before the next is read.
+- **Every paged dump has a primary-key tiebreaker; upstream's do not.** `updated_at`, `created_at`
+  and `sort_key` are non-unique, and `LIMIT`/`OFFSET` over a tie may order the tied rows
+  differently for each window — one row returned twice, another never. The written count looks
+  correct either way and only the restore is wrong. This is the kind of defect that survives
+  testing, since SQLite is consistent enough in practice that it takes a changed query plan to
+  expose it.
+- **The file appears only when complete**, via a `.part` and a rename, as chapter downloads do.
+  A half-written backup is discovered at restore time, which is the one moment the user has
+  nothing else left.
+
+What is deliberately not carried: tombstones (the importer clears `deleted_at`, so exporting a
+soft delete would resurrect it as data), disabled sources (1360 of them, and upstream's dump is
+`dumpEnabled` for the same reason), per-installation Cloudflare state, and `history.page_count` —
+Ageha's own schema-30 column, which has no field in the format and degrades to "unknown".
 
 ---
 

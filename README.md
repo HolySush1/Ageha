@@ -30,7 +30,8 @@ clients registered per service, which is explained in
   control. Reading position is restored exactly.
 - **Downloads** — offline chapters written as ordinary CBZ, readable in any comic reader.
 - **Settings** — themes, reader defaults, and the parsers update engine: check, roll back, pin.
-- **Backup import** — from the Android app, reporting exactly what it could not restore.
+- **Backup import and export** — the Android app's own format, both directions. Import reports
+  exactly what it could not restore; export writes a file that also restores back onto a phone.
 
 ## The command line
 
@@ -42,6 +43,7 @@ Everything the UI does is also reachable without it, which is how the source lay
 ./app/cli/build/install/cli/bin/cli search MANGADEX "frieren"
 ./app/cli/build/install/cli/bin/cli smoke --sample 25   # exercise real sources end to end
 ./app/cli/build/install/cli/bin/cli import backup.zip   # import an Android backup
+./app/cli/build/install/cli/bin/cli export              # write one, dated, to the current directory
 ```
 
 ## Migrating from the Android app
@@ -49,6 +51,11 @@ Everything the UI does is also reachable without it, which is how the source lay
 Export a backup from Kotatsu-Redo and use **File → Import Android backup**, or `cli import
 <backup.zip>`. Library, favourites, categories, reading history and reading positions come across;
 the import says exactly what it could not restore rather than reporting success over a partial one.
+
+It runs the other way too. **File → Export backup**, or `cli export`, writes the same format, so a
+desktop library restores onto a phone as readily as it arrived from one — and, more to the point,
+copies to another machine or a backup drive. Downloaded chapters are not in the archive; they are
+ordinary CBZ files, and copying the folder moves them.
 
 ## Architecture in one paragraph
 

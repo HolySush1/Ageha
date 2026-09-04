@@ -4,8 +4,11 @@ import app.ageha.core.model.AgehaFilter
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceFailure
+import app.ageha.core.backup.BackupExportException
+import app.ageha.core.backup.BackupExporter
 import app.ageha.core.backup.BackupImportException
 import app.ageha.core.backup.BackupImporter
+import app.ageha.core.backup.defaultBackupFileName
 import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
@@ -46,6 +49,7 @@ fun main(args: Array<String>) {
 				"sources" -> listSources(stack, args.getOrNull(1))
 				"parsers" -> parsers(stack, args.getOrNull(1))
 				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
+				"export" -> exportBackup(args.getOrNull(1))
 				"library" -> library()
 				"smoke" -> smokeTest(
 					stack = stack,
@@ -181,6 +185,31 @@ private suspend fun importBackup(path: String) {
 		println()
 		println(result.describe())
 	} catch (e: BackupImportException) {
+		System.err.println()
+		System.err.println(e.message)
+		exitProcess(1)
+	} finally {
+		database.close()
+	}
+}
+
+/**
+ * Write a backup of the local database.
+ *
+ * Here as well as in the UI because this is the command someone reaches for when scripting a
+ * nightly copy, and because it is the fastest way to see what an export actually contains without
+ * opening the app. With no path it writes upstream's dated file name into the working directory,
+ * which is what a cron line wants and what an interactive user would have typed anyway.
+ */
+private suspend fun exportBackup(path: String?) {
+	val file = File(path ?: defaultBackupFileName())
+	val database = AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db"))
+	try {
+		println("Exporting to " + file.absolutePath + "...")
+		val result = BackupExporter(database).export(file)
+		println()
+		println(result.describe())
+	} catch (e: BackupExportException) {
 		System.err.println()
 		System.err.println(e.message)
 		exitProcess(1)
@@ -426,6 +455,7 @@ private fun printUsage() {
 		Ageha source CLI -- proves the parsers work on desktop.
 
 		  import  <backup.zip>          import a Kotatsu-Redo Android backup
+		  export  [backup.zip]          write a backup of the local database
 		  library                       what is in the local database
 		  parsers [check|rollback]      show the loaded parsers build, or update it
 		  sources [filter]              list sources in the loaded parsers build
@@ -437,7 +467,7 @@ private fun printUsage() {
 
 		SOURCE is a source name from 'sources', for example MANGADEX.
 
-		Every command except 'sources' hits the live internet.
+		Every command except 'sources', 'library', 'import' and 'export' hits the live internet.
 		""".trimIndent(),
 	)
 }

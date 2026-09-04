@@ -241,4 +241,52 @@ class BackupImporterTest {
 		assertEquals(1, db.historyDao().observeRecent(10).first().size)
 		assertEquals(1, db.mangaDao().tagsOf(100L).size)
 	}
+
+	@Test
+	@DisplayName("the index is read from the array the Android app actually writes")
+	fun indexIsArrayWrapped(@TempDir dir: File) = runBlocking {
+		// The regression this pins: upstream writes every section, `index` included, through one
+		// `writeJsonArray` helper, so the entry is `[{...}]`. The importer decoded it as a bare
+		// object and swallowed the failure, which meant `result.index` was null for every real
+		// Android backup ever imported -- while this suite passed, because the fixture wrote the
+		// shape the parser wanted rather than the shape the app produces.
+		val file = archive(dir) {
+			section(BackupSection.INDEX, "[" + BackupArchiveBuilder.indexObject(4321) + "]")
+		}
+
+		val index = importer.import(file).index
+
+		assertNotNull(index, "an array-wrapped index is the real shape and must be read")
+		assertEquals("org.koitharu.kotatsu", index?.appId)
+		assertEquals(4321, index?.appVersion)
+	}
+
+	@Test
+	@DisplayName("a bare index object is still read")
+	fun indexBareObject(@TempDir dir: File) = runBlocking {
+		// Not the shape any app writes, but one branch's worth of tolerance covers an archive
+		// somebody assembled by hand -- and this is the shape the suite used to assert, so
+		// keeping it stops the fix from trading one blind spot for another.
+		val file = archive(dir) {
+			section(BackupSection.INDEX, BackupArchiveBuilder.indexObject(7))
+		}
+
+		assertEquals(7, importer.import(file).index?.appVersion)
+	}
+
+	@Test
+	@DisplayName("an unreadable index does not fail the import")
+	fun indexGarbageIsNotFatal(@TempDir dir: File) = runBlocking {
+		// The index is provenance, not data. An archive holding a library worth restoring must
+		// not be refused over a decorative field, at the one moment the user is migrating.
+		val file = archive(dir) {
+			section(BackupSection.INDEX, "not json at all")
+			section(BackupSection.HISTORY, "[" + BackupArchiveBuilder.history(100L, "Frieren") + "]")
+		}
+
+		val result = importer.import(file)
+
+		assertEquals(null, result.index)
+		assertEquals(1, result.restored[BackupSection.HISTORY])
+	}
 }

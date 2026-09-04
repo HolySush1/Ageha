@@ -12,6 +12,7 @@ import app.ageha.core.js.JsRuntime
 import app.ageha.core.js.RhinoJsRuntime
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.parsers.Ageha
+import app.ageha.core.backup.BackupExporter
 import app.ageha.core.backup.BackupImporter
 import app.ageha.core.data.ChapterDownloader
 import app.ageha.core.parsers.ParsersUpdateService
@@ -90,6 +91,7 @@ val agehaModule = module {
 		)
 	}
 	single { BackupImporter(get<AgehaDatabase>()) }
+	single { BackupExporter(get<AgehaDatabase>()) }
 	single {
 		ChapterDownloader(
 			catalog = get(),
@@ -159,6 +161,7 @@ class AgehaApplication private constructor(
 	val sourceStack: SourceStack get() = koin.get()
 	val parsersUpdates: ParsersUpdateService get() = koin.get()
 	val backupImporter: BackupImporter get() = koin.get()
+	val backupExporter: BackupExporter get() = koin.get()
 	val downloader: ChapterDownloader get() = koin.get()
 	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()

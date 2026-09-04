@@ -6,6 +6,8 @@ import app.ageha.core.database.entity.MangaTagsEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -153,8 +155,31 @@ class BackupImporter(
 		return Sections(byName, unknown)
 	}
 
+	/**
+	 * Read the `index` section, which is an array holding one object.
+	 *
+	 * The wrapping is not a guess and not defensive coding. The Android app writes every section
+	 * through one `writeJsonArray` helper, `index` included, so a real archive's index entry is
+	 * `[{"app_id":...}]` and never a bare object. Reading it as an object -- which this did --
+	 * fails, and the failure was swallowed here, so **every genuine Android backup reported no
+	 * index at all** while the tests passed against a fixture that wrote a bare object. The bug
+	 * was invisible from inside the project: only upstream's writer shows the real shape.
+	 *
+	 * Both shapes are accepted now. The array is what upstream and [BackupExporter] write; the
+	 * bare object costs one branch and covers any hand-made archive, which is the sort of thing
+	 * someone assembling a backup by hand would reasonably produce.
+	 *
+	 * Still null-on-failure rather than fatal: the index is provenance, not data. An archive whose
+	 * index is unreadable still holds a library worth restoring, and refusing the import over a
+	 * decorative field would be the wrong trade in the one moment the user is migrating.
+	 */
 	private fun decodeIndex(text: String): BackupIndex? = runCatching {
-		json.decodeFromString<BackupIndex>(text)
+		val element = json.parseToJsonElement(text)
+		val obj = when (element) {
+			is JsonArray -> element.firstOrNull() ?: return null
+			else -> element
+		}
+		json.decodeFromJsonElement<BackupIndex>(obj)
 	}.getOrNull()
 
 	private inline fun <reified T> decode(text: String): T = try {

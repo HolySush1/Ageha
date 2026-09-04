@@ -182,6 +182,30 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     not rewritten on every page turn. The `chapters` table had existed since Milestone 4 with
     nothing writing to it; it is what lets the last chapter be *named* and the next one *found*
     with no network call.
+- **Backup export.** Ageha writes the Android app's own backup format, so the migration runs both
+  ways and a desktop library is no longer trapped in one file on one disk. `File > Export backup`,
+  a button in Settings > Library, and `cli export [file]` for a scripted nightly copy.
+  - **The archive is upstream's, not Ageha's own**, which is what makes it restore onto a phone as
+    readily as onto another desktop -- and means the format has exactly one reader here, so the
+    round trip is testable end to end rather than by inspection.
+  - Written to a `.part` and renamed on success, the discipline downloads already use. A
+    half-written archive that looks like a backup is discovered at restore time, which is the one
+    moment there is nothing to fall back on.
+  - Streamed in windows of 64 rows. A backup embeds the full manga record with its tags inside
+    every history row and again inside every favourite row, so building one in memory first is the
+    difference between an export that works on a real library and one that works on a small one.
+  - **Every paged dump carries a primary-key tiebreaker, which upstream's do not.** `updated_at`,
+    `created_at` and `sort_key` are all non-unique, and paging a tie with `LIMIT`/`OFFSET` lets one
+    row appear in two windows and another in none. The count written looks right either way; the
+    damage only shows on restore.
+  - Tombstones stay home. Soft-deleted history and favourites are excluded, because the importer
+    clears `deleted_at` on the way in -- exporting a tombstone would resurrect a deletion as data.
+  - Only enabled sources are written, as upstream does. Ageha ships 1360 disabled, and the rest
+    would be a copy of the source list.
+  - Sections Ageha holds no data for -- `bookmarks`, `settings`, `scrobbling`, `statistics`,
+    `saved_filters` -- are absent rather than written empty. Absent reads as "nothing to say";
+    empty reads as "none of those", which for settings is a claim a restoring app could act on.
+
 - **Cross-source search.** One title against every enabled source at once, four requests in flight,
   grouped by source and skipping sources that cannot take a search term at all.
 
@@ -205,6 +229,15 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   Downloads `Ctrl+4`. Library stays `Ctrl+1` and Settings stays `Ctrl+,`.
 
 ### Fixed
+
+- **The index of every real Android backup was silently unreadable.** The Android app writes each
+  section through one `writeJsonArray` helper, `index` included, so the entry is an array holding
+  one object. Ageha decoded it as a bare object and swallowed the failure with `getOrNull()`, so
+  `result.index` was null for every genuine archive ever imported and the app version that wrote a
+  file was never available. The tests passed throughout, because the fixture wrote the shape the
+  parser wanted rather than the shape the app produces -- the bug was invisible from inside the
+  project and only upstream's writer shows it. Both shapes are accepted now, the fixture writes the
+  real one, and the failure to read an index is still not fatal: it is provenance, not data.
 
 - **Webtoon mode never resolved page urls past the first few.** `resolveAround` was called from
   `goToPage` and nowhere else, and scrolling a continuous strip does not go through `goToPage` -- so
@@ -244,6 +277,16 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   is `NonCancellable` so the last page turn survives quitting.
 
 ### Notes
+
+- **`history.page_count` does not survive a backup.** It is Ageha's own column (schema 30) and the
+  archive format has no field for it. Inventing one would produce a file the Android app does not
+  understand, for a value that reads as "unknown" anyway and degrades to resuming the exact saved
+  page. A round trip forgets it, exactly as an Android import arrives without it.
+- **Local archives are exported like anything else.** A CBZ opened from disk gets a history entry
+  whose url is an absolute path, and that path is unlikely to resolve on another machine. It is
+  kept rather than filtered: the position survives when the path does match, and Continue Reading
+  already shows an entry it cannot open as unavailable instead of failing. Dropping them would
+  guarantee the loss that keeping them only risks.
 
 - Sources are addressed and persisted **by name string, never by enum or ordinal**.
   `MangaParserSource` is generated at build time by KSP, so its constants differ between parser
