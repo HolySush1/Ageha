@@ -14,6 +14,9 @@ import app.ageha.core.network.AgehaPaths
 import app.ageha.core.parsers.Ageha
 import app.ageha.core.backup.BackupExporter
 import app.ageha.core.backup.BackupImporter
+import app.ageha.core.sync.SyncAccountStore
+import app.ageha.core.sync.SyncApi
+import app.ageha.core.sync.SyncEngine
 import app.ageha.core.data.ChapterDownloader
 import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.SourceStack
@@ -92,6 +95,11 @@ val agehaModule = module {
 	}
 	single { BackupImporter(get<AgehaDatabase>()) }
 	single { BackupExporter(get<AgehaDatabase>()) }
+	single { SyncAccountStore() }
+	// Sync travels over the source stack's client, so it shares one connection pool, one set
+	// of timeouts and one shutdown with everything else Ageha puts on the network.
+	single { SyncApi(get<SourceStack>().httpClient) }
+	single { SyncEngine(get<AgehaDatabase>(), get(), get()) }
 	single {
 		ChapterDownloader(
 			catalog = get(),
@@ -162,6 +170,9 @@ class AgehaApplication private constructor(
 	val parsersUpdates: ParsersUpdateService get() = koin.get()
 	val backupImporter: BackupImporter get() = koin.get()
 	val backupExporter: BackupExporter get() = koin.get()
+	val syncApi: SyncApi get() = koin.get()
+	val syncEngine: SyncEngine get() = koin.get()
+	val syncAccounts: SyncAccountStore get() = koin.get()
 	val downloader: ChapterDownloader get() = koin.get()
 	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()

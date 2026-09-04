@@ -284,7 +284,41 @@ The compatibility gate the brief asks for maps cleanly onto §5: reflectively as
 
 **Backup format — good news, it is simple.** A zip whose entries are named by `BackupSection`: `index, history, categories, favourites, settings, reader_grid, bookmarks, sources, scrobbling, statistics, saved_filters`. Each entry is `kotlinx.serialization` JSON. `index` carries `app_id`, `app_version` and `created_at`. Import is a zip read plus a JSON decode into about ten DTOs — a day of work, not a research project. This is the migration path and it is cheap. **I recommend building it early** (Milestone 4) rather than late; it is the difference between "try it" and "switch to it".
 
-**Sync server:** a `sync/` package exists. I have not read the protocol closely enough to say whether it is Android-coupled. Flagging as an open question, not a blocker.
+**Sync server -- answered 2026-09-04, and the answer is "no".** The brief asked to wire this up if
+feasible and to flag it if the protocol turned out to be Android-coupled. Having now read the
+`sync/` package properly: **the protocol is not Android-coupled at all; the Android app's
+*implementation* of it is, completely.** Those are different things, and conflating them is what
+made this look like a research problem.
+
+The protocol is four POSTs of JSON over OkHttp:
+
+| Endpoint | Body | Answer |
+|---|---|---|
+| `/auth` | `{"email","password"}` | `{"token"}`; failures are a bare quoted string |
+| `/resource/history` | `SyncDto` with `history` | `204`, or a `SyncDto` to merge |
+| `/resource/favourites` | `SyncDto` with `favourites` + `categories` | `204`, or a `SyncDto` |
+| `/forgot-password` | `{"email"}` | 2xx |
+
+with `Authorization: Bearer`, `X-App-Version` and `X-Db-Version` headers. Not incremental: the
+client sends everything it has and the server returns the merged set. `SyncHelper` is the whole of
+it and it is ~30 lines of actual HTTP.
+
+What *is* Android, and is all plumbing rather than protocol:
+
+- `AccountManager` for credentials, and `Account` threaded through every class
+- `ContentProviderClient` / `ContentProviderOperation` for every database read and write
+- `AbstractThreadedSyncAdapter`, `SyncService`, `SyncResult`/`SyncStats` for scheduling
+- the resource path segments are the app's own `TABLE_HISTORY` / `TABLE_FAVOURITES` constants,
+  interpolated straight into the url
+
+Every one of those has an obvious desktop replacement -- a file, a Room DAO, a coroutine -- and none
+of them is on the wire. **Built in `:core:sync`.** See `docs/ARCHITECTURE.md` 7d.
+
+One consequence worth recording here rather than in the architecture doc, because it is a *finding*
+about the schema: the sync DTOs carry `deleted_at` and the backup DTOs do not. That is why history,
+favourites and favourite categories are soft-deleted in the schema, and it is the justification for
+a design decision made back in Milestone 4 on the strength of a comment. A sync payload without
+tombstones cannot express a deletion, so every other device would push the deleted row back.
 
 **Scrobbling:** `scrobbling/` covers the trackers named in the brief. All are OAuth plus REST — no Android coupling expected.
 

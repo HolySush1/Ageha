@@ -32,6 +32,9 @@ clients registered per service, which is explained in
 - **Settings** — themes, reader defaults, and the parsers update engine: check, roll back, pin.
 - **Backup import and export** — the Android app's own format, both directions. Import reports
   exactly what it could not restore; export writes a file that also restores back onto a phone.
+- **Sync** — reading history, favourites and categories against a
+  [kotatsu-syncserver](https://github.com/KotatsuApp/kotatsu-syncserver) you run yourself, using
+  the same protocol as the Android app. There is no Ageha-hosted service and no default address.
 
 ## The command line
 
@@ -44,6 +47,7 @@ Everything the UI does is also reachable without it, which is how the source lay
 ./app/cli/build/install/cli/bin/cli smoke --sample 25   # exercise real sources end to end
 ./app/cli/build/install/cli/bin/cli import backup.zip   # import an Android backup
 ./app/cli/build/install/cli/bin/cli export              # write one, dated, to the current directory
+./app/cli/build/install/cli/bin/cli sync                # sync with a kotatsu-syncserver
 ```
 
 ## Migrating from the Android app
@@ -56,6 +60,20 @@ It runs the other way too. **File → Export backup**, or `cli export`, writes t
 desktop library restores onto a phone as readily as it arrived from one — and, more to the point,
 copies to another machine or a backup drive. Downloaded chapters are not in the archive; they are
 ordinary CBZ files, and copying the folder moves them.
+
+## Sync
+
+Optional, off until configured, and pointed at a server you host. **Settings → Sync**, or
+`cli sync login <address> <email>`. Ageha speaks the same protocol as the Android app, so a phone
+and a desktop stay in step through one server; reading history, favourites and categories travel
+both ways, including deletions.
+
+Two things worth knowing before you use it. Ageha syncs at startup and when asked, **not on a
+timer** — the protocol is not incremental, so a periodic sync would re-send your whole library each
+time. And if you let it remember your password, that password is stored in a file in Ageha's data
+folder, protected by your user account and nothing stronger: desktop has no keychain a plain JVM
+can reach without shipping a native library for every platform. Declining is supported, and costs a
+prompt whenever the session expires.
 
 ## Architecture in one paragraph
 

@@ -10,6 +10,7 @@ dependencies {
 	// pinning all live here, so this is one of the few feature modules that talks to :core:parsers.
 	implementation(project(":core:parsers"))
 	implementation(project(":core:backup"))
+	implementation(project(":core:sync"))
 	implementation(project(":core:js"))
 	implementation(compose.desktop.currentOs)
 	implementation(libs.kotlinx.coroutines.core)

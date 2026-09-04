@@ -10,6 +10,7 @@ import app.ageha.core.database.dao.MangaDao
 import app.ageha.core.database.dao.MangaPrefsDao
 import app.ageha.core.database.dao.RestoreDao
 import app.ageha.core.database.dao.SourcesDao
+import app.ageha.core.database.dao.SyncDao
 import app.ageha.core.database.entity.ChapterEntity
 import app.ageha.core.database.entity.FavouriteCategoryEntity
 import app.ageha.core.database.entity.FavouriteEntity
@@ -66,4 +67,6 @@ abstract class AgehaDatabase : RoomDatabase() {
 	abstract fun restoreDao(): RestoreDao
 
 	abstract fun exportDao(): ExportDao
+
+	abstract fun syncDao(): SyncDao
 }

@@ -9,6 +9,11 @@ import app.ageha.core.backup.BackupExporter
 import app.ageha.core.backup.BackupImportException
 import app.ageha.core.backup.BackupImporter
 import app.ageha.core.backup.defaultBackupFileName
+import app.ageha.core.sync.SyncAccount
+import app.ageha.core.sync.SyncAccountStore
+import app.ageha.core.sync.SyncApi
+import app.ageha.core.sync.SyncApiException
+import app.ageha.core.sync.SyncEngine
 import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
@@ -50,6 +55,7 @@ fun main(args: Array<String>) {
 				"parsers" -> parsers(stack, args.getOrNull(1))
 				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
 				"export" -> exportBackup(args.getOrNull(1))
+				"sync" -> sync(stack, args.getOrNull(1), args.drop(2))
 				"library" -> library()
 				"smoke" -> smokeTest(
 					stack = stack,
@@ -215,6 +221,78 @@ private suspend fun exportBackup(path: String?) {
 		exitProcess(1)
 	} finally {
 		database.close()
+	}
+}
+
+/**
+ * Sync against a kotatsu-syncserver.
+ *
+ * `login` deliberately does **not** take the password as an argument. A password on a command line
+ * lands in shell history, in the process table and in any terminal recording, and the whole point
+ * of this feature is that a credential is being handled carefully. It is read from the console
+ * with echo off instead, and refused outright when there is no console -- a piped stdin cannot be
+ * read without echo, so accepting one would silently downgrade exactly the protection this is for.
+ */
+private suspend fun sync(stack: SourceStack, command: String?, args: List<String>) {
+	val accounts = SyncAccountStore()
+	when (command) {
+		null, "run" -> {
+			val database = AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db"))
+			try {
+				val engine = SyncEngine(database, SyncApi(stack.httpClient), accounts)
+				println(engine.sync().describe())
+			} finally {
+				database.close()
+			}
+		}
+
+		"status" -> {
+			val account = accounts.load()
+			if (account == null) {
+				println("No sync account is set up. Run 'cli sync login <url> <email>'.")
+			} else {
+				println("Signed in as " + account.email)
+				println("Server:   " + account.syncUrl)
+				println("Password: " + if (account.isPasswordStored) "stored on this machine" else "not stored")
+			}
+		}
+
+		"login" -> {
+			if (args.size < 2) {
+				System.err.println("Usage: cli sync login <url> <email>")
+				exitProcess(2)
+			}
+			val console = System.console()
+			if (console == null) {
+				System.err.println(
+					"No console available, so the password cannot be read without echoing it. " +
+						"Run this from a terminal.",
+				)
+				exitProcess(2)
+			}
+			val password = String(console.readPassword("Password for %s: ", args[1]))
+			val url = args[0].trimEnd('/').let {
+				if (it.startsWith("http://") || it.startsWith("https://")) it else "https://" + it
+			}
+			try {
+				val token = SyncApi(stack.httpClient).authenticate(url, args[1], password)
+				accounts.save(SyncAccount(syncUrl = url, email = args[1], token = token, password = password))
+				println("Signed in to " + url + " as " + args[1] + ".")
+			} catch (e: SyncApiException) {
+				System.err.println("Sign-in failed: " + e.message)
+				exitProcess(1)
+			}
+		}
+
+		"logout" -> {
+			accounts.clear()
+			println("Signed out. The stored account file has been removed.")
+		}
+
+		else -> {
+			System.err.println("Unknown sync command: " + command)
+			exitProcess(2)
+		}
 	}
 }
 
@@ -456,6 +534,8 @@ private fun printUsage() {
 
 		  import  <backup.zip>          import a Kotatsu-Redo Android backup
 		  export  [backup.zip]          write a backup of the local database
+		  sync    [run|status|login|logout]
+		                                sync with a kotatsu-syncserver
 		  library                       what is in the local database
 		  parsers [check|rollback]      show the loaded parsers build, or update it
 		  sources [filter]              list sources in the loaded parsers build

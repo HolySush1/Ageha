@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -31,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -51,6 +53,7 @@ enum class SettingsSection(val label: String) {
 	READER("Reader"),
 	PARSERS("Sources and updates"),
 	LIBRARY("Library and backup"),
+	SYNC("Sync"),
 	ABOUT("About"),
 }
 
@@ -78,11 +81,24 @@ fun SettingsScreen(
 	onPin: (String?) -> Unit,
 	onImportBackup: () -> Unit,
 	onExportBackup: () -> Unit,
+	sync: SyncUiState,
+	onSignIn: (String, String, String, Boolean) -> Unit,
+	onSignOut: () -> Unit,
+	onSyncNow: () -> Unit,
+	onSyncOnStart: (Boolean) -> Unit,
 	onClearHistory: () -> Unit,
 	historyCount: Int,
 	modifier: Modifier = Modifier,
+	/**
+	 * Which panel opens first.
+	 *
+	 * A parameter rather than always Appearance so the headless render can draw each panel.
+	 * Every one of them is a screen that can fail to compose, and the ones reached by three
+	 * clicks are precisely the ones nobody checks before a release.
+	 */
+	initialSection: SettingsSection = SettingsSection.APPEARANCE,
 ) {
-	var section by remember { mutableStateOf(SettingsSection.APPEARANCE) }
+	var section by remember { mutableStateOf(initialSection) }
 	Row(modifier.fillMaxSize()) {
 		Column(
 			Modifier
@@ -112,6 +128,7 @@ fun SettingsScreen(
 				SettingsSection.LIBRARY -> LibraryPanel(
 					onImportBackup, onExportBackup, onClearHistory, historyCount,
 				)
+				SettingsSection.SYNC -> SyncPanel(sync, onSignIn, onSignOut, onSyncNow, onSyncOnStart)
 				SettingsSection.ABOUT -> AboutPanel(parsers)
 			}
 		}
@@ -442,3 +459,135 @@ internal val readerHelp: List<Pair<String, String>> = listOf(
 	"Ctrl + wheel" to "Zoom about the pointer",
 	"Escape" to "Close the reader",
 )
+
+/**
+ * Sync against a self-hosted kotatsu-syncserver.
+ *
+ * Two things this panel says out loud that a settings screen usually would not, because both are
+ * things a user is entitled to know before typing a password into an application:
+ *
+ *  - **Where the password goes.** Desktop has no system keychain a plain JVM can reach, so a
+ *    remembered password is a file on this machine. Saying so is the difference between a user
+ *    making that choice and discovering it.
+ *  - **That the server is theirs.** This is not an Ageha service, and there is no default host.
+ *    Nothing is sent anywhere until an address is typed here.
+ */
+@Composable
+private fun SyncPanel(
+	state: SyncUiState,
+	onSignIn: (String, String, String, Boolean) -> Unit,
+	onSignOut: () -> Unit,
+	onSyncNow: () -> Unit,
+	onSyncOnStart: (Boolean) -> Unit,
+) {
+	PanelTitle("Sync")
+	Explain(
+		"Ageha syncs reading history, favourites and categories with a kotatsu-syncserver you " +
+			"run yourself -- the same protocol and the same server the Android app uses, so the " +
+			"two stay in step. There is no Ageha-hosted service and no default address: nothing " +
+			"leaves this machine until you enter one.",
+	)
+
+	if (state.isSignedIn) {
+		Text("Signed in as ${state.email}", style = MaterialTheme.typography.bodyLarge)
+		Text(
+			state.syncUrl,
+			style = AgehaTextStyles.metadata,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		)
+		Explain(
+			if (state.isPasswordStored) {
+				"The password is stored on this machine so Ageha can sign in again when the " +
+					"session expires. It is a file in Ageha's data folder, protected by your " +
+					"user account and nothing stronger."
+			} else {
+				"The password is not stored. Ageha will ask for it again when the session expires."
+			},
+		)
+		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+			Button(onClick = onSyncNow, enabled = !state.isBusy) {
+				Text(if (state.isBusy) "Syncing..." else "Sync now")
+			}
+			TextButton(onClick = onSignOut, enabled = !state.isBusy) { Text("Sign out") }
+		}
+		Row(verticalAlignment = Alignment.CenterVertically) {
+			Switch(checked = state.syncOnStart, onCheckedChange = onSyncOnStart, enabled = !state.isBusy)
+			Text("Sync when Ageha starts", modifier = Modifier.padding(start = AgehaSpacing.sm))
+		}
+		Explain(
+			"Ageha syncs at startup and when you ask it to. It does not sync on a timer -- a " +
+				"desktop app that is open all day would spend the day re-sending your whole " +
+				"library, because the protocol is not incremental.",
+		)
+	} else {
+		var url by remember { mutableStateOf(state.syncUrl) }
+		var email by remember { mutableStateOf(state.email) }
+		var password by remember { mutableStateOf("") }
+		var rememberPassword by remember { mutableStateOf(true) }
+		OutlinedTextField(
+			value = url,
+			onValueChange = { url = it },
+			label = { Text("Server address") },
+			placeholder = { Text("sync.example.org") },
+			singleLine = true,
+			enabled = !state.isBusy,
+			modifier = Modifier.fillMaxWidth(),
+		)
+		OutlinedTextField(
+			value = email,
+			onValueChange = { email = it },
+			label = { Text("Email") },
+			singleLine = true,
+			enabled = !state.isBusy,
+			modifier = Modifier.fillMaxWidth(),
+		)
+		OutlinedTextField(
+			value = password,
+			onValueChange = { password = it },
+			label = { Text("Password") },
+			singleLine = true,
+			enabled = !state.isBusy,
+			visualTransformation = PasswordVisualTransformation(),
+			modifier = Modifier.fillMaxWidth(),
+		)
+		Row(verticalAlignment = Alignment.CenterVertically) {
+			Switch(
+				checked = rememberPassword,
+				onCheckedChange = { rememberPassword = it },
+				enabled = !state.isBusy,
+			)
+			Text("Remember the password", modifier = Modifier.padding(start = AgehaSpacing.sm))
+		}
+		Explain(
+			if (rememberPassword) {
+				"Stored in a file in Ageha's data folder so sync can renew its session on its " +
+					"own. Protected by your user account; there is no keychain on desktop that " +
+					"Ageha can reach without shipping a native library per platform."
+			} else {
+				"Nothing is written to disk except the session token. Ageha will ask again when " +
+					"it expires."
+			},
+		)
+		Button(
+			onClick = { onSignIn(url, email, password, rememberPassword) },
+			enabled = !state.isBusy,
+		) {
+			Text(if (state.isBusy) "Signing in..." else "Sign in")
+		}
+	}
+
+	state.message?.let { message ->
+		HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+		SelectionContainer {
+			Text(
+				message,
+				style = AgehaTextStyles.metadata,
+				color = if (state.isError) {
+					MaterialTheme.colorScheme.error
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+			)
+		}
+	}
+}

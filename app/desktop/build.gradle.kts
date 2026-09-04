@@ -21,6 +21,7 @@ dependencies {
 	implementation(project(":feature:settings"))
 	implementation(project(":feature:downloads"))
 	implementation(project(":core:backup"))
+	implementation(project(":core:sync"))
 	implementation(compose.desktop.currentOs)
 	implementation(libs.koin.core)
 	implementation(libs.okhttp)

@@ -54,6 +54,8 @@ import app.ageha.core.parsers.Ageha
 import app.ageha.feature.library.LibraryViewModel
 import app.ageha.feature.settings.ParsersViewModel
 import app.ageha.feature.settings.SettingsScreen
+import app.ageha.feature.settings.SettingsSection
+import app.ageha.feature.settings.SyncViewModel
 import app.ageha.feature.reader.AutoHideChrome
 import app.ageha.feature.reader.ReaderActions
 import app.ageha.feature.reader.ReaderKeys
@@ -82,6 +84,8 @@ fun AgehaShell(
 	onToggleFullscreen: () -> Unit = {},
 	onImportBackup: () -> Unit = {},
 	onExportBackup: () -> Unit = {},
+	/** Which settings panel opens first. Used by the headless render; see SettingsScreen. */
+	initialSettingsSection: SettingsSection = SettingsSection.APPEARANCE,
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember {
@@ -108,6 +112,17 @@ fun AgehaShell(
 			activeVersion = application.sourceStack.parsersVersion,
 			sourceCount = application.sources.allDescriptors().size,
 			scope = scope,
+		)
+	}
+
+	val syncViewModel = remember {
+		SyncViewModel(
+			api = application.syncApi,
+			engine = application.syncEngine,
+			accounts = application.syncAccounts,
+			scope = scope,
+			syncOnStart = preferences.syncOnStart,
+			onSyncOnStartChanged = { onPreferencesChange(preferences.copy(syncOnStart = it)) },
 		)
 	}
 
@@ -235,6 +250,7 @@ fun AgehaShell(
 
 						Destination.Settings -> {
 							val parsersState by parsersViewModel.state.collectAsState()
+							val syncState by syncViewModel.state.collectAsState()
 							// The count comes from the same live list Continue Reading draws, so the
 							// confirm button cannot offer to clear a number that is no longer true.
 							val continueState by continueViewModel.state.collectAsState()
@@ -256,6 +272,12 @@ fun AgehaShell(
 								onPin = parsersViewModel::pin,
 								onImportBackup = onImportBackup,
 								onExportBackup = onExportBackup,
+								sync = syncState,
+								onSignIn = syncViewModel::signIn,
+								onSignOut = syncViewModel::signOut,
+								onSyncNow = syncViewModel::syncNow,
+								onSyncOnStart = syncViewModel::setSyncOnStart,
+								initialSection = initialSettingsSection,
 								onClearHistory = {
 									scope.launch {
 										val cleared = application.history.clearAll()

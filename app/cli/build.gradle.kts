@@ -7,6 +7,7 @@ dependencies {
 	implementation(project(":core:js"))
 	implementation(project(":core:model"))
 	implementation(project(":core:backup"))
+	implementation(project(":core:sync"))
 	implementation(project(":core:database"))
 	implementation(libs.kotlinx.coroutines.core)
 }

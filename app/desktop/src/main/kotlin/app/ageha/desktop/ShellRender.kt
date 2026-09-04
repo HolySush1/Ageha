@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.Density
 import app.ageha.core.data.LocalArchive
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.feature.settings.SettingsSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.EncodedImageFormat
@@ -56,6 +57,7 @@ fun main(args: Array<String>) {
 				scene.close()
 			}
 		}
+		renderSettingsPanels(app, outDir)
 		renderSearchAll(app, outDir)
 		renderReader(app, outDir)
 		println("sources visible to the UI: ${app.sources.allDescriptors().size}")
@@ -70,6 +72,41 @@ private const val RENDER_SETTLE_MS = 2_500L
 /** Frames to draw while waiting for asynchronous image loads to land. */
 private const val RENDER_FRAMES = 30
 private const val RENDER_FRAME_GAP_MS = 100L
+
+/**
+ * Renders each settings panel.
+ *
+ * The panels beyond Appearance are three clicks from the front door, which makes them exactly the
+ * screens that compose wrong for a release and are found by a user rather than by CI. Sync is the
+ * newest and the worst of them to get wrong: it is a form, so a failure there is a user who cannot
+ * sign in rather than a screen that looks odd.
+ */
+private fun renderSettingsPanels(app: AgehaApplication, outDir: File) {
+	for (section in SettingsSection.entries) {
+		val navigator = Navigator().apply { switchTo(Section.SETTINGS) }
+		val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
+			AgehaTheme(mode = AgehaThemeMode.DARK) {
+				AgehaShell(
+					app,
+					navigator,
+					FocusRequester(),
+					Modifier.fillMaxSize(),
+					initialSettingsSection = section,
+				)
+			}
+		}
+		try {
+			scene.render()
+			runBlocking { delay(RENDER_FRAME_GAP_MS) }
+			val image = scene.render()
+			val name = "shell-settings-" + section.name.lowercase() + ".png"
+			File(outDir, name).writeBytes(checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes)
+			println("wrote " + name)
+		} finally {
+			scene.close()
+		}
+	}
+}
 
 /**
  * Renders the cross-source search, which nothing else reaches.

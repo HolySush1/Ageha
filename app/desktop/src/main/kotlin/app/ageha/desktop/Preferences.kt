@@ -33,6 +33,15 @@ data class Preferences(
 	val window: WindowGeometry = WindowGeometry(),
 	val lastCategoryId: Int = -1,
 	val minimiseToTray: Boolean = false,
+	/**
+	 * Run a sync when the window opens, if an account is configured.
+	 *
+	 * On by default, and harmless when it is not: with no account the engine returns
+	 * `NotConfigured` without touching the network. Startup is the one moment a sync is genuinely
+	 * wanted -- it is when another device's changes are most likely to be waiting -- and it is
+	 * also the moment the user is least interested in being asked.
+	 */
+	val syncOnStart: Boolean = true,
 )
 
 /**

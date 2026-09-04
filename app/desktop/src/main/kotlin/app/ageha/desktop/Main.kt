@@ -29,6 +29,7 @@ import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.BrandAssets
 import app.ageha.core.data.LocalArchive
+import app.ageha.core.sync.SyncOutcome
 import app.ageha.core.designsystem.ThemeGallery
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.debounce
@@ -85,6 +86,28 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 		} ?: WindowPosition.PlatformDefault,
 		placement = if (preferences.window.isMaximized) WindowPlacement.Maximized else WindowPlacement.Floating,
 	)
+
+	// Sync once, at startup, if an account is configured.
+	//
+	// `Unit` rather than the preference as the key: this is a one-shot at launch, and keying it on
+	// `syncOnStart` would fire another sync every time the user toggled the switch in settings.
+	// With no account configured the engine returns NotConfigured without touching the network, so
+	// the check costs nothing on the installations that will never use this.
+	//
+	// Only failures are surfaced. A sync that worked is not news, and a notice card on every
+	// launch is a notice card nobody reads -- but a sync that has been quietly failing for a
+	// fortnight is exactly what a user needs told.
+	LaunchedEffect(Unit) {
+		if (!preferences.syncOnStart) return@LaunchedEffect
+		val outcome = app.syncEngine.sync()
+		if (outcome is SyncOutcome.Failed) {
+			app.notices.post(
+				title = "Sync failed",
+				detail = outcome.describe(),
+				isError = true,
+			)
+		}
+	}
 
 	// Fullscreen is a window placement, not a preference: it is a mode you are in right now, and
 	// restoring an app fullscreen because it was fullscreen last week is startling.

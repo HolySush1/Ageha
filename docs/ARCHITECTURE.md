@@ -491,6 +491,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged �
 | 4 | Database + library/history persistence | **done.** Room 2.8 + bundled SQLite proven on desktop; schema at v28, 8 of 17 entities |
 | 4b | **Android backup import** | **done.** History, favourites, categories and sources restore from a real archive; unsupported sections and dropped rows are reported, not hidden |
 | 4c | **Backup export** (not in the brief) | **done.** The same format, written. The brief asked only for import, which left a desktop library with no supported way off the disk it was on -- see 7c |
+| 4d | **Sync** (`if feasible` in the brief) | **done.** The brief's open question is answered: the protocol is portable, only the Android plumbing is not. `:core:sync` -- see 7d |
 | 5 | `DESIGN.md`, `:core:designsystem`, icon pipeline, theme gallery | **done.** Palette derived from the seed rather than hand-picked, contrast enforced by test in all three themes, icons rebuilt from the source logo by `:tools:brandkit`, gallery renders headlessly to `docs/design-gallery.png` |
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list and the §1.4 risk is now **closed by measurement** -- 200 pages, every frame inside budget, heap bounded |
@@ -610,6 +611,86 @@ What is deliberately not carried: tombstones (the importer clears `deleted_at`, 
 soft delete would resurrect it as data), disabled sources (1360 of them, and upstream's dump is
 `dumpEnabled` for the same reason), per-installation Cloudflare state, and `history.page_count` —
 Ageha's own schema-30 column, which has no field in the format and degrades to "unknown".
+
+---
+
+## 7d. Sync, and why it was feasible when tracking was not
+
+The brief asked for the kotatsu-syncserver protocol "if feasible", and to flag it if it turned out
+to be Android-coupled. `FINDINGS.md` §7 carried that as an open question for four milestones. It is
+now answered, and the answer needed nothing but reading the code properly: **the protocol is not
+Android-coupled; the Android app's implementation of it is, entirely.**
+
+The wire format is four POSTs of JSON over OkHttp. What is Android is the apparatus around it --
+`AccountManager` holding the credentials, `ContentProviderClient` performing every database
+operation, `AbstractThreadedSyncAdapter` doing the scheduling. None of that is on the wire, and
+each has an obvious desktop replacement: a file, a Room DAO, a coroutine. Mistaking the plumbing
+for the protocol is what made this look like a research problem for so long.
+
+### Why this is buildable when Shikimori and AniList were not
+
+Worth stating plainly, because from a distance both look like "an untested network integration"
+and the project refused one and built the other.
+
+Tracking needed an **OAuth client id and secret registered by this project's owner** — a credential
+Ageha itself would have to hold, which cannot be invented, cannot be committed to a public GPL
+repository, and cannot be exercised without being real. Writing those blind would have shipped four
+network clients that look finished and work for nobody.
+
+Sync needs a **server address and an account, both supplied by the user**. Ageha holds no
+credential of its own, so there is nothing here that cannot be tested — and it is tested, against a
+real socket, in `SyncEngineTest`. The distinction was never "network"; it was whether the untestable
+part is a secret this project would have to own.
+
+### Three things about the implementation
+
+- **The payload carries tombstones; a backup does not.** This is the single most important
+  difference between `:core:sync` and `:core:backup`, and blurring it corrupts data in a way that
+  looks like a bug in someone else's device. A backup describes what a library *is*, so exporting a
+  soft delete would restore a deletion as data. A sync payload describes what has *happened*, and
+  the tombstone is the only thing that distinguishes "deleted here" from "never existed here" —
+  without it, every other device pushes the deleted row straight back. `SyncDao` exists solely
+  because it returns the rows `ExportDao` deliberately hides.
+
+  This also retroactively justifies a Milestone 4 decision. The `deleted_at` columns went into the
+  schema with a comment saying sync would need them, and nothing used them for six milestones. They
+  were right.
+
+- **Tombstones are collected last, never first.** A tombstone the server has not yet seen is a
+  deletion that has not propagated. Collecting it early does not delete the row — it deletes the
+  *deletion*, and the next sync from any other device restores the entry the user removed. The
+  four-day retention window is the Android app's, deliberately: two clients garbage-collecting on
+  different schedules is exactly how a deletion comes back from the dead.
+
+- **The token refresh is explicit, not an OkHttp `Authenticator`.** Upstream uses one, and it works
+  there because its refresh call is `runBlocking` inside a callback. An `Authenticator` is a
+  blocking hook on a connection thread, and re-entering suspending code from one is a deadlock
+  waiting for a slow server. `SyncEngine` retries once, explicitly, on a 401 — once and not in a
+  loop, because a rejected refresh means the credentials are wrong and retrying only locks the
+  account out.
+
+### The credential problem, stated rather than hidden
+
+Desktop has no system keychain a plain JVM can reach without a native library per platform — the
+cost that got QuickJS rejected in favour of Rhino. The protocol refreshes an expired token by
+re-sending the password, so remembering it is what makes a startup sync silent.
+
+Ageha stores it, in a file, restricted to the owner where the filesystem can express that and
+leaning on the user-profile ACL on Windows where it cannot — the same protection already standing
+between another user and the cookie jar or the library database. What it does **not** do is
+encrypt the file with a key sitting beside it, which is a decoration that reassures a reviewer and
+protects nobody. The settings panel says where the password goes, in those words, and declining to
+store it is supported: everything works until the token expires, and then Ageha asks again.
+
+One deliberate departure from upstream: a bare hostname is normalised to **`https://`**, where the
+Android app assumes `http://`. This request carries a password, and defaulting a credential to
+cleartext because the user omitted five characters is not a default worth matching.
+
+### What is not built
+
+Sync runs at startup and on demand, not on a timer. The protocol is not incremental — every sync
+re-sends the entire history and favourites set — so a desktop app left open all day would spend the
+day re-uploading the library. A timer is the wrong shape for this protocol, not a missing feature.
 
 ---
 

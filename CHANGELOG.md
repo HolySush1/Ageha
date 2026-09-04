@@ -182,6 +182,36 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     not rewritten on every page turn. The `chapters` table had existed since Milestone 4 with
     nothing writing to it; it is what lets the last chapter be *named* and the next one *found*
     with no network call.
+- **Sync, against a self-hosted kotatsu-syncserver.** The brief asked for this "if feasible" and
+  to flag it if the protocol turned out to be Android-coupled. It is not: the protocol is four
+  POSTs of JSON over OkHttp, and it is the Android app's *implementation* -- `AccountManager`,
+  `ContentProviderClient`, `AbstractThreadedSyncAdapter` -- that is Android, none of which is on
+  the wire. `docs/FINDINGS.md` 7 records the evidence; the question had been open since
+  Milestone 1.
+  - `:core:sync` -- the wire format, the HTTP client, the account store and the merge engine.
+    Reading history, favourites and categories travel both ways, so a desktop and a phone stay in
+    step through the same server the Android app uses.
+  - **The payload carries tombstones, and a backup deliberately does not.** This is the whole
+    reason `deleted_at` has been in the schema since Milestone 4 with nothing using it. A sync
+    payload without tombstones cannot express a deletion, so every other device pushes the deleted
+    row straight back.
+  - **Tombstones are collected after the exchange, never before.** A tombstone the server has not
+    seen is a deletion that has not propagated; collecting it early deletes the *deletion*, and the
+    next sync restores what the user removed. The four-day window is the Android app's, matched on
+    purpose -- two clients collecting on different schedules is how a deletion comes back.
+  - An expired token is refreshed once and the retry carries the new one. Explicitly, rather than
+    through an OkHttp `Authenticator` as upstream does: an `Authenticator` is a blocking callback
+    on a connection thread, and re-entering suspending code from one deadlocks against a slow
+    server.
+  - Settings > Sync, and `cli sync [run|status|login|logout]`. `login` reads the password from the
+    console with echo off and refuses a piped stdin, because a password given as an argument lands
+    in shell history and in the process table.
+  - Syncs at startup and on demand, **not on a timer**. The protocol is not incremental, so a
+    desktop app left open all day would spend it re-sending the whole library.
+  - Twelve tests drive the engine through a real socket against a server that speaks the protocol,
+    covering the payload shape, tombstones both ways, 204-is-not-empty, token refresh, an
+    unreachable host and a malformed reply.
+
 - **Backup export.** Ageha writes the Android app's own backup format, so the migration runs both
   ways and a desktop library is no longer trapped in one file on one disk. `File > Export backup`,
   a button in Settings > Library, and `cli export [file]` for a scripted nightly copy.
@@ -277,6 +307,16 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   is `NonCancellable` so the last page turn survives quitting.
 
 ### Notes
+
+- **The sync password is stored in a file, and the app says so.** Desktop has no system keychain a
+  plain JVM can reach without a native library per platform. The protocol refreshes an expired
+  token by re-sending the password, so remembering it is what makes a startup sync silent. The file
+  is restricted to its owner where the filesystem can express that, and leans on the user-profile
+  ACL on Windows where it cannot -- the same protection the cookie jar and the database already
+  have. It is deliberately *not* encrypted with a key stored beside it, which protects nobody.
+  Declining to store it is supported and costs a prompt when the token expires.
+- **A bare sync hostname is normalised to `https://`, where the Android app assumes `http://`.**
+  That request carries a password.
 
 - **`history.page_count` does not survive a backup.** It is Ageha's own column (schema 30) and the
   archive format has no field for it. Inventing one would produce a file the Android app does not

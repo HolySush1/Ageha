@@ -40,12 +40,17 @@ rootProject.name = "ageha"
 // :feature:tracking, because external tracking services are out of scope for good (CLAUDE.md 9)
 // and Continue Reading lives in :feature:library instead; and :feature:updates, because the update
 // engine lives in :core:parsers and needed a screen rather than a module of its own.
+//
+// :core:sync is not in the brief's list either. It arrived once the brief's open question about
+// the kotatsu-syncserver protocol was actually answered: the wire format is portable and only the
+// Android app's plumbing around it is not. See docs/ARCHITECTURE.md 7d.
 include(
 	":core:model",
 	":core:network",
 	":core:js",
 	":core:jvmcontext",
 	":core:backup",
+	":core:sync",
 	":core:database",
 	":core:parsers",
 	":core:designsystem",
