@@ -3,6 +3,7 @@ package app.ageha.desktop
 import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.ReaderBackground
 import app.ageha.core.network.AgehaPaths
+import app.ageha.feature.settings.AppUpdatePolicy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -42,6 +43,13 @@ data class Preferences(
 	 * also the moment the user is least interested in being asked.
 	 */
 	val syncOnStart: Boolean = true,
+	/**
+	 * Whether Ageha looks for a newer Ageha, and whether it says so.
+	 *
+	 * Defaults to checking quietly. It does *not* control installation -- the installer owns that
+	 * on all three platforms and exposes no runtime switch. See [AppUpdatePolicy].
+	 */
+	val appUpdatePolicy: AppUpdatePolicy = AppUpdatePolicy.AUTOMATIC,
 )
 
 /**

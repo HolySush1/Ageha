@@ -100,6 +100,7 @@ val agehaModule = module {
 	// of timeouts and one shutdown with everything else Ageha puts on the network.
 	single { SyncApi(get<SourceStack>().httpClient) }
 	single { SyncEngine(get<AgehaDatabase>(), get(), get()) }
+	single { AppUpdateChecker(get<SourceStack>().httpClient) }
 	single {
 		ChapterDownloader(
 			catalog = get(),
@@ -173,6 +174,7 @@ class AgehaApplication private constructor(
 	val syncApi: SyncApi get() = koin.get()
 	val syncEngine: SyncEngine get() = koin.get()
 	val syncAccounts: SyncAccountStore get() = koin.get()
+	val appUpdates: AppUpdateChecker get() = koin.get()
 	val downloader: ChapterDownloader get() = koin.get()
 	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()

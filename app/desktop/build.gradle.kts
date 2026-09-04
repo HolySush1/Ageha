@@ -79,3 +79,35 @@ tasks.register<JavaExec>("renderShell") {
 	classpath = sourceSets["main"].runtimeClasspath
 	args(layout.buildDirectory.dir("shell").get().asFile.absolutePath)
 }
+
+/**
+ * Keep `AgehaVersion.CURRENT` honest.
+ *
+ * The same guard `:core:parsers` puts on `BundledParsers.VERSION`, for the same reason: a constant
+ * that has to agree with something else in the build will eventually stop agreeing with it, and
+ * the symptom here would be an app that tells every user they are running a version they are not.
+ * The project version carries a `-SNAPSHOT` suffix between releases, which is not part of the
+ * released version number, so it is stripped before comparing.
+ */
+val checkAppVersion by tasks.registering {
+	group = "verification"
+	description = "Fails if AgehaVersion.CURRENT disagrees with the project version."
+	val declared = project.version.toString().substringBefore("-SNAPSHOT")
+	val source = layout.projectDirectory
+		.file("src/main/kotlin/app/ageha/desktop/AppUpdates.kt").asFile
+	inputs.file(source)
+	inputs.property("declared", declared)
+	outputs.upToDateWhen { true }
+	doLast {
+		val found = Regex("""const val CURRENT = "([^"]+)"""")
+			.find(source.readText())?.groupValues?.get(1)
+		if (found != declared) {
+			throw GradleException(
+				"AgehaVersion.CURRENT is \"$found\" but the project version is \"$declared\". " +
+					"They name the same release and must match.",
+			)
+		}
+	}
+}
+
+tasks.named("check") { dependsOn(checkAppVersion) }

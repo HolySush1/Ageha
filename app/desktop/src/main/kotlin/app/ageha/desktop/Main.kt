@@ -30,6 +30,7 @@ import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.BrandAssets
 import app.ageha.core.data.LocalArchive
 import app.ageha.core.sync.SyncOutcome
+import app.ageha.feature.settings.AppUpdatePolicy
 import app.ageha.core.designsystem.ThemeGallery
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.debounce
@@ -106,6 +107,21 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 				detail = outcome.describe(),
 				isError = true,
 			)
+		}
+	}
+
+	// Ageha's own update check, at startup, subject to the policy.
+	//
+	// Only NOTIFY posts a notice. AUTOMATIC checks and stays quiet -- the installer is what
+	// actually applies the update on every platform, so under that policy there is nothing for the
+	// user to do and nothing worth interrupting them for. MANUAL does not look at all, and that
+	// has to mean *no request*, not a request whose result is hidden: a setting called "never
+	// check" that still contacts GitHub would be a lie.
+	LaunchedEffect(Unit) {
+		if (preferences.appUpdatePolicy == AppUpdatePolicy.MANUAL) return@LaunchedEffect
+		val outcome = app.appUpdates.check()
+		if (outcome is AppUpdateOutcome.Available && preferences.appUpdatePolicy == AppUpdatePolicy.NOTIFY) {
+			app.notices.post("Ageha ${outcome.version} is available", outcome.describe())
 		}
 	}
 

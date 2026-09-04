@@ -182,6 +182,20 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
     not rewritten on every page turn. The `chapters` table had existed since Milestone 4 with
     nothing writing to it; it is what lets the last chapter be *named* and the next one *found*
     with no network call.
+- **Layer 2 gets its settings toggle**, which the brief asked for and which was the last thing on
+  its list still missing. Settings > Sources and updates > Ageha itself: check quietly, check and
+  tell me, or never check.
+  - **It does not claim to control installation, because Ageha cannot.** On all three platforms
+    the installer owns that -- MSIX, the macOS bundle updater, apt -- each configured at package
+    time with no runtime switch. A checkbox claiming otherwise would be a lie. What the toggle
+    controls is whether Ageha looks and whether it tells you, and the panel says so in those words.
+  - "Never check" makes **no request at all**, rather than making one and hiding the answer.
+  - Versions compare numerically. Lexicographically `"0.10.0" < "0.9.0"`, which would tell everyone
+    on 0.9 to upgrade to 0.10 and everyone on 0.10 that they were ahead of it.
+  - `AgehaVersion.CURRENT` is guarded by `:app:desktop:checkAppVersion` against the project
+    version -- the same guard `:core:parsers` puts on its bundled parsers version, and verified to
+    actually fail when the two disagree.
+
 - **Sync, against a self-hosted kotatsu-syncserver.** The brief asked for this "if feasible" and
   to flag it if the protocol turned out to be Android-coupled. It is not: the protocol is four
   POSTs of JSON over OkHttp, and it is the Android app's *implementation* -- `AccountManager`,

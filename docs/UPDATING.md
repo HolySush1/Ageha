@@ -89,6 +89,40 @@ version that disagrees with what it is tagged.
 See [RELEASING.md](RELEASING.md) for signing, which is not done yet and is the one thing standing
 between a release and a clean first-run experience.
 
+### The settings toggle, and what it honestly controls
+
+The brief asks for an automatic / notify / manual toggle here, and it exists — under
+**Settings → Sources and updates → Ageha itself**. What it controls needs saying plainly, because
+the obvious reading is wrong.
+
+**Ageha cannot install its own updates, and the toggle does not pretend to.** On all three
+platforms the *installer* owns that: MSIX on Windows, the bundle's updater on macOS, apt on Linux.
+Each is configured when the package is built, and none exposes a runtime switch. A settings
+checkbox claiming to turn automatic installation on and off would be a lie told by a checkbox.
+
+What Ageha genuinely controls is whether it *looks*, and whether it *tells you*:
+
+| Setting | Behaviour |
+|---|---|
+| Check quietly (default) | Asks GitHub at startup, says nothing. The installer updates you anyway. |
+| Check and tell me | Asks at startup, and posts a notice when a newer release exists. |
+| Never check | No request is made at all. A "Check for updates" button remains. |
+
+"Never check" means *no request*, not a request whose answer is hidden. A setting by that name
+that still contacted GitHub would be the same lie in a different place.
+
+The check is an unauthenticated read of `releases/latest` — a public endpoint on a public
+repository, so a token would be a credential Ageha would have to hold for no gain. That caps it at
+60 requests an hour per address, which one check per launch cannot reach. A repository with no
+releases answers 404, which is reported as "could not check" rather than as an error, because it is
+the state this project is in right now.
+
+Versions compare **numerically**. The string comparison is the trap: `"0.10.0" < "0.9.0"`
+lexicographically, which would tell everyone on 0.9 to upgrade to 0.10 and everyone on 0.10 that
+they were ahead of it. `AgehaVersion.CURRENT` is checked against the project version by
+`./gradlew :app:desktop:checkAppVersion`, the same guard `:core:parsers` puts on its bundled
+parsers version, so the two cannot drift.
+
 ---
 
 ## Layer 3 — the automation

@@ -81,6 +81,9 @@ fun SettingsScreen(
 	onPin: (String?) -> Unit,
 	onImportBackup: () -> Unit,
 	onExportBackup: () -> Unit,
+	appUpdates: AppUpdatesUiState,
+	onAppUpdatePolicy: (AppUpdatePolicy) -> Unit,
+	onCheckForAppUpdate: () -> Unit,
 	sync: SyncUiState,
 	onSignIn: (String, String, String, Boolean) -> Unit,
 	onSignOut: () -> Unit,
@@ -124,6 +127,7 @@ fun SettingsScreen(
 				SettingsSection.PARSERS -> ParsersPanel(
 					parsers, jsRuntime, parsersDescription,
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
+					appUpdates, onAppUpdatePolicy, onCheckForAppUpdate,
 				)
 				SettingsSection.LIBRARY -> LibraryPanel(
 					onImportBackup, onExportBackup, onClearHistory, historyCount,
@@ -256,6 +260,9 @@ private fun ParsersPanel(
 	onCheck: () -> Unit,
 	onRollBack: () -> Unit,
 	onPin: (String?) -> Unit,
+	appUpdates: AppUpdatesUiState,
+	onAppUpdatePolicy: (AppUpdatePolicy) -> Unit,
+	onCheckForAppUpdate: () -> Unit,
 ) {
 	PanelTitle("Sources and updates")
 	Explain(
@@ -326,7 +333,55 @@ private fun ParsersPanel(
 	}
 
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	AppUpdatesStatus(appUpdates, onAppUpdatePolicy, onCheckForAppUpdate)
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	JavaScriptStatus(jsRuntime)
+}
+
+/**
+ * Ageha's own updates, as distinct from the sources'.
+ *
+ * Sitting under the parsers panel on purpose: these are the two things that update, they update
+ * for completely different reasons and at completely different rates, and a user who has just read
+ * about one is in the right frame of mind to be told how the other differs.
+ */
+@Composable
+private fun AppUpdatesStatus(
+	state: AppUpdatesUiState,
+	onPolicy: (AppUpdatePolicy) -> Unit,
+	onCheck: () -> Unit,
+) {
+	PanelTitle("Ageha itself")
+	Explain(
+		"Ageha ${state.currentVersion}. This updates far more rarely than the sources do -- a " +
+			"site changing needs a new parsers build, not a new Ageha.",
+	)
+	Explain(
+		"Installing an update is your installer's job, not Ageha's: Windows, macOS and Linux each " +
+			"handle it their own way and none of them can be switched on or off from in here. " +
+			"What this setting controls is whether Ageha looks, and whether it tells you.",
+	)
+	for (option in AppUpdatePolicy.entries) {
+		Row(
+			Modifier.fillMaxWidth().clickable { onPolicy(option) },
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			RadioButton(selected = state.policy == option, onClick = { onPolicy(option) })
+			Column(Modifier.padding(start = AgehaSpacing.sm)) {
+				Text(option.label, style = MaterialTheme.typography.bodyLarge)
+				Text(
+					option.detail,
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+		}
+	}
+	OutlinedButton(onClick = onCheck, enabled = !state.isChecking) {
+		Text(if (state.isChecking) "Checking..." else "Check for updates")
+	}
+	state.lastResult?.let { SelectionContainer { Explain(it) } }
 }
 
 /**

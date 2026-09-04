@@ -22,7 +22,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +56,7 @@ import app.ageha.core.parsers.Ageha
 import app.ageha.feature.library.LibraryViewModel
 import app.ageha.feature.settings.ParsersViewModel
 import app.ageha.feature.settings.SettingsScreen
+import app.ageha.feature.settings.AppUpdatesUiState
 import app.ageha.feature.settings.SettingsSection
 import app.ageha.feature.settings.SyncViewModel
 import app.ageha.feature.reader.AutoHideChrome
@@ -125,6 +128,11 @@ fun AgehaShell(
 			onSyncOnStartChanged = { onPreferencesChange(preferences.copy(syncOnStart = it)) },
 		)
 	}
+
+	// Ageha's own update check. State lives here rather than in a view model because there is one
+	// action and one string of result -- a class for it would be ceremony.
+	var appUpdateChecking by remember { mutableStateOf(false) }
+	var appUpdateResult by remember { mutableStateOf<String?>(null) }
 
 	val notices by application.notices.notices.collectAsState()
 
@@ -272,6 +280,21 @@ fun AgehaShell(
 								onPin = parsersViewModel::pin,
 								onImportBackup = onImportBackup,
 								onExportBackup = onExportBackup,
+								appUpdates = AppUpdatesUiState(
+									policy = preferences.appUpdatePolicy,
+									currentVersion = AgehaVersion.CURRENT,
+									isChecking = appUpdateChecking,
+									lastResult = appUpdateResult,
+								),
+								onAppUpdatePolicy = { onPreferencesChange(preferences.copy(appUpdatePolicy = it)) },
+								onCheckForAppUpdate = {
+									appUpdateChecking = true
+									appUpdateResult = null
+									scope.launch {
+										appUpdateResult = application.appUpdates.check().describe()
+										appUpdateChecking = false
+									}
+								},
 								sync = syncState,
 								onSignIn = syncViewModel::signIn,
 								onSignOut = syncViewModel::signOut,
