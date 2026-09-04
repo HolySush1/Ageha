@@ -26,7 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -382,14 +382,34 @@ fun BrowseScreen(
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
 	val gridState = rememberLazyGridState()
-	val shouldLoadMore by remember(state.manga.size, state.hasMore) {
-		derivedStateOf {
-			val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-			state.hasMore && last >= state.manga.size - PREFETCH_DISTANCE
-		}
-	}
+	// The state and the callback, always current, so the effect below can read them without being
+	// restarted. This is the whole fix for a listing that stopped dead after its first page.
+	//
+	// It used to hoist a `derivedStateOf` out of `remember(state.manga.size, state.hasMore)` and
+	// collect it from a `LaunchedEffect` keyed only on the source. Recomposition duly built a new
+	// derived state for every page -- and the coroutine went on observing the *first* one, which
+	// had closed over `manga.size == 0` and `hasMore == true` and so evaluated `last >= -8`: true,
+	// permanently. `snapshotFlow` emits only on change, so it emitted `true` exactly once, during
+	// the first page, when `loadMore` was already in flight and returned early. It never emitted
+	// again. Every source in the app was one page deep, which is what the report described as
+	// "only 20 things load".
+	//
+	// Reading the state inside the flow instead of capturing it fixes that at the root: the
+	// predicate is re-evaluated whenever the grid scrolls *or* the state changes, and the guards
+	// the view model applies are mirrored here, so the flow goes false while a page is in flight
+	// and can go true again for the next one.
+	val current by rememberUpdatedState(state)
+	val loadMore by rememberUpdatedState(onLoadMore)
 	LaunchedEffect(gridState, state.sourceName) {
-		snapshotFlow { shouldLoadMore }.collect { if (it) onLoadMore() }
+		snapshotFlow {
+			val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+			val loaded = current.manga.size
+			loaded > 0 &&
+				current.hasMore &&
+				!current.isLoadingMore &&
+				!current.isLoadingFirstPage &&
+				last >= loaded - PREFETCH_DISTANCE
+		}.collect { if (it) loadMore() }
 	}
 
 	Column(modifier.fillMaxSize()) {
