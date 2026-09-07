@@ -1,5 +1,6 @@
 package app.ageha.core.designsystem
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,12 +27,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.model.AgehaManga
 import coil3.compose.AsyncImage
@@ -60,6 +69,12 @@ fun MangaCard(
 	badgeCount: Int = 0,
 	progress: Float? = null,
 	isSelected: Boolean = false,
+	/** Mono line under the title, left: how far in you are. Null draws no row at all. */
+	positionLabel: String? = null,
+	/** Mono line under the title, right: `read`, `reading`, `started`. */
+	stateLabel: String? = null,
+	/** Every chapter read. Draws the accent tick, and turns [stateLabel] accent-coloured. */
+	isComplete: Boolean = false,
 ) {
 	Column(
 		modifier = modifier
@@ -88,10 +103,15 @@ fun MangaCard(
 			CoverImage(manga, imageHeaders)
 			if (progress != null && progress > 0f) ReadingProgressBar(progress)
 			if (badgeCount > 0) {
-				AgehaAccent.UnreadBadge(
-					badgeCount,
-					Modifier.align(Alignment.TopEnd).padding(AgehaSpacing.xs),
+				CoverBadge(
+					if (badgeCount == 1) "NEW" else "NEW $badgeCount",
+					Modifier.align(Alignment.TopStart).padding(AgehaSpacing.xs),
 				)
+			}
+			// Top *right*, opposite the badge, and only when finished. The two never compete for
+			// the same corner: a title with unread chapters is by definition not complete.
+			if (isComplete) {
+				CompletionTick(Modifier.align(Alignment.TopEnd).padding(AgehaSpacing.xs))
 			}
 		}
 		Text(
@@ -102,6 +122,86 @@ fun MangaCard(
 			overflow = TextOverflow.Ellipsis,
 			minLines = 2,
 		)
+		// Drawn only when there is something to say. A row of empty mono baselines under every
+		// never-opened cover would add a line of height to each card in the grid to report
+		// nothing, which on a shelf of new titles is most of them.
+		if (positionLabel != null || stateLabel != null) {
+			Row(
+				Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+			) {
+				Text(
+					positionLabel.orEmpty(),
+					style = AgehaTextStyles.monoMeta,
+					color = AgehaTheme.skin.inkFaint,
+					maxLines = 1,
+				)
+				Text(
+					stateLabel.orEmpty(),
+					style = AgehaTextStyles.monoMeta,
+					// The one word on the card that earns the accent. "read" is the end state a
+					// shelf is scanned for, and colouring it is what lets someone find the
+					// finished titles without reading a single title.
+					color = if (isComplete) AgehaTheme.skin.accent else AgehaTheme.skin.inkFaint,
+					maxLines = 1,
+				)
+			}
+		}
+	}
+}
+
+/**
+ * The mono cap in the corner of a cover: `NEW`, `NEW 3`, `DONE`.
+ *
+ * Its own near-black plate rather than the theme's surface, and that is deliberate: this sits on
+ * arbitrary cover art, which can be any colour at any brightness, so a translucent theme fill has
+ * no contrast guarantee at all. A fixed dark plate does, in every skin, over every cover.
+ */
+@Composable
+private fun CoverBadge(label: String, modifier: Modifier = Modifier) {
+	Box(
+		modifier
+			.clip(AgehaTheme.skin.chip)
+			.background(Color(0xB30C0A0E))
+			.padding(horizontal = 5.dp, vertical = 2.dp),
+	) {
+		Text(label, style = AgehaTextStyles.monoEyebrow, color = Color.White)
+	}
+}
+
+/**
+ * The accent disc with a white tick: every chapter read.
+ *
+ * Drawn rather than set as a glyph, for the reason the window buttons are: a check mark is not in
+ * Archivo, and a text implementation would fall through to whatever face Skia found next.
+ */
+@Composable
+private fun CompletionTick(modifier: Modifier = Modifier) {
+	Box(
+		modifier
+			.size(19.dp)
+			.clip(CircleShape)
+			.background(AgehaTheme.skin.accent)
+			.semantics { contentDescription = "Finished" },
+		contentAlignment = Alignment.Center,
+	) {
+		Canvas(Modifier.size(9.dp)) {
+			val stroke = 2.dp.toPx()
+			drawLine(
+				Color.White,
+				Offset(0f, size.height * 0.55f),
+				Offset(size.width * 0.38f, size.height),
+				stroke,
+				StrokeCap.Round,
+			)
+			drawLine(
+				Color.White,
+				Offset(size.width * 0.38f, size.height),
+				Offset(size.width, 0f),
+				stroke,
+				StrokeCap.Round,
+			)
+		}
 	}
 }
 
@@ -140,7 +240,7 @@ private fun CoverImage(manga: AgehaManga, imageHeaders: Map<String, String>) {
 @Composable
 private fun CoverFallback(title: String) {
 	Box(
-		Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest),
+		Modifier.fillMaxSize().coverPlaceholder(),
 		contentAlignment = Alignment.Center,
 	) {
 		Text(
@@ -181,7 +281,54 @@ fun MangaThumbnail(
 	}
 }
 
-/** A hairline of progress across the bottom of a cover. Neutral, so it does not tint the art. */
+/**
+ * The placeholder a cover shows before -- or instead of -- its artwork.
+ *
+ * Two layers, both from the handoff: the skin's own `--cover` gradient at 160 degrees, and a
+ * repeating 135-degree stripe of white at 5%. The stripe is what stops it reading as a broken
+ * image. A flat rectangle in a grid of real covers looks like a failure; the same rectangle with a
+ * texture across it looks like something that has not arrived yet, which is what it is.
+ *
+ * `TileMode.Repeated` over a short gradient is how a repeating stripe is expressed here -- Compose
+ * has no repeating-linear-gradient, and drawing the bars by hand would mean a `Canvas` that has to
+ * be told its own size.
+ */
+@Composable
+fun Modifier.coverPlaceholder(): Modifier {
+	val skin = AgehaTheme.skin
+	val stripe = Color.White.copy(alpha = 0.05f)
+	return this
+		.background(
+			Brush.linearGradient(
+				listOf(skin.coverHigh, skin.coverLow),
+				start = Offset.Zero,
+				end = Offset(STRIPE_SPAN * 6, STRIPE_SPAN * 18),
+			),
+		)
+		.background(
+			Brush.linearGradient(
+				0f to stripe,
+				0.5f to stripe,
+				0.5f to Color.Transparent,
+				1f to Color.Transparent,
+				start = Offset.Zero,
+				end = Offset(STRIPE_SPAN, STRIPE_SPAN),
+				tileMode = TileMode.Repeated,
+			),
+		)
+}
+
+/** The handoff's 9px band inside an 18px repeat, as one diagonal step. */
+private const val STRIPE_SPAN = 18f
+
+/**
+ * Progress across the bottom of a cover.
+ *
+ * Accent rather than `primary`, which is the one place the reader's neutrality rule does *not*
+ * reach: this is 3dp of library chrome pinned to the edge of the art, not a wash over it, and it
+ * is the same bar the handoff draws in the same colour. The dark track underneath is what keeps it
+ * legible over a pale cover.
+ */
 @Composable
 private fun BoxScope.ReadingProgressBar(progress: Float) {
 	Box(
@@ -189,13 +336,13 @@ private fun BoxScope.ReadingProgressBar(progress: Float) {
 			.align(Alignment.BottomStart)
 			.fillMaxWidth()
 			.height(3.dp)
-			.background(Color.Black.copy(alpha = 0.45f)),
+			.background(Color.Black.copy(alpha = 0.6f)),
 	) {
 		Box(
 			Modifier
 				.fillMaxWidth(progress.coerceIn(0f, 1f))
 				.height(3.dp)
-				.background(MaterialTheme.colorScheme.primary),
+				.background(AgehaTheme.skin.accent),
 		)
 	}
 }
@@ -235,6 +382,9 @@ fun MangaGrid(
 				badgeCount = item.badgeCount,
 				progress = item.progress,
 				isSelected = item.isSelected,
+				positionLabel = item.positionLabel,
+				stateLabel = item.stateLabel,
+				isComplete = item.isComplete,
 			)
 		}
 		if (footer != null) {
@@ -258,6 +408,10 @@ data class MangaGridItem(
 	val badgeCount: Int = 0,
 	val progress: Float? = null,
 	val isSelected: Boolean = false,
+	/** See `MangaCard`. Explore leaves all three unset: a catalogue row has no reading state. */
+	val positionLabel: String? = null,
+	val stateLabel: String? = null,
+	val isComplete: Boolean = false,
 ) {
 	val key: String get() = "${manga.sourceName}:${manga.id}"
 }

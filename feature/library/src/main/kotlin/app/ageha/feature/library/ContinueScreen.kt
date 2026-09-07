@@ -42,6 +42,14 @@ import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.ContinueEntry
 import app.ageha.core.designsystem.AgehaMotion
 import app.ageha.core.designsystem.AgehaSearchField
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Path
+import app.ageha.core.designsystem.AgehaTheme
+import kotlin.math.roundToInt
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.CoverAccent
@@ -320,40 +328,82 @@ fun ContinueHero(
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		Column(
-			Modifier.weight(1f).padding(AgehaSpacing.xl),
-			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+			Modifier.weight(1f).padding(horizontal = 36.dp, vertical = AgehaSpacing.xl),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 		) {
-			Text(
-				if (entry.isCaughtUp) "CAUGHT UP" else "CONTINUE READING",
-				style = AgehaTextStyles.metadata,
-				color = accent.mutedContent,
-			)
+			// The eyebrow, with the handoff's 5px dot. The dot is doing real work: at 10px with
+			// .16em of tracking the label is quiet enough to be missed entirely, and a single
+			// saturated mark in front of it is what makes the eye start the line.
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+			) {
+				Box(Modifier.size(5.dp).clip(CircleShape).background(accent.content))
+				Text(
+					if (entry.isCaughtUp) "MANGA • CAUGHT UP" else "MANGA • LAST READ",
+					style = AgehaTextStyles.monoEyebrow,
+					color = accent.mutedContent,
+				)
+			}
 			Text(
 				entry.manga.title,
-				style = MaterialTheme.typography.headlineMedium,
+				// The one place in Ageha where type is the loudest thing on screen: 40sp at 800.
+				// This panel answers the question the app is opened to settle, so the title of the
+				// book you are part-way through is allowed to be the largest thing in the window.
+				style = MaterialTheme.typography.displayLarge,
 				color = accent.content,
 				maxLines = 2,
 				overflow = TextOverflow.Ellipsis,
+				modifier = Modifier.widthIn(max = 600.dp),
 			)
-			Text(
-				listOfNotNull(entry.sourceTitle, entry.chapterLabel).joinToString("  ·  "),
-				style = AgehaTextStyles.metadata,
-				color = accent.mutedContent,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			entry.progressPercent?.let { HeroProgress(it, accent) }
-			Button(
-				onClick = onOpen,
-				// Inverted out of the panel rather than coloured from the palette. A brand-filled
-				// button on a panel tinted by somebody's cover is two unrelated colours arguing;
-				// these two are the pair CoverAccent has already measured against each other.
-				colors = ButtonDefaults.buttonColors(
-					containerColor = accent.content,
-					contentColor = accent.container,
-				),
+			ChapterChip(entry, accent)
+			// The synopsis is the handoff's, and it is the reason the panel got taller. Resuming
+			// after a fortnight away is mostly a memory problem -- a title and a chapter number
+			// do not answer "what was this about", and two lines of the description do.
+			entry.manga.description?.takeIf { it.isNotBlank() }?.let { synopsis ->
+				Text(
+					synopsis,
+					style = MaterialTheme.typography.bodyLarge,
+					color = accent.mutedContent,
+					maxLines = 2,
+					overflow = TextOverflow.Ellipsis,
+					modifier = Modifier.widthIn(max = 520.dp),
+				)
+			}
+			Row(
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 			) {
-				Text(if (entry.isCaughtUp) "Reopen" else "Resume")
+				Button(
+					onClick = onOpen,
+					// Inverted out of the panel rather than coloured from the palette. A
+					// brand-filled button on a panel tinted by somebody's cover is two unrelated
+					// colours arguing; these two are the pair CoverAccent has already measured
+					// against each other.
+					colors = ButtonDefaults.buttonColors(
+						containerColor = accent.content,
+						contentColor = accent.container,
+					),
+				) {
+					Text(if (entry.isCaughtUp) "Reopen" else "Continue reading")
+				}
+				// The position, in mono, beside the buttons rather than under a bar. It replaced a
+				// progress bar plus a percentage: the bar and the number said the same thing
+				// twice, and the cover already carries a bar of its own three pixels tall.
+				Text(
+					buildString {
+						append(entry.chapterLabel ?: entry.sourceTitle)
+						entry.progressPercent?.let {
+							append(" · ")
+							append((it * 100).roundToInt())
+							append("%")
+						}
+					},
+					style = AgehaTextStyles.monoMeta,
+					color = accent.mutedContent,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
 			}
 		}
 		MangaThumbnail(
@@ -367,6 +417,45 @@ fun ContinueHero(
 			// have taken the entire panel and been 1.5 times taller than it. Naming the width is
 			// what pins it to the panel's height instead.
 			modifier = Modifier.width(HERO_COVER_WIDTH).fillMaxHeight(),
+		)
+	}
+}
+
+/**
+ * The chapter you stopped on, as a chip with a play triangle.
+ *
+ * A chip rather than another line of metadata, because this is the panel's *subject* -- the thing
+ * the button acts on -- and setting it beside the source name as one more grey line made it read
+ * as provenance. The triangle is drawn rather than typed for the reason the window buttons are:
+ * a solid right-pointing triangle is not a character Archivo carries.
+ */
+@Composable
+private fun ChapterChip(entry: ContinueEntry, accent: CoverAccentColors) {
+	val shape = AgehaTheme.skin.chip
+	Row(
+		Modifier
+			.clip(shape)
+			.background(accent.content.copy(alpha = 0.08f))
+			.border(1.dp, accent.content.copy(alpha = 0.22f), shape)
+			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
+		Canvas(Modifier.size(8.dp)) {
+			val path = Path().apply {
+				moveTo(0f, 0f)
+				lineTo(size.width, size.height / 2f)
+				lineTo(0f, size.height)
+				close()
+			}
+			drawPath(path, accent.content)
+		}
+		Text(
+			listOfNotNull(entry.chapterLabel, entry.sourceTitle).joinToString(" · "),
+			style = AgehaTextStyles.monoMeta,
+			color = accent.content,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
 		)
 	}
 }
@@ -409,10 +498,17 @@ private fun HeroProgress(progress: Float, accent: CoverAccentColors) {
 }
 
 /** Tall enough for a headline and a line of metadata, short enough to leave the grid visible. */
-private val HERO_HEIGHT = 222.dp
+private val HERO_HEIGHT = 321.dp
 
-/** [HERO_HEIGHT] at a cover's 2:3. Stated rather than derived, so the two cannot round apart. */
-private val HERO_COVER_WIDTH = 148.dp
+/**
+ * [HERO_HEIGHT] at a cover's 2:3. Stated rather than derived, so the two cannot round apart.
+ *
+ * 214dp is the handoff's figure, and 321 is exactly its 3:2 -- so the cover fills the panel's full
+ * height with nothing cropped and no letterboxing. The panel grew from 222dp to make room for the
+ * synopsis the handoff puts under the title; at the old height the description had two lines and
+ * the cover had 148dp, which is a thumbnail rather than the largest piece of artwork in the app.
+ */
+private val HERO_COVER_WIDTH = 214.dp
 
 /** The progress bar. Fixed width, so it does not stretch across an ultrawide window. */
 private val HERO_PROGRESS_WIDTH = 160.dp

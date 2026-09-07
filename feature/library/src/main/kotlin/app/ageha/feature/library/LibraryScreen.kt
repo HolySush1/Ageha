@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import kotlin.math.roundToInt
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,8 @@ import app.ageha.core.data.LibraryEntry
 import app.ageha.core.designsystem.AgehaGlass
 import app.ageha.core.designsystem.AgehaMotion
 import app.ageha.core.designsystem.AgehaSearchField
+import app.ageha.core.designsystem.AgehaChip
+import app.ageha.core.designsystem.SectionHeader
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -167,8 +170,21 @@ private fun LibraryContent(
 				onOpen = onContinue,
 				onSeeAll = onSeeAllContinue,
 			)
-			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 		}
+		// The shelf's own band, between the Continue Reading rows above and the grid below. It
+		// replaced a plain divider, which separated the two without saying what either was --
+		// and on a screen where both halves are covers, "which of these is my library" is a
+		// question the eye actually has to ask.
+		SectionHeader(
+			label = "My library",
+			count = if (state.entries.size == 1) "1 title" else "${state.entries.size} titles",
+			modifier = Modifier.padding(
+				start = AgehaSpacing.md,
+				end = AgehaSpacing.md,
+				top = AgehaSpacing.sm,
+				bottom = AgehaSpacing.sm,
+			),
+		)
 		MangaGrid(
 			manga = state.entries.map { it.toGridItem(imageHeaders) },
 			onClick = onOpenManga,
@@ -177,12 +193,44 @@ private fun LibraryContent(
 	}
 }
 
-private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>) = MangaGridItem(
-	manga = manga,
-	imageHeaders = headers[manga.sourceName].orEmpty(),
-	badgeCount = newChapters,
-	progress = progressPercent,
-)
+/**
+ * A library row as the grid draws it.
+ *
+ * ## Why the position reads as a percentage rather than "Ch 214 / 260"
+ *
+ * The handoff prints a chapter position on every card. Ageha cannot honestly produce one here.
+ * A [LibraryEntry] carries how far through the *current chapter* the reader is and how many
+ * chapters have appeared since they last opened it -- there is no total, because the Android
+ * schema this database stays compatible with has no per-chapter read table, and the total only
+ * exists after a source has been asked for a fresh chapter list.
+ *
+ * So the card says what is actually known. A percentage is the same information the progress bar
+ * underneath it carries, stated in a form you can read at a glance across a grid, and it never
+ * claims a chapter count that came from nowhere.
+ */
+private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>): MangaGridItem {
+	val percent = progressPercent
+	// 100% is the threshold rather than a mark-as-read flag, for the same reason: there is no
+	// per-chapter table to ask. Reaching the end of the last chapter Ageha knows about is the
+	// strongest completion signal this schema can give.
+	val isComplete = percent != null && percent >= 1f
+	return MangaGridItem(
+		manga = manga,
+		imageHeaders = headers[manga.sourceName].orEmpty(),
+		badgeCount = newChapters,
+		progress = percent,
+		positionLabel = percent?.let { "${(it * 100).roundToInt()}%" },
+		stateLabel = when {
+			isComplete -> "read"
+			percent != null && percent > 0f -> "reading"
+			hasBeenRead -> "started"
+			// Never opened. No state word at all rather than "unread", which would put a mono row
+			// under every card on a freshly imported library to say nothing.
+			else -> null
+		},
+		isComplete = isComplete,
+	)
+}
 
 /**
  * The shelf rail.
@@ -465,19 +513,20 @@ private fun LibraryToolbar(
 
 @Composable
 private fun SortMenu(sort: LibrarySort, onSort: (LibrarySort) -> Unit) {
-	var expanded by remember { mutableStateOf(false) }
-	Box {
-		TextButton(onClick = { expanded = true }) { Text(sort.label) }
-		DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-			for (option in LibrarySort.entries) {
-				DropdownMenuItem(
-					text = { Text(option.label) },
-					onClick = {
-						onSort(option)
-						expanded = false
-					},
-				)
-			}
+	// Chips in a row, not a dropdown behind a word.
+	//
+	// The handoff puts the shelf's ordering on the surface -- `Recent / Unread first / Completed`
+	// -- and it is right to. A dropdown hides the current sort behind its own label and costs two
+	// clicks to change; five chips cost one, and the set of choices is readable without opening
+	// anything. Ageha has five orderings rather than the mockup's three, which is a difference in
+	// what the app can do rather than in how it should look.
+	Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs)) {
+		for (option in LibrarySort.entries) {
+			AgehaChip(
+				label = option.label,
+				isSelected = option == sort,
+				onClick = { onSort(option) },
+			)
 		}
 	}
 }
