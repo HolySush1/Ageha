@@ -74,6 +74,7 @@ fun main(args: Array<String>) {
 		renderSettingsPanels(app, outDir)
 		renderCollapsedRail(app, outDir)
 		renderSearchAll(app, outDir)
+		renderCommandPanel(app, outDir)
 		renderContinueHero(app, outDir)
 		renderReader(app, outDir)
 		val descriptors = app.sources.allDescriptors()
@@ -175,6 +176,42 @@ private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
  * anybody's server. That is the intended behaviour on a machine that has never been configured,
  * and rendering it proves the screen handles it.
  */
+/**
+ * Renders the command panel over the library.
+ *
+ * It is an overlay rather than a destination, so nothing in the screen loop can reach it -- and an
+ * overlay that only appears on a keystroke is exactly the surface that ships broken. Composing it
+ * with `isCommandPanelOpen = true` proves the panel lays out, that its backdrop covers the window,
+ * and that the field and rows draw over a live screen rather than under it.
+ */
+private fun renderCommandPanel(app: AgehaApplication, outDir: File) {
+	val navigator = Navigator().apply { switchTo(Section.LIBRARY) }
+	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
+			AgehaShell(
+				app,
+				navigator,
+				FocusRequester(),
+				Modifier.fillMaxSize(),
+				isCommandPanelOpen = true,
+			)
+		}
+	}
+	try {
+		var image = scene.render()
+		repeat(RENDER_FRAMES) {
+			runBlocking { delay(RENDER_FRAME_GAP_MS) }
+			image = scene.render()
+		}
+		File(outDir, "shell-command-panel.png").writeBytes(
+			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
+		)
+		println("wrote shell-command-panel.png")
+	} finally {
+		scene.close()
+	}
+}
+
 private fun renderSearchAll(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { searchAllSources("berserk", subject = "Berserk") }
 	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
