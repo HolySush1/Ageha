@@ -372,7 +372,6 @@ fun MangaThumbnail(
 @Composable
 fun Modifier.coverPlaceholder(): Modifier {
 	val skin = AgehaTheme.skin
-	val stripe = Color.White.copy(alpha = 0.05f)
 	return this
 		.background(
 			Brush.linearGradient(
@@ -381,21 +380,40 @@ fun Modifier.coverPlaceholder(): Modifier {
 				end = Offset(STRIPE_SPAN * 6, STRIPE_SPAN * 18),
 			),
 		)
-		.background(
-			Brush.linearGradient(
-				0f to stripe,
-				0.5f to stripe,
-				0.5f to Color.Transparent,
-				1f to Color.Transparent,
-				start = Offset.Zero,
-				end = Offset(STRIPE_SPAN, STRIPE_SPAN),
-				tileMode = TileMode.Repeated,
-			),
-		)
+		.diagonalStripe()
+}
+
+/**
+ * The handoff's diagonal stripe: a 9px band inside an 18px repeat, at white 4-5%.
+ *
+ * It appears on every placeholder surface in the design -- covers, the Continue banner, the
+ * reader's page blocks -- and it is doing one job in all three: saying "this is a surface, not a
+ * failure". A flat rectangle in a grid reads as something that did not load; a striped one reads
+ * as a deliberate texture.
+ *
+ * Public because the banner needs it over artwork rather than over a gradient, and a second
+ * implementation of a texture is how two surfaces end up with stripes at different angles.
+ */
+fun Modifier.diagonalStripe(alpha: Float = STRIPE_ALPHA): Modifier {
+	val stripe = Color.White.copy(alpha = alpha)
+	return this.background(
+		Brush.linearGradient(
+			0f to stripe,
+			0.5f to stripe,
+			0.5f to Color.Transparent,
+			1f to Color.Transparent,
+			start = Offset.Zero,
+			end = Offset(STRIPE_SPAN, STRIPE_SPAN),
+			tileMode = TileMode.Repeated,
+		),
+	)
 }
 
 /** The handoff's 9px band inside an 18px repeat, as one diagonal step. */
 private const val STRIPE_SPAN = 18f
+
+/** White at 5%. Visible as texture on a dark surface, invisible as a pattern. */
+private const val STRIPE_ALPHA = 0.05f
 
 /**
  * Progress across the bottom of a cover.

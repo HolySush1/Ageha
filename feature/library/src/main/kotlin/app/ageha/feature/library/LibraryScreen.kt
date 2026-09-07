@@ -1,79 +1,60 @@
 package app.ageha.feature.library
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.TooltipArea
-import androidx.compose.foundation.background
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import kotlin.math.roundToInt
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.ageha.core.data.ContinueEntry
-import app.ageha.core.data.LibraryCategory
 import app.ageha.core.data.LibraryEntry
-import app.ageha.core.designsystem.AgehaGlass
-import app.ageha.core.designsystem.AgehaMotion
-import app.ageha.core.designsystem.AgehaSearchField
 import app.ageha.core.designsystem.AgehaChip
-import app.ageha.core.designsystem.SectionHeader
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.AgehaTheme
+import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.EmptyState
-import app.ageha.core.designsystem.GlassTone
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaGridItem
-import app.ageha.core.designsystem.glassSurface
+import app.ageha.core.designsystem.SectionHeader
 import app.ageha.core.model.AgehaManga
+import kotlin.math.roundToInt
 
 /**
  * The library: the user's own collection.
  *
- * Laid out for a desktop window rather than scaled up from a phone. Categories live in a
- * persistent rail down the left instead of behind a tab bar or a drawer, because there is room
- * for them and because switching shelves is the most common thing done here -- hiding it behind a
- * tap would be a phone compromise imported for no reason.
+ * ## One column, not a rail beside a grid
+ *
+ * This screen used to be a 224dp shelf rail welded to the left edge, with a search field and a
+ * sort row above the grid. The handoff draws it as a single scrolling body -- banner, shelf
+ * header, chips, grid -- and that is the better shape for a reason beyond fidelity: the rail spent
+ * a fixed slice of a desktop window on a list most people change a few times a day, in the one
+ * view whose whole job is to fit as many covers across as possible.
+ *
+ * The shelves did not go anywhere. They are chips in the header block now, in the same vocabulary
+ * as the sort chips beside them, which is what this design's component set says a small exclusive
+ * choice looks like.
+ *
+ * ## Where the search field went
+ *
+ * Into the nav pill's command panel, which is where the handoff puts library search and what
+ * WIRING.md describes it doing -- filter the local library instantly, then fan out to the enabled
+ * sources. A per-screen field that did the first half and a separate screen that did the second
+ * was two controls for one question.
  */
 @Composable
 fun LibraryScreen(
@@ -83,63 +64,16 @@ fun LibraryScreen(
 	onContinue: (ContinueEntry) -> Unit,
 	onSeeAllContinue: () -> Unit,
 	onSelectCategory: (Int) -> Unit,
-	onSearch: (String) -> Unit,
 	onSort: (LibrarySort) -> Unit,
 	onNeedHeaders: (String) -> Unit,
 	onBrowseSources: () -> Unit,
 	modifier: Modifier = Modifier,
-	searchFocus: FocusRequester = remember { FocusRequester() },
-	/** Whether the shelf rail is folded to a strip. A preference, not screen state -- see below. */
-	isRailCollapsed: Boolean = false,
-	onToggleRail: () -> Unit = {},
-) {
-	Row(modifier.fillMaxSize()) {
-		CategoryRail(
-			categories = state.categories,
-			sizes = state.sizes,
-			selectedId = state.selectedCategoryId,
-			isCollapsed = isRailCollapsed,
-			onSelect = onSelectCategory,
-			onToggleCollapsed = onToggleRail,
-		)
-		Column(Modifier.fillMaxSize()) {
-			LibraryToolbar(
-				query = state.query,
-				sort = state.sort,
-				onSearch = onSearch,
-				onSort = onSort,
-				searchFocus = searchFocus,
-			)
-			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-			when {
-				state.isEmpty -> EmptyState(
-					title = "Nothing saved yet",
-					detail = "Browse a source and add something to your library, or import a " +
-						"backup from the Android app.",
-					action = { TextButton(onClick = onBrowseSources) { Text("Browse sources") } },
-				)
-
-				state.entries.isEmpty() -> EmptyState(
-					title = "No matches",
-					detail = "Nothing in this shelf matches \"${state.query}\".",
-				)
-
-				else -> LibraryContent(
-					state, imageHeaders, onOpenManga, onContinue, onSeeAllContinue, onNeedHeaders,
-				)
-			}
-		}
-	}
-}
-
-@Composable
-private fun LibraryContent(
-	state: LibraryUiState,
-	imageHeaders: Map<String, Map<String, String>>,
-	onOpenManga: (AgehaManga) -> Unit,
-	onContinue: (ContinueEntry) -> Unit,
-	onSeeAllContinue: () -> Unit,
-	onNeedHeaders: (String) -> Unit,
+	/** Settings' card style. See `CardStyle`. */
+	cardStyle: CardStyle = CardStyle.COVER,
+	/** Settings' "Blur 18+ covers". */
+	blurAdultCovers: Boolean = false,
+	/** The banner's "All N chapters". Opens that title's chapter list. */
+	onOpenChapters: (ContinueEntry) -> Unit = {},
 ) {
 	// Resolving image headers is a per-source cost, not a per-cover one, so it is asked for once
 	// per distinct source in the current view rather than from inside the grid's item scope.
@@ -148,48 +82,152 @@ private fun LibraryContent(
 			.distinct()
 			.forEach(onNeedHeaders)
 	}
-	Column(Modifier.fillMaxSize()) {
-		// Hidden while filtering: the shelf is ordered by when you last read, so leaving it above
-		// a filtered grid shows results that do not match the query the user just typed.
-		if (state.recent.isNotEmpty() && state.query.isEmpty()) {
-			val newest = state.recent.first()
-			ContinueHero(
-				entry = newest,
-				imageHeaders = imageHeaders[newest.manga.sourceName].orEmpty(),
-				onOpen = { onContinue(newest) },
-				modifier = Modifier.padding(
-					horizontal = AgehaSpacing.md,
-					vertical = AgehaSpacing.sm,
-				),
+	Column(modifier.fillMaxSize()) {
+		Column(
+			Modifier.padding(start = 24.dp, end = 24.dp, top = AgehaSpacing.lg),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.lg),
+		) {
+			// Hidden while filtering: the banner is whatever was read last, so leaving it above a
+			// filtered grid shows something that does not match the query just typed.
+			if (state.recent.isNotEmpty() && state.query.isEmpty()) {
+				val newest = state.recent.first()
+				ContinueHero(
+					entry = newest,
+					imageHeaders = imageHeaders[newest.manga.sourceName].orEmpty(),
+					onOpen = { onContinue(newest) },
+					onOpenChapters = { onOpenChapters(newest) },
+				)
+			}
+			ShelfHeader(state, onSeeAllContinue)
+			ShelfControls(state, onSelectCategory, onSort)
+		}
+		when {
+			state.isEmpty -> EmptyState(
+				title = "Nothing saved yet",
+				detail = "Browse a source and add something to your library, or import a " +
+					"backup from the Android app.",
+				action = { TextButton(onClick = onBrowseSources) { Text("Browse sources") } },
 			)
-			// The hero already carries the newest entry, so the shelf starts at the second. Showing
-			// it twice, at two sizes, one above the other, reads as a rendering fault.
-			ContinueShelf(
-				entries = state.recent.drop(1),
-				imageHeaders = imageHeaders,
-				onOpen = onContinue,
-				onSeeAll = onSeeAllContinue,
+
+			state.entries.isEmpty() -> EmptyState(
+				title = "No matches",
+				detail = "Nothing in this shelf matches \"${state.query}\".",
+			)
+
+			else -> MangaGrid(
+				manga = state.entries.map { it.toGridItem(imageHeaders) },
+				onClick = onOpenManga,
+				style = cardStyle,
+				blurAdult = blurAdultCovers,
+				contentPadding = PaddingValues(
+					start = 24.dp,
+					end = 24.dp,
+					top = AgehaSpacing.md,
+					bottom = 28.dp,
+				),
+				modifier = Modifier.fillMaxSize(),
 			)
 		}
-		// The shelf's own band, between the Continue Reading rows above and the grid below. It
-		// replaced a plain divider, which separated the two without saying what either was --
-		// and on a screen where both halves are covers, "which of these is my library" is a
-		// question the eye actually has to ask.
+	}
+}
+
+/**
+ * The handoff's band above the grid: accent bar, `MY LIBRARY`, a rule, and the count.
+ *
+ * The trailing link is Ageha's, and it is the one thing the handoff's Library has nowhere to put.
+ * Continue Reading is a *screen* here as well as a banner -- it holds everything ever read, not
+ * only the newest -- and with the old shelf row gone this link is the only way to reach it from
+ * the library.
+ */
+@Composable
+private fun ShelfHeader(state: LibraryUiState, onSeeAllContinue: () -> Unit) {
+	Row(
+		Modifier.fillMaxWidth(),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+	) {
 		SectionHeader(
 			label = "My library",
 			count = if (state.entries.size == 1) "1 title" else "${state.entries.size} titles",
-			modifier = Modifier.padding(
-				start = AgehaSpacing.md,
-				end = AgehaSpacing.md,
-				top = AgehaSpacing.sm,
-				bottom = AgehaSpacing.sm,
-			),
+			modifier = Modifier.weight(1f),
 		)
-		MangaGrid(
-			manga = state.entries.map { it.toGridItem(imageHeaders) },
-			onClick = onOpenManga,
-			modifier = Modifier.fillMaxSize(),
-		)
+		if (state.recent.isNotEmpty()) {
+			Text(
+				"Recently read",
+				style = AgehaTextStyles.monoEyebrow,
+				color = AgehaTheme.skin.inkFaint,
+				modifier = Modifier
+					.clip(MaterialTheme.shapes.extraSmall)
+					.clickable(onClick = onSeeAllContinue)
+					.padding(horizontal = AgehaSpacing.xs, vertical = 2.dp),
+			)
+		}
+	}
+}
+
+/**
+ * The heading and the two chip rows under it.
+ *
+ * ## Why the shelves and the ordering are the same kind of control
+ *
+ * They are both "pick one of a small set and the grid changes", which in this design's vocabulary
+ * is a chip. Giving the shelves a rail and the ordering chips said the two were different kinds of
+ * thing, when the only real difference is that one filters and the other sorts.
+ *
+ * They stay on separate rows rather than in one wrapping run. Mixed together, "Favourites" and
+ * "Unread first" read as alternatives to each other, and picking one would appear to un-pick the
+ * other -- which is exactly what they do *not* do.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ShelfControls(
+	state: LibraryUiState,
+	onSelectCategory: (Int) -> Unit,
+	onSort: (LibrarySort) -> Unit,
+) {
+	Column(verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+		Text("Reading & read", style = MaterialTheme.typography.headlineSmall)
+		// Only when there is more than the one implicit shelf. A single chip reading "All" is a
+		// control with no alternative, which is furniture rather than a choice.
+		if (state.categories.isNotEmpty()) {
+			FlowRow(
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+				verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+			) {
+				AgehaChip(
+					label = "All",
+					isSelected = state.selectedCategoryId == LibraryUiState.ALL_CATEGORY,
+					onClick = { onSelectCategory(LibraryUiState.ALL_CATEGORY) },
+					count = (state.sizes[LibraryUiState.ALL_CATEGORY] ?: 0).toString(),
+				)
+				for (category in state.categories) {
+					AgehaChip(
+						label = category.title,
+						isSelected = state.selectedCategoryId == category.id,
+						onClick = { onSelectCategory(category.id) },
+						count = (state.sizes[category.id] ?: 0).toString(),
+					)
+				}
+			}
+		}
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+		) {
+			// Chips in a row, not a dropdown behind a word. The handoff puts the shelf's ordering
+			// on the surface -- `Recent / Unread first / Completed` -- and it is right to: a
+			// dropdown hides the current sort behind its own label and costs two clicks to change,
+			// while chips cost one and the whole set is readable without opening anything. Ageha
+			// has five orderings rather than the mockup's three, which is a difference in what the
+			// app can do rather than in how it should look.
+			for (option in LibrarySort.entries) {
+				AgehaChip(
+					label = option.label,
+					isSelected = option == state.sort,
+					onClick = { onSort(option) },
+				)
+			}
+		}
 	}
 }
 
@@ -230,305 +268,6 @@ private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>): 
 		},
 		isComplete = isComplete,
 	)
-}
-
-/**
- * The shelf rail.
- *
- * ## Why it is glass now, and why it collapses
- *
- * It used to be a 210dp slab of `surfaceContainerLow` welded to the left edge -- the last opaque
- * panel left in the window once the navigation became a floating pill over a live backdrop. Next
- * to that pill it read as a leftover from the previous design rather than as part of this one, and
- * it charged a fixed 210dp of a desktop window for a list most people change a few times a day, in
- * an app whose signature view is a grid of covers that wants every pixel of that width.
- *
- * So it is a glass card floating in the same layer as the rest of the chrome, and it collapses.
- * Collapsed it is a 60dp strip of initials and counts, which is enough to switch shelves and to
- * see which one has anything in it -- and the width it hands back is roughly one more column of
- * covers on a laptop. The state is a preference rather than screen state: a rail that unfolded
- * itself on every launch would be a control that does not stay where it was put.
- *
- * ## What is deliberate about a row
- *
- * - **Counts stay, in both states.** On a phone they would be clutter; on a desktop the space is
- *   already paid for, and "which shelf has the 200 things in it" is exactly the question a rail
- *   with counts answers without a click.
- * - **Selection is a filled pill *and* a bar down the leading edge.** Two signals rather than one,
- *   because the pill on its own is a low-contrast fill that a hover state can be mistaken for --
- *   and collapsed, where there is no label to read, the bar is the only thing saying which shelf
- *   you are on.
- * - **That bar is `primary`, not the vermillion accent.** Vermillion means unread, actively
- *   reading, or destructive; a fourth meaning is how an accent turns into a second brand colour.
- * - **Hovering is visible.** A desktop pointer expects an answer before it commits to a click.
- */
-@Composable
-private fun CategoryRail(
-	categories: List<LibraryCategory>,
-	sizes: Map<Int, Int>,
-	selectedId: Int,
-	isCollapsed: Boolean,
-	onSelect: (Int) -> Unit,
-	onToggleCollapsed: () -> Unit,
-) {
-	val width by animateDpAsState(
-		targetValue = if (isCollapsed) RAIL_COLLAPSED_WIDTH else RAIL_WIDTH,
-		animationSpec = tween(AgehaMotion.QUICK_MS, easing = AgehaMotion.standard),
-		label = "library-rail-width",
-	)
-	Column(
-		Modifier
-			.width(width)
-			.fillMaxHeight()
-			.padding(
-				start = AgehaSpacing.sm,
-				end = AgehaSpacing.xs,
-				top = AgehaSpacing.xs,
-				bottom = AgehaSpacing.sm,
-			)
-			.glassSurface(MaterialTheme.shapes.large, GlassTone.PANEL)
-			.padding(vertical = AgehaSpacing.sm),
-	) {
-		RailHeader(
-			total = sizes[LibraryUiState.ALL_CATEGORY] ?: 0,
-			isCollapsed = isCollapsed,
-			onToggleCollapsed = onToggleCollapsed,
-		)
-		LazyColumn(Modifier.weight(1f)) {
-			item {
-				CategoryRow(
-					title = "All",
-					count = sizes[LibraryUiState.ALL_CATEGORY] ?: 0,
-					isSelected = selectedId == LibraryUiState.ALL_CATEGORY,
-					isCollapsed = isCollapsed,
-					onClick = { onSelect(LibraryUiState.ALL_CATEGORY) },
-				)
-			}
-			items(categories, key = { it.id }) { category ->
-				CategoryRow(
-					title = category.title,
-					count = sizes[category.id] ?: 0,
-					isSelected = selectedId == category.id,
-					isCollapsed = isCollapsed,
-					onClick = { onSelect(category.id) },
-				)
-			}
-		}
-	}
-}
-
-/**
- * The rail's own heading, and the control that folds it away.
- *
- * The chevron keeps its name in a tooltip rather than losing it. An icon on its own with no
- * accessible label is a control only the person who wrote it can use.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun RailHeader(total: Int, isCollapsed: Boolean, onToggleCollapsed: () -> Unit) {
-	val label = if (isCollapsed) "Expand shelves" else "Collapse shelves"
-	Row(
-		Modifier
-			.fillMaxWidth()
-			.padding(start = AgehaSpacing.xs, end = AgehaSpacing.xs, bottom = AgehaSpacing.xs),
-		verticalAlignment = Alignment.CenterVertically,
-	) {
-		if (isCollapsed) {
-			Box(Modifier.weight(1f))
-		} else {
-			Text(
-				"Shelves",
-				style = MaterialTheme.typography.labelLarge,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				modifier = Modifier.weight(1f).padding(start = AgehaSpacing.md),
-			)
-			Text(
-				total.toString(),
-				style = AgehaTextStyles.readerHud,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-			)
-		}
-		TooltipArea(tooltip = { RailTooltip(label) }) {
-			IconButton(onClick = onToggleCollapsed, modifier = Modifier.size(RAIL_TOGGLE_SIZE)) {
-				Icon(
-					imageVector = if (isCollapsed) {
-						Icons.Default.KeyboardArrowRight
-					} else {
-						Icons.Default.KeyboardArrowLeft
-					},
-					contentDescription = label,
-					tint = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-			}
-		}
-	}
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun CategoryRow(
-	title: String,
-	count: Int,
-	isSelected: Boolean,
-	isCollapsed: Boolean,
-	onClick: () -> Unit,
-) {
-	val interaction = remember { MutableInteractionSource() }
-	val isHovered by interaction.collectIsHoveredAsState()
-	val content = if (isSelected) {
-		MaterialTheme.colorScheme.onSecondaryContainer
-	} else {
-		MaterialTheme.colorScheme.onSurface
-	}
-	val row = @Composable {
-		Row(
-			Modifier
-				.fillMaxWidth()
-				.padding(horizontal = AgehaSpacing.xs, vertical = 1.dp)
-				.clip(AgehaGlass.PillShape)
-				.background(
-					when {
-						isSelected -> MaterialTheme.colorScheme.secondaryContainer
-						isHovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = RAIL_HOVER_ALPHA)
-						else -> Color.Transparent
-					},
-				)
-				.hoverable(interaction)
-				// `selectable` rather than `clickable`, so the row announces itself as one option
-				// out of a set and can say whether it is the current one.
-				.selectable(selected = isSelected, role = Role.Tab, onClick = onClick)
-				.height(RAIL_ROW_HEIGHT)
-				.padding(horizontal = AgehaSpacing.sm),
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-		) {
-			// Reserved whether or not it is drawn, so selecting a shelf does not shunt its label
-			// sideways under the pointer.
-			Box(
-				Modifier
-					.width(RAIL_MARK_WIDTH)
-					.height(RAIL_MARK_HEIGHT)
-					.clip(MaterialTheme.shapes.extraSmall)
-					.background(
-						if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-					),
-			)
-			if (isCollapsed) {
-				// An initial with the count under it. Two short lines fit where a name does not,
-				// and the count is the half that still means something without the name.
-				Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-					Text(
-						title.take(1).uppercase(),
-						style = MaterialTheme.typography.labelLarge,
-						color = content,
-						maxLines = 1,
-					)
-					Text(
-						count.toString(),
-						style = AgehaTextStyles.readerHud,
-						color = MaterialTheme.colorScheme.onSurfaceVariant,
-						maxLines = 1,
-					)
-				}
-			} else {
-				Text(
-					title,
-					style = MaterialTheme.typography.bodyMedium,
-					color = content,
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
-					modifier = Modifier.weight(1f),
-				)
-				Text(
-					count.toString(),
-					style = AgehaTextStyles.readerHud,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-			}
-		}
-	}
-	// Collapsed, the shelf's name exists nowhere but the tooltip, so the tooltip is the row's only
-	// label and is not optional. Expanded, the label is right there and repeating it is noise.
-	if (isCollapsed) {
-		TooltipArea(
-			tooltip = { RailTooltip(if (count > 0) "$title  ·  $count" else title) },
-			content = row,
-		)
-	} else {
-		row()
-	}
-}
-
-@Composable
-private fun RailTooltip(text: String) {
-	Box(
-		Modifier
-			.glassSurface(MaterialTheme.shapes.small, GlassTone.RAISED)
-			.padding(horizontal = AgehaSpacing.sm, vertical = AgehaSpacing.xs),
-	) {
-		Text(text, style = AgehaTextStyles.metadata, color = MaterialTheme.colorScheme.onSurface)
-	}
-}
-
-/** Wide enough for a shelf name, narrow enough that the grid still gets the window. */
-private val RAIL_WIDTH = 224.dp
-
-/** Collapsed: an initial, a count, and the selection mark. Nothing else fits; nothing else is needed. */
-private val RAIL_COLLAPSED_WIDTH = 60.dp
-
-/** A pointer-sized row, well below the 48dp a touch target would need. This is not a touch UI. */
-private val RAIL_ROW_HEIGHT = 36.dp
-
-/** The "you are here" mark down a row's leading edge. */
-private val RAIL_MARK_WIDTH = 3.dp
-private val RAIL_MARK_HEIGHT = 18.dp
-
-private val RAIL_TOGGLE_SIZE = 28.dp
-
-/** Hover feedback. Enough to answer the pointer, not enough to compete with selection. */
-private const val RAIL_HOVER_ALPHA = 0.07f
-
-@Composable
-private fun LibraryToolbar(
-	query: String,
-	sort: LibrarySort,
-	onSearch: (String) -> Unit,
-	onSort: (LibrarySort) -> Unit,
-	searchFocus: FocusRequester,
-) {
-	Row(
-		Modifier.fillMaxWidth().padding(AgehaSpacing.md),
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
-		verticalAlignment = Alignment.CenterVertically,
-	) {
-		AgehaSearchField(
-			value = query,
-			onValueChange = onSearch,
-			placeholder = "Filter this shelf",
-			modifier = Modifier.weight(1f).focusRequester(searchFocus),
-		)
-		SortMenu(sort, onSort)
-	}
-}
-
-@Composable
-private fun SortMenu(sort: LibrarySort, onSort: (LibrarySort) -> Unit) {
-	// Chips in a row, not a dropdown behind a word.
-	//
-	// The handoff puts the shelf's ordering on the surface -- `Recent / Unread first / Completed`
-	// -- and it is right to. A dropdown hides the current sort behind its own label and costs two
-	// clicks to change; five chips cost one, and the set of choices is readable without opening
-	// anything. Ageha has five orderings rather than the mockup's three, which is a difference in
-	// what the app can do rather than in how it should look.
-	Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs)) {
-		for (option in LibrarySort.entries) {
-			AgehaChip(
-				label = option.label,
-				isSelected = option == sort,
-				onClick = { onSort(option) },
-			)
-		}
-	}
 }
 
 /** The library's title, selectable so a user can copy a manga name out of it. */

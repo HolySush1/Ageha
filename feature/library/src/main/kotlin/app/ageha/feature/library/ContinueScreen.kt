@@ -56,6 +56,7 @@ import app.ageha.core.designsystem.CoverAccent
 import app.ageha.core.designsystem.CoverAccentColors
 import app.ageha.core.designsystem.EmptyState
 import app.ageha.core.designsystem.MangaThumbnail
+import app.ageha.core.designsystem.diagonalStripe
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
@@ -308,6 +309,18 @@ fun ContinueHero(
 	imageHeaders: Map<String, String>,
 	onOpen: () -> Unit,
 	modifier: Modifier = Modifier,
+	/**
+	 * The handoff's "All 260 chapters", beside Continue reading.
+	 *
+	 * WIRING.md lists it as *"not implemented in the mockup. Should open a chapter list for the
+	 * title"* -- which Ageha already has, on the details screen, carrying the read flag, the
+	 * downloaded flag and the release date that wiring asks for. So this opens that rather than
+	 * growing a second chapter list.
+	 *
+	 * Null hides the button. The count comes from `manga.chapters`, which is null until a source
+	 * has been asked for one; the label drops the number in that case rather than inventing it.
+	 */
+	onOpenChapters: (() -> Unit)? = null,
 ) {
 	val accent = CoverAccent.rememberFor(entry.manga.coverUrl, imageHeaders)
 	// The fill arrives a frame or two after the panel, once the cover has been sampled. Crossed
@@ -323,6 +336,12 @@ fun ContinueHero(
 			.height(HERO_HEIGHT)
 			.clip(MaterialTheme.shapes.large)
 			.background(container)
+			// The handoff's 125-degree stripe over the panel fill. It is the texture that stops
+			// the largest flat rectangle in the application from reading as an unloaded surface,
+			// and it is the same stripe every cover placeholder carries -- one texture, drawn
+			// once, in `diagonalStripe`.
+			.diagonalStripe(HERO_STRIPE_ALPHA)
+			.border(1.dp, AgehaTheme.skin.line, MaterialTheme.shapes.large)
 			.clickable(onClick = onOpen)
 			.testTag(HERO_TAG),
 		verticalAlignment = Alignment.CenterVertically,
@@ -386,6 +405,32 @@ fun ContinueHero(
 					),
 				) {
 					Text(if (entry.isCaughtUp) "Reopen" else "Continue reading")
+				}
+				// The handoff's ghost button beside the filled one. Bordered in the panel's own
+				// ink rather than `--line2`, for the same reason the filled button is inverted
+				// out of the panel: this card is tinted by somebody's cover, and a hairline from
+				// the global palette on top of that reads as a border that missed its element.
+				if (onOpenChapters != null) {
+					Row(
+						Modifier
+							.clip(MaterialTheme.shapes.medium)
+							.border(
+								1.dp,
+								accent.content.copy(alpha = HERO_GHOST_EDGE_ALPHA),
+								MaterialTheme.shapes.medium,
+							)
+							.clickable(onClick = onOpenChapters)
+							.padding(horizontal = 22.dp, vertical = 12.dp),
+					) {
+						Text(
+							entry.manga.chapters
+								?.size
+								?.let { "All $it chapters" }
+								?: "All chapters",
+							style = MaterialTheme.typography.labelLarge,
+							color = accent.content,
+						)
+					}
 				}
 				// The position, in mono, beside the buttons rather than under a bar. It replaced a
 				// progress bar plus a percentage: the bar and the number said the same thing
@@ -517,85 +562,30 @@ private val HERO_PROGRESS_HEIGHT = 4.dp
 /** The unfilled part of the track. Visible as a groove, never as a second bar. */
 private const val HERO_PROGRESS_TRACK_ALPHA = 0.24f
 
+/**
+ * The banner's stripe, quieter than a cover's.
+ *
+ * 3.5% against a placeholder's 5%. This panel carries a 40sp headline and two lines of body text;
+ * at the cover's alpha the bars are visible *through* the type, which turns a texture into a
+ * legibility problem on the one surface that can least afford one.
+ */
+private const val HERO_STRIPE_ALPHA = 0.035f
+
+/** The ghost button's edge, in the panel's own ink rather than the palette's hairline. */
+private const val HERO_GHOST_EDGE_ALPHA = 0.30f
+
 const val HERO_TAG = "continue-hero"
 
-@Composable
-fun ContinueShelf(
-	entries: List<ContinueEntry>,
-	imageHeaders: Map<String, Map<String, String>>,
-	onOpen: (ContinueEntry) -> Unit,
-	onSeeAll: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	if (entries.isEmpty()) return
-	Column(modifier.padding(vertical = AgehaSpacing.sm)) {
-		Row(
-			Modifier.fillMaxWidth().padding(horizontal = AgehaSpacing.lg),
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			Text(
-				"Continue reading",
-				style = MaterialTheme.typography.titleSmall,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				modifier = Modifier.weight(1f),
-			)
-			TextButton(onClick = onSeeAll) { Text("See all") }
-		}
-		androidx.compose.foundation.lazy.LazyRow(
-			contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = AgehaSpacing.md),
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-		) {
-			items(entries, key = { it.mangaId }) { entry ->
-				ShelfCard(entry, imageHeaders[entry.manga.sourceName].orEmpty()) { onOpen(entry) }
-			}
-		}
-	}
-}
 
-@Composable
-private fun ShelfCard(entry: ContinueEntry, imageHeaders: Map<String, String>, onOpen: () -> Unit) {
-	Column(
-		Modifier
-			.width(112.dp)
-			.clip(MaterialTheme.shapes.small)
-			.clickable(onClick = onOpen)
-			.padding(AgehaSpacing.xs),
-		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
-	) {
-		Box {
-			MangaThumbnail(
-				manga = entry.manga,
-				imageHeaders = imageHeaders,
-				progress = entry.progressPercent,
-				modifier = Modifier.fillMaxWidth(),
-			)
-			if (!entry.isSourceAvailable) {
-				Chip(
-					"Unavailable",
-					MaterialTheme.colorScheme.errorContainer,
-					MaterialTheme.colorScheme.onErrorContainer,
-				)
-			}
-		}
-		Text(
-			entry.manga.title,
-			style = AgehaTextStyles.mangaTitle,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-		)
-		// The chapter, not the source: on a shelf whose whole purpose is resuming, "Chapter 34" is
-		// what tells someone whether this is the one they meant.
-		Text(
-			entry.chapterLabel ?: entry.sourceTitle,
-			style = AgehaTextStyles.metadata,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-		)
-		Spacer(Modifier.height(1.dp))
-	}
-}
+/**
+ * The Continue Reading shelf and its cards used to live here.
+ *
+ * They drew a horizontal row of recently-read titles between the banner and the library grid. The
+ * handoff's Library has no such row -- the banner carries the newest entry and the grid carries
+ * everything -- and with both of those true the shelf was a third view of the same titles, at a
+ * third size, on one screen. The Continue Reading *screen* is unaffected; it is still what the
+ * shelf header's trailing link opens.
+ */
 
 /**
  * Test tag for the end-to-end journey driver.

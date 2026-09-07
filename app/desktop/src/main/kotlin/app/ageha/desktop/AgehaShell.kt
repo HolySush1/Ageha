@@ -84,6 +84,7 @@ import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -187,6 +188,12 @@ fun AgehaShell(
 	var appUpdateChecking by remember { mutableStateOf(false) }
 	var appUpdateResult by remember { mutableStateOf<String?>(null) }
 
+	// Whether the command panel is up. Shell state rather than a destination, and deliberately so:
+	// search is an *action* you take on the screen you are already looking at, not a place you
+	// navigate to. Giving it a destination put it in the same back stack as the screen that
+	// launched it and made Escape ambiguous.
+	var searchOpen by remember { mutableStateOf(false) }
+
 	val notices by application.notices.notices.collectAsState()
 
 	// Where a Continue Reading entry resolved to.
@@ -265,21 +272,14 @@ fun AgehaShell(
 						onContinue = { continueViewModel.open(it.mangaId) },
 						onSeeAllContinue = navigator::openContinue,
 						onSelectCategory = libraryViewModel::selectCategory,
-						onSearch = libraryViewModel::search,
 						onSort = libraryViewModel::setSort,
 						onNeedHeaders = libraryViewModel::ensureHeaders,
 						onBrowseSources = { navigator.switchTo(Section.EXPLORE) },
-						searchFocus = searchFocus,
-						// The rail's fold is a preference rather than screen state, so switching
-						// to Explore and back does not quietly unfold it. See Preferences.
-						isRailCollapsed = preferences.libraryRailCollapsed,
-						onToggleRail = {
-							onPreferencesChange(
-								preferences.copy(
-									libraryRailCollapsed = !preferences.libraryRailCollapsed,
-								),
-							)
-						},
+						cardStyle = preferences.cardStyle,
+						blurAdultCovers = preferences.blurAdultCovers,
+						// The handoff's "All 260 chapters". Ageha already has that list, on the
+						// details screen, with the read and downloaded flags WIRING.md asks for.
+						onOpenChapters = { navigator.openManga(it.manga) },
 					)
 				}
 
@@ -633,14 +633,46 @@ fun AgehaShell(
 		if (!navigator.isImmersive) {
 			FloatingNav(
 				navigator = navigator,
-				onSearchAllSources = {
-					navigator.openGlobalSearch()
-					// Straight into the field. The pill is one click away from anywhere, and a
-					// search screen that then asks for a second click before it will take a query
-					// is a search screen people stop using.
-					runCatching { searchFocus.requestFocus() }
-				},
+				onSearchAllSources = { searchOpen = true },
 				modifier = Modifier.align(Alignment.TopCenter),
+			)
+		}
+
+		// The handoff's command panel, over whatever screen is current.
+		//
+		// The library query is the *same* state the grid filters on, which is the handoff being
+		// deliberate rather than lazy: typing here filters the shelf behind the panel live, so
+		// closing it leaves the library showing what was just searched for instead of throwing
+		// the query away.
+		if (searchOpen && !navigator.isImmersive) {
+			val libraryState by libraryViewModel.state.collectAsState()
+			val headers by libraryViewModel.imageHeaders.collectAsState()
+			val globalState by globalSearchViewModel.state.collectAsState()
+			// One request per enabled source is not something to spend on a keystroke. The local
+			// half of the panel is already live; this is the half that costs someone bandwidth.
+			LaunchedEffect(libraryState.query) {
+				val query = libraryState.query
+				if (query.length >= REMOTE_SEARCH_MIN_LENGTH) {
+					delay(REMOTE_SEARCH_DEBOUNCE_MS)
+					globalSearchViewModel.search(query)
+				}
+			}
+			CommandPanel(
+				query = libraryState.query,
+				onQuery = libraryViewModel::search,
+				local = libraryState.entries,
+				remote = globalState.results.flatMap { it.manga },
+				isSearchingRemote = globalState.isSearching,
+				imageHeaders = headers,
+				onOpen = { manga ->
+					searchOpen = false
+					navigator.openManga(manga)
+				},
+				onSeeAllResults = {
+					searchOpen = false
+					navigator.searchAllSources(libraryState.query)
+				},
+				onDismiss = { searchOpen = false },
 			)
 		}
 
@@ -908,3 +940,20 @@ internal fun buildViewModels(
 	ExploreViewModel(sources, scope),
 	BrowseViewModel(catalog, sources, scope),
 )
+
+/**
+ * How long the panel waits before asking every enabled source.
+ *
+ * 150ms is WIRING.md's figure and it is about *cost*, not smoothness: each fan-out is one request
+ * per enabled source, sent from the user's own address. Typing "one piece" without this is nine
+ * fan-outs where one was wanted.
+ */
+private const val REMOTE_SEARCH_DEBOUNCE_MS = 150L
+
+/**
+ * The shortest query worth fanning out on.
+ *
+ * Two characters match most of every catalogue, so a source is asked to compute and serve a result
+ * set nobody will read. The local half of the panel still answers from the first keystroke.
+ */
+private const val REMOTE_SEARCH_MIN_LENGTH = 3
