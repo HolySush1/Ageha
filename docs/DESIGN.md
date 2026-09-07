@@ -603,22 +603,49 @@ predates backdrop filters. **This is a real fidelity gap**, recorded rather than
 
 ### 11.4 Where the handoff was not followed
 
-Each of these is a deliberate departure, not an omission.
+Each of these is a deliberate departure, not an omission. The list is much shorter than it was:
+the select popovers, the filter rail, the command panel, the single-column library and the
+Downloads pause/resume controls were all departures once and are not any more.
 
 | Handoff | What Ageha does | Why |
 |---|---|---|
-| Settings → **Tracking** (AniList / MAL / Kitsu) | Not built. The rail's seventh slot is **Sync**, Ageha's own. | CLAUDE.md rule 9 puts external tracking permanently out of scope. WIRING.md itself notes it needs an OAuth flow the mockup lacks. |
+| Settings -> **Tracking** (AniList / MAL / Kitsu) | Not built. The rail's seventh slot is **Sync**, Ageha's own. | CLAUDE.md rule 9 puts external tracking permanently out of scope. WIRING.md itself notes it needs an OAuth flow the mockup lacks. |
 | Reader progress fill, page ticks and **Close** in `--accent` | Neutral, from `ReaderChrome` | Rule 8: nothing brand-coloured touches the reader. `ReaderNeutralityTest` measures every reader colour for hue and would fail the build. |
 | Card position reads `Ch 214 / 260` | A percentage | A `LibraryEntry` has no chapter *total*. The Android schema this database stays compatible with has no per-chapter read table, and a total only exists after a source has been asked for a fresh list. |
 | Source health: `Healthy / Slow 1.8s / Broken 404` | `Healthy / Broken` | There is no latency probe. Inventing a number with nothing behind it is worse than reporting upstream's own broken flag. |
 | Storage bar: "of 64 GB used" | The volume's real capacity | One filesystem call, and it makes the bar mean something: the same library is nothing on a 2TB desktop and a problem on a 128GB laptop. |
 | Trash deletes on the first click | Confirms, naming the chapter count | WIRING.md flags the instant delete as wrong. These are files kept deliberately for offline reading, and there is no undo. |
-| Settings rows as **select popovers** | Radio groups, as before | The popover saves vertical space in a mockup with more rows than screen. Ageha's radios already show every option without a click; hiding a visible choice is a loss dressed as fidelity. The reader's chips *are* popovers, where the alternative was cycling through full redraws of somebody's artwork. |
-| Reader chips **cycle** on click | Open a menu | Three options each means up to two unwanted states rendered on the way to the one wanted — and a cycler never shows what the options are. |
 | Reader is a layer "above everything" | The 38dp title bar stays | The handoff describes a browser prototype with no window to manage. Hiding it takes minimise and close from someone mid-chapter to hide 38px they are not looking at. Fullscreen is the real immersion path. |
-| Nav pill: 5 items | 4 items and the search button | Continue Reading became the Library banner, which is where the handoff puts it. It keeps Ctrl+2 and the banner's see-all link. |
+| Nav pill: 5 items | 4 items and the search button | Continue Reading became the Library banner, which is where the handoff puts it. It keeps Ctrl+2 and the shelf header's link. |
+| Filter rail: **four** toggles, including *Show unverified mirrors* | Three | There is no unverified-mirror tier in the parsers library. A switch that changes nothing is worse than a shorter rail. |
+| Settings: **Wi-Fi only**, **Image quality**, **Volume keys** | Absent | A desktop JVM cannot portably ask whether a connection is metered; Ageha stores what the source served rather than recompressing it; and there are no volume keys. Same rule as above. |
+| Reading mode as one **Single / Double / Long strip** segment | A Paged/Long strip segment, with pairing and direction as their own rows | Ageha's reader mode is per *manga* and the pairing is global. Folding them into one control would make a reader who set one webtoon to strip mode stop pairing pages in every tankoubon. |
+| Downloads: paused work resumes from the last finished page | Resumes by restarting the chapter | `ChapterDownloader` writes into one `ZipOutputStream` and deletes its `.part` on cancellation -- which is what guarantees a `.cbz` on disk is never a partial download wearing a finished name. Page-level resume means staging loose files and trades that guarantee for a directory of orphans after a crash. **A real gap**, recorded rather than papered over. |
+| Free up space: "delete read chapters, oldest first" | Oldest *written* first, per-title selection | The download inventory is the filesystem, keyed by a sanitised title with no id to join read state on. Same intent, with the data that exists. |
 
-### 11.5 The rule the handoff and CLAUDE.md agree on
+### 11.5 What the handoff asked for and now exists
+
+Recorded because these were the gaps, and a design record that only lists departures stops being
+useful the moment they are closed.
+
+- **The command panel.** 620dp, 74dp from the top, mono field, `ESC` cap, five rows, full-bleed
+  invisible backdrop, `Ctrl+K`. It does what WIRING.md describes and what neither of the two
+  controls it replaced could do alone: filter the library from the first keystroke, then fan out to
+  the enabled sources on a 150ms debounce and append those results underneath.
+- **Select popovers.** `AgehaSelect`: a ghost button, a panel 6dp below it aligned to its right
+  edge, Escape and outside-click to close, a rotating caret, an accent tick on the chosen row. The
+  earlier note here argued radio groups were better; they are, *given room*, and the handoff's row
+  layout does not have it.
+- **The filter rail.** 292dp, toggle rows over `--line` dividers, language chips, the note box.
+- **"All N chapters"** on the Continue banner, opening the details screen's chapter list.
+- **Pause all / Resume all, per-row Pause/Resume, and Free up space** on Downloads.
+- **Licences**, which was `TextButton(onClick = {})` -- the one genuinely dead control in the app.
+- **Six settings with real backends**: reading mode and direction (a fallback on
+  `ReaderRepository.observeMode`), page fit, preload depth (both the url half and the image half),
+  card style, 18+ cover blur, and parallel downloads (pushed into the live queue, not merely
+  stored).
+
+### 11.6 The rule the handoff and CLAUDE.md agree on
 
 > *"No literal hex in component styles. Only `var(--…)`."*
 
@@ -627,7 +654,7 @@ across `feature/` and `app/desktop`. It found one real offender on its first run
 placeholders carried `Color(0xFF9A9A9A)`, chosen against the black background everyone develops on
 and barely legible on Paper — two of the four backgrounds that screen offers.
 
-### 11.6 Window chrome
+### 11.7 Window chrome
 
 The window is undecorated so the title bar can carry what a native caption cannot: a context line
 with live counts, the skin switcher, and the app's own mark at 21dp. What a caption did for free is

@@ -8,6 +8,29 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **A command panel, on `Ctrl+K` or the magnifier in the navigation pill.** One field, over
+  whatever screen you are on. It filters your library from the first keystroke, then asks every
+  enabled source and appends what they find underneath. It replaced two controls that each did
+  half of that: the library's own search box, which could not reach a source, and a separate
+  search screen, which could not see your library.
+- **Settings is the handoff's screen now**: seven sections down a rail, and rows that put a label
+  and a plain-language hint on the left with one control on the right. The controls are segmented
+  groups and real popovers rather than stacks of radio buttons — a popover opens below its button,
+  closes on Escape or a click outside, and ticks the option you chose.
+- **Six settings that previously did nothing now do something.** Reading mode and right-to-left
+  (a default for titles you have never set one on), page fit, how many pages are fetched ahead,
+  card style, blurring 18+ covers until you point at them, and how many chapters download at once
+  — the last of which applies to the queue you are already watching rather than at the next launch.
+- **Downloads can be paused.** Pause all / Resume all on the storage card, and a Pause or Resume
+  chip on every row. **Free up space** opens a reclaim sheet: oldest downloads first, tick what to
+  remove, and it tells you how much that will free before you commit.
+- **"All N chapters"** beside Continue reading on the library banner, which opens that title's
+  chapter list.
+- **Explore has a filter rail** instead of a dropdown menu — a panel down the right-hand side, so
+  narrowing the catalogue no longer means reopening the same menu three times while it covers the
+  list it is filtering. The language chips moved into it.
+- **Licences** in Settings → About actually opens now. It was a button that did nothing.
+
 - **Two skins, Ember and Glass.** The interface is rebuilt to the Ember & Glass design handoff:
   same layout, two materials. Ember is flat — opaque panels, warm near-black, small radii, a red
   accent. Glass is frosted — translucent panels over a cool blue-grey, fully round pills, a violet
@@ -33,6 +56,10 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Changed
 
+- **The library is one column now.** The shelf rail down the left edge is gone; your shelves are
+  chips above the grid, beside the ordering chips, and the width the rail was using went back to
+  the covers. The library's search box went with it — `Ctrl+K` searches your library *and* your
+  sources from anywhere, which is what you wanted from it.
 - **Continue Reading left the navigation pill.** It is the banner at the top of the Library now,
   which is where you were already looking. `Ctrl+2` and the banner's see-all link still open the
   full list.
