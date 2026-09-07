@@ -30,6 +30,41 @@ architecture, which is why `app/desktop/build.gradle.kts` declares all six rathe
 whatever the CI runner happens to be — a Linux build made on Windows would otherwise carry Windows
 Skia and fail at first paint.
 
+## Building and installing locally on Windows
+
+Conveyor cannot run on a normal Windows account here -- its build needs symlink permission a
+non-elevated user does not have -- so local packaging goes through jpackage instead:
+
+```
+./gradlew :app:desktop:packageMsi --no-configuration-cache
+```
+
+`--no-configuration-cache` is required, not optional: the Compose plugin's `downloadWix` task calls
+`Task.project` at execution time, which Gradle's configuration cache forbids. That task also
+downloads WiX, so its first run needs the network -- `--offline` fails there and nowhere else.
+
+The MSI lands in `app/desktop/build/compose/binaries/main/msi/`.
+
+### An MSI cannot upgrade over the same version
+
+Installing `Ageha-0.1.0.msi` while `Ageha 0.1.0` is installed fails with **1638**, *"another version
+of this product is already installed"*. jpackage does not set `AllowSameVersionUpgrades` in its WiX
+template and Compose's `nativeDistributions` block does not expose it, so there are two ways round:
+
+- **Bump the version.** `packageVersion` in `app/desktop/build.gradle.kts`. This is what a real
+  release does, and it is why the problem never shows up in CI.
+- **Uninstall, then install**, for a local rebuild at the same version:
+
+  ```
+  msiexec /x "{PRODUCT-CODE}" /qn     # from ...\Uninstall\, DisplayName "Ageha"
+  msiexec /i "Ageha-0.1.0.msi" /qn
+  ```
+
+  **This is safe for the library.** Binaries install to `%LOCALAPPDATA%\Ageha Reader`; the database,
+  cookies and preferences live in `%LOCALAPPDATA%\Ageha` -- deliberately separate, for exactly this
+  reason. Back up `preferences.json` first anyway when the new build renames an enum the old one
+  wrote: `PreferencesStore.migrate` rewrites what it recognises, and rewrites it in place.
+
 ## Conveyor's licence
 
 Conveyor is free for projects under an OSI-approved licence. Ageha is GPL-3.0, so it qualifies, and
