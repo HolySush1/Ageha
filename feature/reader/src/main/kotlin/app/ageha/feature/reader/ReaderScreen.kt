@@ -56,6 +56,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.style.TextOverflow
+import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.ReaderBackground
@@ -197,7 +210,7 @@ fun ReaderScreen(
 			exit = fadeOut(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			modifier = Modifier.align(Alignment.BottomCenter),
 		) {
-			ReaderStatusBar(state, chrome, Modifier.hoverable(chromeHover))
+			ReaderStatusBar(state, chrome, onPageChange, Modifier.hoverable(chromeHover))
 		}
 	}
 }
@@ -488,47 +501,189 @@ private fun ReaderTopBar(
 	modifier: Modifier = Modifier,
 ) {
 	Row(
-		modifier.fillMaxWidth().background(chrome.scrim).padding(AgehaSpacing.sm),
+		modifier
+			.padding(top = 16.dp, start = AgehaSpacing.lg, end = AgehaSpacing.lg)
+			.widthIn(max = READER_PILL_MAX_WIDTH)
+			.shadow(12.dp, MaterialTheme.shapes.large, clip = false)
+			.clip(MaterialTheme.shapes.large)
+			.background(chrome.scrim)
+			.border(1.dp, chrome.subdued.copy(alpha = 0.30f), MaterialTheme.shapes.large)
+			.padding(start = 18.dp, end = AgehaSpacing.md, top = 11.dp, bottom = 11.dp),
 		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		horizontalArrangement = Arrangement.spacedBy(15.dp),
 	) {
-		TextButton(onClick = onClose) { Text("Close", color = chrome.content) }
-		Column(Modifier.weight(1f)) {
+		Column {
 			Text(
 				state.manga?.title.orEmpty(),
-				style = AgehaTextStyles.readerHud,
+				style = MaterialTheme.typography.titleMedium,
 				color = chrome.content,
 				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
 				state.chapter?.title ?: "Chapter ${state.chapterIndex + 1}",
-				style = AgehaTextStyles.metadata,
+				style = AgehaTextStyles.monoMeta,
 				color = chrome.subdued,
 				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		// Only once there is a page list to describe.
+		//
+		// The handoff's pill always carries this block, because its prototype has no loading state.
+		// Ageha does: a chapter opened from a live source has no pages for as long as the source
+		// takes to answer, and a progress block drawn then reads "1 / 1 - 100% - 0 left" with total
+		// confidence. `ReaderStatusBarTest` exists because that shipped once already. The rest of
+		// the pill stays up, because Close and the mode chips are exactly what someone wants while
+		// a slow chapter is still loading.
+		if (state.pages.isNotEmpty()) {
+			PillDivider(chrome)
+			ReaderProgressBlock(state, chrome)
+		}
+		Spacer(Modifier.weight(1f))
 		EnumMenu("Mode", ReaderMode.entries, state.mode, chrome, { it.name.lowercase() }, onSetMode)
 		EnumMenu("Fit", PageScale.entries, state.scale, chrome, { it.label }, onSetScale)
 		EnumMenu("Background", ReaderBackground.entries, background, chrome, { it.label }, onSetBackground)
 		if (state.mode.isPaged) {
-			TextButton(onClick = onToggleDoublePage) {
-				Text(if (doublePage) "Two pages" else "One page", color = chrome.content)
+			EnumMenu("Pages", DOUBLE_PAGE_OPTIONS, doublePage, chrome, { if (it) "double" else "single" }) {
+				onToggleDoublePage()
 			}
 			if (doublePage) {
-				TextButton(onClick = onToggleCoverOffset) {
-					Text(if (coverOffset) "Cover offset on" else "Cover offset off", color = chrome.content)
+				EnumMenu("Offset", DOUBLE_PAGE_OPTIONS, coverOffset, chrome, { if (it) "on" else "off" }) {
+					onToggleCoverOffset()
 				}
 			}
 		} else {
 			// Both a readout and the way anyone finds out Ctrl+wheel does anything. Clicking it
 			// returns the strip to the source's own width, which is the one width that needs no
 			// explanation.
-			TextButton(onClick = { onSetWebtoonZoom(1f) }) {
-				Text("Width: ${(webtoonZoom * 100).roundToInt()}%", color = chrome.content)
+			ReaderChip(
+				label = "Width",
+				value = "${(webtoonZoom * 100).roundToInt()}%",
+				chrome = chrome,
+				onClick = { onSetWebtoonZoom(1f) },
+			)
+		}
+		PillDivider(chrome)
+		// Close is the handoff's tinted button, drained of its tint.
+		//
+		// The handoff fills it with `--accent-soft` over `--accent-line`. Both are brand colour and
+		// this sits inside the reader, where CLAUDE.md rule 8 says nothing brand-coloured may go --
+		// `ReaderNeutralityTest` measures every reader colour for hue and would fail the build. The
+		// handoff loses, and is said to be losing rather than quietly bent. What survives is the
+		// shape and the weight: a filled, bordered button at the right end, still the only filled
+		// control in the pill, so it still reads as the way out.
+		Row(
+			Modifier
+				.clip(MaterialTheme.shapes.medium)
+				.background(chrome.content.copy(alpha = 0.12f))
+				.border(1.dp, chrome.content.copy(alpha = 0.35f), MaterialTheme.shapes.medium)
+				.clickable(onClick = onClose)
+				.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Text("Close", style = MaterialTheme.typography.labelMedium, color = chrome.content)
+			Canvas(Modifier.size(9.dp)) {
+				val w = 1.5.dp.toPx()
+				drawLine(chrome.content, Offset(0f, 0f), Offset(size.width, size.height), w, StrokeCap.Round)
+				drawLine(chrome.content, Offset(size.width, 0f), Offset(0f, size.height), w, StrokeCap.Round)
 			}
 		}
 	}
 }
+
+/**
+ * The two-state options behind the Pages and Offset chips.
+ *
+ * A list of booleans rather than a bespoke toggle, so these read as the same control as Mode, Fit
+ * and Background instead of as two odd buttons wearing different clothes in the same pill.
+ */
+private val DOUBLE_PAGE_OPTIONS = listOf(false, true)
+
+/** The handoff's 1x34 rule between groups in the control pill. */
+@Composable
+private fun PillDivider(chrome: ReaderChrome) {
+	Box(Modifier.width(1.dp).height(34.dp).background(chrome.subdued.copy(alpha = 0.35f)))
+}
+
+/**
+ * Where you are in the chapter: the count, the proportion, what is left, and a bar.
+ *
+ * All four, in 192dp, and they are not redundant. The count is the position, the percentage is the
+ * proportion, "8 left" is the *decision* -- finish this now or stop -- and the bar is the one you
+ * read without reading. The handoff groups them exactly this way and is right to.
+ *
+ * Neutral throughout, where the handoff colours the percentage and the fill with the accent. Same
+ * reason as the Close button above.
+ */
+@Composable
+private fun ReaderProgressBlock(state: ReaderUiState, chrome: ReaderChrome) {
+	val total = state.pageCount.coerceAtLeast(1)
+	val page = (state.currentPage + 1).coerceIn(1, total)
+	val fraction = page.toFloat() / total
+	Column(Modifier.width(192.dp), verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs)) {
+		Row(
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Text(
+				"$page / $total",
+				style = AgehaTextStyles.readerHud,
+				color = chrome.content,
+				modifier = Modifier.testTag(PAGE_COUNTER_TAG),
+			)
+			Text("${(fraction * 100).roundToInt()}%", style = AgehaTextStyles.monoMeta, color = chrome.content)
+			Text("${total - page} left", style = AgehaTextStyles.monoMeta, color = chrome.subdued)
+		}
+		Box(
+			Modifier
+				.fillMaxWidth()
+				.height(3.dp)
+				.clip(MaterialTheme.shapes.extraSmall)
+				.background(chrome.content.copy(alpha = 0.18f)),
+		) {
+			Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(chrome.content))
+		}
+	}
+}
+
+/** A MODE / FIT / BACKGROUND chip: a mono label, the value, and a caret. */
+@Composable
+private fun ReaderChip(
+	label: String,
+	value: String,
+	chrome: ReaderChrome,
+	isOpen: Boolean = false,
+	onClick: () -> Unit,
+) {
+	val shape = MaterialTheme.shapes.medium
+	Row(
+		Modifier
+			.clip(shape)
+			.background(chrome.content.copy(alpha = if (isOpen) 0.16f else 0.07f))
+			.border(1.dp, chrome.content.copy(alpha = if (isOpen) 0.35f else 0.16f), shape)
+			.clickable(onClick = onClick)
+			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(6.dp),
+	) {
+		Text(label.uppercase(), style = AgehaTextStyles.monoControl, color = chrome.subdued)
+		Text(value, style = MaterialTheme.typography.labelMedium, color = chrome.content)
+		// The caret flips when the menu is open, which is the only feedback saying which of three
+		// identical-looking chips the list below belongs to.
+		Canvas(Modifier.size(7.dp)) {
+			val w = 1.4.dp.toPx()
+			val from = if (isOpen) size.height else 0f
+			val to = if (isOpen) 0f else size.height
+			drawLine(chrome.subdued, Offset(0f, from), Offset(size.width / 2f, to), w, StrokeCap.Round)
+			drawLine(chrome.subdued, Offset(size.width, from), Offset(size.width / 2f, to), w, StrokeCap.Round)
+		}
+	}
+}
+
+/** The handoff's 1200px control pill, as a ceiling rather than a fixed width. */
+private val READER_PILL_MAX_WIDTH = 1200.dp
 
 @Composable
 private fun <T> EnumMenu(
@@ -541,14 +696,28 @@ private fun <T> EnumMenu(
 ) {
 	var expanded by remember { mutableStateOf(false) }
 	Box {
-		TextButton(onClick = { expanded = true }) {
-			Text("$label: ${name(selected)}", color = chrome.content)
-		}
+		ReaderChip(
+			label = label,
+			value = name(selected),
+			chrome = chrome,
+			isOpen = expanded,
+			onClick = { expanded = !expanded },
+		)
+		// A real menu, not a cycler.
+		//
+		// The handoff says these chips cycle on click, which is fine for three options in a
+		// prototype and wrong here: Mode has three, Fit has three, Background has three, and
+		// cycling means up to two wrong states are rendered -- full-page redraws of somebody's
+		// artwork -- on the way to the one that was wanted. A list also *shows* the options, which
+		// a cycler never does.
 		DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
 			for (option in options) {
 				DropdownMenuItem(
 					text = { Text(name(option)) },
-					onClick = { onSelect(option); expanded = false },
+					onClick = {
+						onSelect(option)
+						expanded = false
+					},
 				)
 			}
 		}
@@ -559,27 +728,92 @@ private fun <T> EnumMenu(
 private fun ReaderStatusBar(
 	state: ReaderUiState,
 	chrome: ReaderChrome,
+	onSeek: (Int) -> Unit,
 	modifier: Modifier = Modifier,
 ) {
 	Row(
-		modifier.fillMaxWidth().background(chrome.scrim).padding(AgehaSpacing.sm),
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+		modifier
+			.padding(bottom = 18.dp)
+			.shadow(10.dp, AgehaTheme.skin.pill, clip = false)
+			.clip(AgehaTheme.skin.pill)
+			.background(chrome.scrim)
+			.border(1.dp, chrome.subdued.copy(alpha = 0.25f), AgehaTheme.skin.pill)
+			.padding(horizontal = AgehaSpacing.lg, vertical = 9.dp),
+		horizontalArrangement = Arrangement.spacedBy(14.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		// Tabular figures, so the counter does not reflow as the page number ticks past 9.
 		Text(
-			"${state.currentPage + 1} / ${state.pageCount}",
-			style = AgehaTextStyles.readerHud,
-			color = chrome.content,
-			modifier = Modifier.testTag(PAGE_COUNTER_TAG),
+			"Ch ${state.chapterIndex + 1} of ${state.chapterCount}",
+			style = AgehaTextStyles.monoMeta,
+			color = chrome.subdued,
 		)
+		PageTicks(state, chrome, onSeek)
 		Text(
-			"Chapter ${state.chapterIndex + 1} of ${state.chapterCount}",
-			style = AgehaTextStyles.metadata,
+			"${state.pageCount} pages",
+			style = AgehaTextStyles.monoMeta,
 			color = chrome.subdued,
 		)
 	}
 }
+
+/**
+ * A page as a tick, and the chapter as a row of them.
+ *
+ * ## Why this is worth the space a plain "14 / 22" would not need
+ *
+ * It answers a different question. The counter says where you are; the ticks say *how much is
+ * left*, at a glance, without arithmetic -- and they are clickable, so the shape of the chapter is
+ * also the way to move around inside it. That is the one navigation a reader wants that neither a
+ * counter nor a scrollbar gives.
+ *
+ * Read, current and unread differ in **height** as well as tone, which is what keeps the row
+ * readable in a reader whose whole palette is three greys. The current tick is nearly twice the
+ * height of an unread one; on tone alone the position would be almost impossible to find.
+ *
+ * ## Why it stops at a cap
+ *
+ * A 60-page chapter would draw 60 ticks and a 200-page one would draw a smear. Past [MAX_TICKS] the
+ * row samples evenly instead, so it stays a shape you can read rather than a texture -- and each
+ * tick still seeks to a real page, just not to every page.
+ */
+@Composable
+private fun PageTicks(state: ReaderUiState, chrome: ReaderChrome, onSeek: (Int) -> Unit) {
+	val total = state.pageCount
+	if (total <= 1) return
+	val shown = minOf(total, MAX_TICKS)
+	Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+		for (slot in 0 until shown) {
+			// Which real page this tick stands for. Identity while under the cap; an even sample
+			// above it.
+			val page = if (shown == total) slot else (slot.toFloat() / (shown - 1) * (total - 1)).roundToInt()
+			val isCurrent = page == state.currentPage
+			val isRead = page < state.currentPage
+			Box(
+				Modifier
+					.width(6.dp)
+					.height(if (isCurrent) 16.dp else 9.dp)
+					.clip(MaterialTheme.shapes.extraSmall)
+					.background(
+						when {
+							isCurrent -> chrome.content
+							isRead -> chrome.content.copy(alpha = 0.45f)
+							else -> chrome.subdued.copy(alpha = 0.30f)
+						},
+					)
+					.clickable { onSeek(page) },
+			)
+		}
+	}
+}
+
+/**
+ * How many ticks the chapter pill will draw before it starts sampling.
+ *
+ * 40 is roughly where 6dp ticks and 3dp gaps stop fitting beside the two labels on a 1280px
+ * window. Chapters longer than this are common in webtoons, which is exactly where the row would
+ * otherwise become a solid bar.
+ */
+private const val MAX_TICKS = 40
 
 /**
  * Hides the chrome after a period with no input.

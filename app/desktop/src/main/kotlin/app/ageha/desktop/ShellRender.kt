@@ -58,9 +58,12 @@ fun main(args: Array<String>) {
 				// bridge and the library from Room. Rendering immediately captures the empty
 				// first frame, which would make this test pass on an app that never loads
 				// anything. Render, wait, render again.
-				scene.render()
+				// Two frames on a moving clock: anything that fades in once its data arrives --
+				// the reader's chapter pill, a chip's selection crossfade -- is mid-animation at
+				// frame zero and would be captured half-drawn or not at all.
+				scene.render(0L)
 				runBlocking { delay(RENDER_SETTLE_MS) }
-				val image = scene.render()
+				val image = scene.render(RENDER_SETTLE_MS * 1_000_000)
 				val data = checkNotNull(image.encodeToData(EncodedImageFormat.PNG))
 				File(outDir, "shell-$skinName-$name.png").writeBytes(data.bytes)
 				println("wrote shell-$skinName-$name.png")
@@ -289,10 +292,17 @@ private fun renderReader(app: AgehaApplication, outDir: File) {
 		// Rendered repeatedly rather than once after a sleep. Coil loads asynchronously and the
 		// composition only advances when the scene is rendered, so a single frame after a delay
 		// captures the placeholder no matter how long the delay is.
-		var image = scene.render()
+		// On a clock that moves, for the reason the hero's render explains -- and for a second
+		// one here. The reader's bottom pill is hidden until a page list arrives, so it enters by
+		// *animation* rather than being visible from the first composition. Rendered at the
+		// default nanoTime, that fade never advances past zero and the pill is absent from every
+		// screenshot while being perfectly present in the running app.
+		var nanos = 0L
+		var image = scene.render(nanos)
 		repeat(RENDER_FRAMES) {
 			runBlocking { delay(RENDER_FRAME_GAP_MS) }
-			image = scene.render()
+			nanos += RENDER_FRAME_GAP_MS * 1_000_000
+			image = scene.render(nanos)
 		}
 		File(outDir, "shell-reader.png").writeBytes(
 			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
