@@ -159,12 +159,17 @@ fun AgehaShell(
 	}
 	// Keyed on the two defaults it reads, so changing them in Settings rebuilds the view model
 	// rather than leaving the new value to take effect at the next launch.
-	val readerViewModel = remember(preferences.defaultReaderMode, preferences.defaultPageScale) {
+	val readerViewModel = remember(
+		preferences.defaultReaderMode,
+		preferences.defaultPageScale,
+		preferences.preloadPages,
+	) {
 		ReaderViewModel(
 			reader = application.reader,
 			scope = scope,
 			defaultMode = preferences.defaultReaderMode,
 			defaultScale = preferences.defaultPageScale,
+			preloadAhead = preferences.preloadPages,
 		)
 	}
 	// *Not* keyed on the concurrency setting: rebuilding the queue would drop every job in it.
@@ -608,6 +613,8 @@ fun AgehaShell(
 						// only exist down there. Driving it from here meant the timer knew
 						// about page turns and nothing else.
 						onHideChrome = { readerViewModel.setChromeVisible(false) },
+						preloadPages = preferences.preloadPages,
+						imageLoader = application.imageLoader,
 					)
 				}
 

@@ -78,6 +78,15 @@ class ReaderViewModel(
 	private val defaultMode: ReaderMode = ReaderMode.DEFAULT,
 	/** Settings' "Page fit". Applies on open; the reader's own chip still changes it live. */
 	private val defaultScale: PageScale = PageScale.FIT_PAGE,
+	/**
+	 * Settings' "Preload next pages": how far ahead urls are resolved.
+	 *
+	 * Zero means the whole chapter. This is the *url* half of preloading -- some sources hand back
+	 * a page list of interstitial urls that each need their own request before there is an image
+	 * to fetch at all, so the depth has to be honoured here as well as in the image cache, or the
+	 * setting would prefetch twelve images out of the four urls it had bothered to resolve.
+	 */
+	private val preloadAhead: Int = AHEAD,
 ) {
 
 	private val _state = MutableStateFlow(ReaderUiState())
@@ -255,7 +264,10 @@ class ReaderViewModel(
 	 */
 	private fun resolveAround(centre: Int) {
 		val pages = _state.value.pages
-		val range = (centre - BEHIND)..(centre + AHEAD)
+		// Zero is the settings screen's "Whole chapter". Expressed as the page count rather than
+		// as a special case in the loop, so the range stays one expression.
+		val ahead = if (preloadAhead <= 0) pages.size else preloadAhead
+		val range = (centre - BEHIND)..(centre + ahead)
 		for (index in range) {
 			val page = pages.getOrNull(index) ?: continue
 			if (page.resolvedUrl != null || page.failure != null) continue

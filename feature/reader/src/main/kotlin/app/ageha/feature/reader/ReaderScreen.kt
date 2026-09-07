@@ -77,6 +77,7 @@ import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.model.PageScale
 import app.ageha.core.model.ReaderMode
+import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -113,8 +114,24 @@ fun ReaderScreen(
 	webtoonZoom: Float = 1f,
 	onSetWebtoonZoom: (Float) -> Unit = {},
 	onHideChrome: () -> Unit = {},
+	/** Settings' "Preload next pages". Zero means the whole chapter. */
+	preloadPages: Int = DEFAULT_PRELOAD_PAGES,
+	/**
+	 * The application's image loader, for warming pages ahead of the reader.
+	 *
+	 * Passed in rather than taken from `SingletonImageLoader`, and that is not a style preference.
+	 * `SingletonImageLoader.get` *creates* Coil's default loader when none has been installed, and
+	 * the application installs its own with `setSafe`, which refuses to replace one that already
+	 * exists. A single composition of this screen before the graph was built would therefore have
+	 * pinned a loader with no OkHttp fetcher, no archive fetcher and no disk cache for the life of
+	 * the process. `ImageLoaderWiringTest` caught exactly that.
+	 *
+	 * Null disables preloading, which is what the headless render and the tests want.
+	 */
+	imageLoader: ImageLoader? = null,
 ) {
 	val chrome = remember(background) { ReaderChrome.forBackground(background) }
+	PreloadPages(state, preloadPages, imageLoader)
 
 	// Chrome auto-hide, and the two signals it needs.
 	//
@@ -497,6 +514,51 @@ private fun ReaderPageImage(
 		)
 	}
 }
+
+/**
+ * The image half of "Preload next pages".
+ *
+ * `ReaderViewModel` resolves page *urls* ahead of the reader; this turns those urls into warm
+ * cache entries, which is the half a reader actually feels. Without it the next page starts
+ * downloading at the moment it is asked for, and the depth setting would only shorten the time
+ * spent waiting for a redirect rather than for the image.
+ *
+ * Three things keep it from being a download-the-internet button:
+ *
+ *  - **Only pages whose url is already resolved.** Resolution is bounded by the same setting, so
+ *    this can never run ahead of it and start guessing.
+ *  - **Forward only.** Going back a page is served by the memory cache, which still holds what was
+ *    just read; spending a request to re-warm it would be work done to avoid work already done.
+ *  - **Enqueued, not awaited.** `enqueue` hands the request to Coil's own dispatcher and returns,
+ *    so a slow source cannot stall the page the reader is looking at.
+ */
+@Composable
+private fun PreloadPages(state: ReaderUiState, preloadPages: Int, loader: ImageLoader?) {
+	if (loader == null) return
+	LaunchedEffect(state.currentPage, state.pages, preloadPages, state.imageHeaders, loader) {
+		val depth = if (preloadPages <= 0) state.pages.size else preloadPages
+		// Best-effort, and swallowing the failure is the point rather than a shortcut. Warming a
+		// cache is not something the reader depends on: if a prefetch cannot be enqueued the page
+		// still loads when it is asked for, a moment later. Letting that throw would take down the
+		// screen someone is reading to save them a wait they would not have noticed.
+		runCatching {
+			for (offset in 1..depth) {
+				val page = state.pages.getOrNull(state.currentPage + offset) ?: break
+				val url = page.resolvedUrl ?: continue
+				loader.enqueue(AgehaImages.readerRequest(url, state.imageHeaders))
+			}
+		}
+	}
+}
+
+/**
+ * The default preload depth, matched to `Preferences.preloadPages`.
+ *
+ * Stated here as well so the three callers that do not pass one -- the headless render, the
+ * webtoon profile and the status-bar test -- behave like the running application rather than
+ * silently preloading nothing.
+ */
+private const val DEFAULT_PRELOAD_PAGES = 6
 
 @Composable
 private fun ReaderTopBar(
