@@ -43,6 +43,13 @@ import app.ageha.core.designsystem.AgehaAccent
 import app.ageha.core.designsystem.AgehaGlass
 import app.ageha.core.designsystem.GlassTone
 import app.ageha.core.designsystem.AgehaSearchField
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import app.ageha.core.designsystem.AgehaChip
+import app.ageha.core.designsystem.NoteBox
+import app.ageha.core.designsystem.AgehaSwitch
+import app.ageha.core.designsystem.AgehaTheme
+import app.ageha.core.designsystem.StatusDot
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
@@ -106,37 +113,44 @@ fun SourcePickerScreen(
 				verticalAlignment = Alignment.CenterVertically,
 			) {
 				for (option in SourceFilter.entries) {
-					FilterChip(
-						selected = state.filter == option,
+					AgehaChip(
+						label = option.label,
+						isSelected = state.filter == option,
 						onClick = { onFilter(option) },
-						shape = AgehaGlass.PillShape,
-						label = {
-							Text(
-								if (option == SourceFilter.ENABLED) {
-									"${option.label} (${state.enabledCount})"
-								} else {
-									option.label
-								},
-							)
+						// Counts come from the *unfiltered* set, as the handoff specifies. A tab
+						// whose count already had the current filter applied would read zero on
+						// the tab you are not looking at and tell you nothing about whether
+						// switching to it is worth the click.
+						count = when (option) {
+							SourceFilter.ENABLED -> state.enabledCount.toString()
+							SourceFilter.ALL -> state.totalCount.toString()
+							SourceFilter.BROKEN -> null
 						},
 					)
 				}
 				Box(Modifier.weight(1f))
+				// The handoff's `N SHOWN`, at the right end of the tab row: how many rows survived
+				// the tab and the filters together. It is the one number that answers "why is this
+				// list shorter than I expected", and it sits where the eye lands after reading the
+				// tabs left to right.
 				Text(
-					"parsers ${state.parsersVersion}",
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					"${state.sources.size} shown",
+					style = AgehaTextStyles.monoEyebrow,
+					color = AgehaTheme.skin.inkFaint,
 				)
 			}
 			// Said out loud, every time. See ExploreUiState.hiddenAdultCount for why.
+			//
+			// A tinted note rather than another grey line, which is the handoff's treatment for
+			// exactly this: a sentence about the screen's own state, where a plain paragraph gets
+			// skipped and a warning colour would overstate it. Nothing has gone wrong; rows are
+			// merely not being shown, and the user is the one who asked for that.
 			if (state.hasHiddenSources) {
-				Text(
+				NoteBox(
 					listOfNotNull(
 						state.hiddenAdultCount.takeIf { it > 0 }?.let { "$it 18+ hidden" },
 						state.hiddenBrokenCount.takeIf { it > 0 }?.let { "$it known broken hidden" },
-					).joinToString(" - "),
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					).joinToString(" · ") + " by the current filters.",
 					modifier = Modifier.testTag(HIDDEN_COUNT_TAG),
 				)
 			}
@@ -289,15 +303,33 @@ private fun SourceRow(
 	onOpen: (String) -> Unit,
 	onSetEnabled: (String, Boolean) -> Unit,
 ) {
+	val skin = AgehaTheme.skin
 	Row(
 		Modifier
 			.fillMaxWidth()
 			.testTag(SOURCE_ROW_TAG)
 			.clickable(enabled = listing.isEnabled) { onOpen(listing.name) }
-			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.md),
+			.padding(horizontal = 18.dp, vertical = 15.dp),
 		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+		horizontalArrangement = Arrangement.spacedBy(15.dp),
 	) {
+		// The initial tile. Twelve hundred sources have no icons and never will -- they are
+		// generated from a parser list, not curated -- so the row needs something with the weight
+		// of an icon that costs no assets. A letter on a tinted square scans down a long list far
+		// better than a column of text starting at the same x.
+		Box(
+			Modifier
+				.size(36.dp)
+				.clip(MaterialTheme.shapes.medium)
+				.background(skin.inset),
+			contentAlignment = Alignment.Center,
+		) {
+			Text(
+				listing.title.take(1).uppercase(),
+				style = AgehaTextStyles.monoData,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
 		Column(Modifier.weight(1f)) {
 			Row(
 				verticalAlignment = Alignment.CenterVertically,
@@ -305,43 +337,58 @@ private fun SourceRow(
 			) {
 				Text(
 					listing.title,
-					style = MaterialTheme.typography.bodyLarge,
+					style = MaterialTheme.typography.titleMedium,
 					color = MaterialTheme.colorScheme.onSurface,
 				)
 				// Only reachable with the 18+ filter switched on, and marked anyway. Someone who
 				// turned adult sources on still has to be able to tell which ones they are.
 				if (listing.descriptor.isAdult) {
-					Text(
-						"18+",
-						style = AgehaTextStyles.metadata,
-						color = MaterialTheme.colorScheme.tertiary,
-					)
-				}
-				// Upstream's own "this source is currently broken" flag. Shown rather than hidden:
-				// the user finds out here instead of by watching it fail.
-				if (listing.descriptor.isBroken) {
-					AgehaAccent.NewChapterDot()
-					Text(
-						"known broken",
-						style = AgehaTextStyles.metadata,
-						color = MaterialTheme.colorScheme.error,
-					)
+					AdultBadge()
 				}
 			}
 			Text(
 				listOfNotNull(
 					listing.descriptor.locale?.uppercase(),
 					listing.descriptor.contentType.name.lowercase().replace('_', ' '),
-				).joinToString(" - "),
-				style = AgehaTextStyles.metadata,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				).joinToString(" · "),
+				style = AgehaTextStyles.monoMeta,
+				color = skin.inkFaint,
 			)
 		}
-		Switch(
+		// Health, as a dot and a word. Ageha has no latency probe, so there is no Slow state to
+		// report and inventing one would be a number with nothing behind it -- upstream's own
+		// broken flag is what is actually known, and it is what this says.
+		Row(
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			StatusDot(if (listing.descriptor.isBroken) skin.accent else skin.ok)
+			Text(
+				if (listing.descriptor.isBroken) "Broken" else "Healthy",
+				style = AgehaTextStyles.monoMeta,
+				color = skin.inkFaint,
+			)
+		}
+		AgehaSwitch(
 			checked = listing.isEnabled,
 			onCheckedChange = { onSetEnabled(listing.name, it) },
 			modifier = Modifier.testTag(SOURCE_TOGGLE_TAG),
 		)
+	}
+}
+
+/** The handoff's `18+` cap: accent-soft over accent-line, in the accent's own ink. */
+@Composable
+private fun AdultBadge() {
+	val skin = AgehaTheme.skin
+	Box(
+		Modifier
+			.clip(skin.chip)
+			.background(MaterialTheme.colorScheme.primaryContainer)
+			.border(1.dp, skin.accentLine, skin.chip)
+			.padding(horizontal = 5.dp, vertical = 1.dp),
+	) {
+		Text("18+", style = AgehaTextStyles.monoEyebrow, color = skin.accent)
 	}
 }
 

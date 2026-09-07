@@ -79,6 +79,9 @@ import app.ageha.feature.reader.ReaderActions
 import app.ageha.feature.reader.ReaderKeys
 import app.ageha.feature.reader.ReaderScreen
 import app.ageha.feature.reader.ReaderViewModel
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -307,12 +310,53 @@ fun AgehaShell(
 
 				Destination.Downloads -> {
 					val queued by downloadQueue.jobs.collectAsState()
+					// Rescanned when the queue changes rather than on a timer. A chapter finishing
+					// is the only thing that grows this figure while the screen is open, and a
+					// filesystem walk on a poll would be work done to observe nothing happening.
+					// `deleteEpoch` re-triggers it after a delete, which the queue never sees.
+					var deleteEpoch by remember { mutableStateOf(0) }
+					val storage by produceState(
+						app.ageha.core.data.StorageReport.EMPTY,
+						queued.size,
+						deleteEpoch,
+					) {
+						value = withContext(Dispatchers.IO) {
+							runCatching { application.downloadInventory.scan() }
+								.getOrDefault(app.ageha.core.data.StorageReport.EMPTY)
+						}
+					}
 					DownloadsScreen(
 						jobs = queued,
 						onCancel = downloadQueue::cancel,
 						onRetry = downloadQueue::retry,
 						onCancelAll = downloadQueue::cancelAll,
 						onClearFinished = downloadQueue::clearFinished,
+						storage = storage,
+						onDeleteTitle = { title ->
+							scope.launch {
+								val freed = withContext(Dispatchers.IO) {
+									application.downloadInventory.delete(title)
+								}
+								deleteEpoch++
+								// Reported rather than silent. This is the one destructive action
+								// on the screen, and saying how much it actually reclaimed is the
+								// difference between a delete you can trust and one you hope
+								// worked.
+								application.notices.post(
+									"Deleted ${title.title}",
+									"${title.chapterCount} chapters removed. The title stays in " +
+										"your library; only the downloaded files are gone.",
+								)
+								if (freed <= 0L) {
+									application.notices.post(
+										"Nothing was deleted",
+										"Ageha could not remove the files for ${title.title}. " +
+											"They may be open in another program.",
+										isError = true,
+									)
+								}
+							}
+						},
 					)
 				}
 
