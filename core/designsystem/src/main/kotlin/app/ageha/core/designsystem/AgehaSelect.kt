@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -106,14 +109,19 @@ fun <T> AgehaSelect(
 				.clickable(enabled = enabled, role = Role.DropdownList) { open = !open }
 				.padding(horizontal = 13.dp, vertical = 9.dp),
 			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+			// `SpaceBetween` against the minimum width, rather than a weighted spacer between the
+			// two children. A `weight` inside a row whose own width is unconstrained resolves to
+			// "as much as there is", so the button grew to fill the whole settings row and
+			// squeezed the label beside it down to one character per line. This pins the button to
+			// [minWidth] and pushes the caret to that edge.
+			horizontalArrangement = Arrangement.SpaceBetween,
 		) {
 			Text(
 				label(value),
 				style = AgehaTextStyles.monoControl,
 				color = if (enabled) MaterialTheme.colorScheme.onSurface else skin.inkFaint,
 			)
-			Spacer(Modifier.weight(1f))
+			Spacer(Modifier.width(AgehaSpacing.md))
 			Canvas(Modifier.size(9.dp).rotate(caret)) { drawCaret(skin.inkFaint) }
 		}
 		if (open) {
@@ -153,6 +161,10 @@ private fun <T> SelectPanel(
 			.clip(shape)
 			.background(AgehaGlass.fill(GlassTone.RAISED))
 			.border(1.dp, skin.lineStrong, shape)
+			// Sized to its widest row, so every row can then fill that width and every tick lands
+			// on the same vertical line. Without it the rows are each their own width and the
+			// ticks stagger down the panel.
+			.width(IntrinsicSize.Max)
 			.padding(5.dp),
 		verticalArrangement = Arrangement.spacedBy(1.dp),
 	) {
@@ -160,6 +172,7 @@ private fun <T> SelectPanel(
 			val isSelected = option == value
 			Row(
 				Modifier
+					.fillMaxWidth()
 					.clip(MaterialTheme.shapes.medium)
 					.background(
 						if (isSelected) {
@@ -171,7 +184,7 @@ private fun <T> SelectPanel(
 					.clickable(role = Role.RadioButton) { onPick(option) }
 					.padding(horizontal = 10.dp, vertical = 8.dp),
 				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+				horizontalArrangement = Arrangement.SpaceBetween,
 			) {
 				Text(
 					label(option),
@@ -182,7 +195,7 @@ private fun <T> SelectPanel(
 						MaterialTheme.colorScheme.onSurfaceVariant
 					},
 				)
-				Spacer(Modifier.weight(1f))
+				Spacer(Modifier.width(AgehaSpacing.md))
 				// Reserved whether or not it is drawn, so the rows do not change width as the
 				// selection moves down the panel.
 				Box(Modifier.size(CHECK_SIZE)) {
