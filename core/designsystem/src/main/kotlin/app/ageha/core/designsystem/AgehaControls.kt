@@ -26,6 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /*
@@ -265,4 +274,40 @@ fun GhostButton(
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 		content = content,
 	)
+}
+
+/**
+ * A dashed hairline, for a note about the application rather than a control in it.
+ *
+ * The handoff uses it once -- around the config path at the foot of the settings rail -- and the
+ * dashes are the whole point: a solid border in this interface means "this is a thing you can
+ * press", and a box that looks pressable and is not is worse than no box.
+ *
+ * Drawn rather than bordered, because `Modifier.border` takes a `Brush` and has no dash phase.
+ * `Stroke` with a `PathEffect` is the only way to express one, which means an `outline` from the
+ * shape and a `drawBehind` rather than a one-line modifier.
+ */
+@Composable
+fun Modifier.dashedBorder(colour: Color, shape: Shape, width: Dp = 1.dp): Modifier {
+	val density = LocalDensity.current
+	val layoutDirection = LocalLayoutDirection.current
+	return drawBehind {
+		val outline = shape.createOutline(size, layoutDirection, density)
+		val path = Path().apply {
+			when (outline) {
+				is Outline.Rectangle -> addRect(outline.rect)
+				is Outline.Rounded -> addRoundRect(outline.roundRect)
+				is Outline.Generic -> addPath(outline.path)
+			}
+		}
+		drawPath(
+			path,
+			colour,
+			style = Stroke(
+				width = width.toPx(),
+				// 4 on, 3 off. Short enough to read as a dash at 1dp rather than as a broken line.
+				pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())),
+			),
+		)
+	}
 }

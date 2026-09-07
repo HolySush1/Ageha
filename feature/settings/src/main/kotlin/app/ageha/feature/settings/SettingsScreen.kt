@@ -23,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +37,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.ageha.core.designsystem.AgehaAccent
+import androidx.compose.foundation.layout.Spacer
+import app.ageha.core.designsystem.AgehaTheme
+import app.ageha.core.designsystem.dashedBorder
+import app.ageha.core.network.AgehaPaths
+import app.ageha.core.designsystem.AgehaSwitch
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.AgehaThemeMode
@@ -120,13 +124,40 @@ fun SettingsScreen(
 	Row(modifier.fillMaxSize()) {
 		Column(
 			Modifier
-				.width(210.dp)
+				.width(188.dp)
 				.fillMaxHeight()
 				.background(MaterialTheme.colorScheme.surfaceContainerLow)
 				.padding(vertical = AgehaSpacing.sm),
 		) {
 			for (option in SettingsSection.entries) {
 				SectionRow(option.label, option == section) { section = option }
+			}
+			Spacer(Modifier.weight(1f))
+			// Where the settings actually live, in a dashed box at the foot of the rail.
+			//
+			// The handoff puts this here and it earns its place: every value on this screen is
+			// written to one file, and someone syncing a machine, filing a bug or recovering a
+			// profile needs the path. Dashed rather than solid, because it is a note about the
+			// application rather than a control in it.
+			Box(
+				Modifier
+					.padding(AgehaSpacing.md)
+					.fillMaxWidth()
+					.dashedBorder(AgehaTheme.skin.lineStrong, MaterialTheme.shapes.medium)
+					.padding(AgehaSpacing.sm),
+			) {
+				Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+					Text(
+						"Settings are stored in",
+						style = AgehaTextStyles.monoMeta,
+						color = AgehaTheme.skin.inkFaint,
+					)
+					Text(
+						AgehaPaths.dataDir.resolve("preferences.json").path,
+						style = AgehaTextStyles.monoMeta,
+						color = AgehaTheme.skin.inkFaint,
+					)
+				}
 			}
 		}
 		Column(
@@ -162,18 +193,21 @@ private fun SectionRow(label: String, isSelected: Boolean, onClick: () -> Unit) 
 		Modifier
 			.fillMaxWidth()
 			.padding(horizontal = AgehaSpacing.sm, vertical = 1.dp)
-			.clip(MaterialTheme.shapes.small)
-			.background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+			.clip(MaterialTheme.shapes.medium)
+			// `--accent-soft` and full-strength ink, as the handoff's selected rail row is.
+			// Unselected carries no fill and no border at all: a rail is a list of places, and
+			// bordering every one of them turns a quiet column into seven competing buttons.
+			.background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
 			.clickable(onClick = onClick)
-			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+			.padding(horizontal = 13.dp, vertical = 10.dp),
 	) {
 		Text(
 			label,
 			style = MaterialTheme.typography.bodyMedium,
 			color = if (isSelected) {
-				MaterialTheme.colorScheme.onSecondaryContainer
-			} else {
 				MaterialTheme.colorScheme.onSurface
+			} else {
+				MaterialTheme.colorScheme.onSurfaceVariant
 			},
 		)
 	}
@@ -258,12 +292,12 @@ private fun ReaderPanel(
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	Text("Page layout", style = MaterialTheme.typography.titleMedium)
 	Row(verticalAlignment = Alignment.CenterVertically) {
-		Switch(checked = doublePage, onCheckedChange = onDoublePage)
+		AgehaSwitch(checked = doublePage, onCheckedChange = onDoublePage)
 		Text("Two pages side by side", Modifier.padding(start = AgehaSpacing.sm))
 	}
 	if (doublePage) {
 		Row(verticalAlignment = Alignment.CenterVertically) {
-			Switch(checked = coverOffset, onCheckedChange = onCoverOffset)
+			AgehaSwitch(checked = coverOffset, onCheckedChange = onCoverOffset)
 			Text("First page stands alone", Modifier.padding(start = AgehaSpacing.sm))
 		}
 		Explain(
@@ -312,11 +346,11 @@ private fun ParsersPanel(
 			"keeps working everywhere, including search across every source.",
 	)
 	Row(verticalAlignment = Alignment.CenterVertically) {
-		Switch(checked = hideBrokenSources, onCheckedChange = onHideBrokenSources)
+		AgehaSwitch(checked = hideBrokenSources, onCheckedChange = onHideBrokenSources)
 		Text("Hide sources known to be broken", Modifier.padding(start = AgehaSpacing.sm))
 	}
 	Row(verticalAlignment = Alignment.CenterVertically) {
-		Switch(checked = showAdultSources, onCheckedChange = onShowAdultSources)
+		AgehaSwitch(checked = showAdultSources, onCheckedChange = onShowAdultSources)
 		Text("Show 18+ sources", Modifier.padding(start = AgehaSpacing.sm))
 	}
 	Explain(
@@ -629,7 +663,7 @@ private fun SyncPanel(
 			TextButton(onClick = onSignOut, enabled = !state.isBusy) { Text("Sign out") }
 		}
 		Row(verticalAlignment = Alignment.CenterVertically) {
-			Switch(checked = state.syncOnStart, onCheckedChange = onSyncOnStart, enabled = !state.isBusy)
+			AgehaSwitch(checked = state.syncOnStart, onCheckedChange = onSyncOnStart, enabled = !state.isBusy)
 			Text("Sync when Ageha starts", modifier = Modifier.padding(start = AgehaSpacing.sm))
 		}
 		Explain(
@@ -669,7 +703,7 @@ private fun SyncPanel(
 			modifier = Modifier.fillMaxWidth(),
 		)
 		Row(verticalAlignment = Alignment.CenterVertically) {
-			Switch(
+			AgehaSwitch(
 				checked = rememberPassword,
 				onCheckedChange = { rememberPassword = it },
 				enabled = !state.isBusy,

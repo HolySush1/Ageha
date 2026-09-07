@@ -168,6 +168,7 @@ fun ReaderScreen(
 
 			state.mode == ReaderMode.WEBTOON -> WebtoonReader(
 				state = state,
+				chrome = chrome,
 				background = background,
 				zoom = webtoonZoom,
 				onScroll = onScroll,
@@ -177,6 +178,7 @@ fun ReaderScreen(
 
 			else -> PagedReader(
 				state = state,
+				chrome = chrome,
 				doublePage = doublePage,
 				coverOffset = coverOffset,
 				onPageChange = onPageChange,
@@ -226,6 +228,7 @@ fun ReaderScreen(
 @Composable
 private fun PagedReader(
 	state: ReaderUiState,
+	chrome: ReaderChrome,
 	doublePage: Boolean,
 	coverOffset: Boolean,
 	onPageChange: (Int) -> Unit,
@@ -263,6 +266,7 @@ private fun PagedReader(
 				page = page,
 				headers = state.imageHeaders,
 				contentScale = state.scale.toContentScale(),
+				chrome = chrome,
 				modifier = Modifier.weight(1f).fillMaxSize(),
 			)
 		}
@@ -311,6 +315,7 @@ private fun PagedReader(
 @Composable
 private fun WebtoonReader(
 	state: ReaderUiState,
+	chrome: ReaderChrome,
 	background: ReaderBackground,
 	zoom: Float,
 	onScroll: (page: Int, fraction: Float) -> Unit,
@@ -414,6 +419,7 @@ private fun WebtoonReader(
 						// Width-filling is the only scale that makes sense for a continuous strip:
 						// the whole point is that the reader scrolls rather than fits.
 						contentScale = ContentScale.FillWidth,
+						chrome = chrome,
 						modifier = Modifier
 							.width(stripWidth)
 							.aspectRatio(ratios[page.key] ?: chapterRatio),
@@ -440,6 +446,15 @@ private fun ReaderPageImage(
 	page: ReaderPage,
 	headers: Map<String, String>,
 	contentScale: ContentScale,
+	/**
+	 * The reader's own inks, rather than a fixed grey.
+	 *
+	 * These two placeholders used to be `Color(0xFF9A9A9A)` written in place -- the only literal
+	 * hex left outside the design system, and wrong for a second reason besides rule 7: a mid grey
+	 * chosen against a black background is barely legible on Paper and invisible on White, which
+	 * are two of the four backgrounds this screen offers.
+	 */
+	chrome: ReaderChrome,
 	modifier: Modifier = Modifier,
 	onDecoded: (width: Int, height: Int) -> Unit = { _, _ -> },
 ) {
@@ -452,12 +467,12 @@ private fun ReaderPageImage(
 			Text(
 				"Page ${page.index + 1} could not be loaded",
 				style = AgehaTextStyles.metadata,
-				color = androidx.compose.ui.graphics.Color(0xFF9A9A9A),
+				color = chrome.subdued,
 			)
 		}
 
 		url == null -> Box(modifier, Alignment.Center) {
-			CircularProgressIndicator(Modifier.size(28.dp), color = androidx.compose.ui.graphics.Color(0xFF9A9A9A))
+			CircularProgressIndicator(Modifier.size(28.dp), color = chrome.subdued)
 		}
 
 		else -> AsyncImage(
