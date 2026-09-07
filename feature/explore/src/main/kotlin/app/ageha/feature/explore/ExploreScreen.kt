@@ -18,10 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,7 +37,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import app.ageha.core.data.SourceListing
-import app.ageha.core.designsystem.AgehaAccent
 import app.ageha.core.designsystem.AgehaGlass
 import app.ageha.core.designsystem.GlassTone
 import app.ageha.core.designsystem.AgehaSearchField
@@ -59,6 +56,23 @@ import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.AgehaSortOrder
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
+import app.ageha.core.designsystem.KeyCap
 
 /**
  * The source picker.
@@ -67,12 +81,20 @@ import app.ageha.core.model.AgehaSortOrder
  * tiles is a grid for its own sake. Each row carries the switch that enables it, so turning
  * sources on is done from the same place they are found rather than in a separate settings screen.
  *
- * The header is where the catalogue becomes usable. 1360 sources in every language, some of them
- * broken and some of them pornographic, is not a list anyone can browse -- so the view chips pick
- * a slice, and the filter menu beside them narrows it by language, by whether upstream has flagged
- * the source broken, and by whether adult sources are shown at all. Whatever those filters remove
- * is counted out loud underneath, because a filtered list that does not say it is filtered is
- * indistinguishable from a catalogue that is missing things.
+ * ## Why the filters are a rail and not a menu
+ *
+ * They used to be a dropdown behind a "Filters (2)" button. The handoff puts them in a 292dp panel
+ * down the right-hand side, and that is the better shape for what they are: switches and a run of
+ * language chips that mostly stay where they were put. A menu closes every time one is touched, so
+ * narrowing a catalogue by a language and two content rules meant opening the same menu three
+ * times -- and while it was open it covered the list it was filtering, which is the one thing a
+ * filter control must never do.
+ *
+ * The rail is a toggle rather than always-on because it costs 292dp of a window whose main content
+ * is a list of rows, and most sessions never touch a filter at all.
+ *
+ * Whatever the filters remove is counted out loud, because a filtered list that does not say it is
+ * filtered is indistinguishable from a catalogue that is missing things.
  */
 @Composable
 fun SourcePickerScreen(
@@ -87,215 +109,445 @@ fun SourcePickerScreen(
 	modifier: Modifier = Modifier,
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
-	Column(modifier.fillMaxSize()) {
-		Column(
-			Modifier
-				.fillMaxWidth()
-				.glassSurface(RoundedCornerShape(0.dp), GlassTone.CHROME)
-				.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
-			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-		) {
-			Row(
-				Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
-				verticalAlignment = Alignment.CenterVertically,
+	var filtersOpen by remember { mutableStateOf(false) }
+	val activeFilters = listOf(state.locale != null, state.hideBroken, state.showAdult).count { it }
+	Row(modifier.fillMaxSize()) {
+		Column(Modifier.weight(1f).fillMaxHeight()) {
+			Column(
+				Modifier
+					.fillMaxWidth()
+					.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.md),
+				verticalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 			) {
-				AgehaSearchField(
-					value = state.query,
-					onValueChange = onSearch,
-					placeholder = "Search ${state.totalCount} sources",
-					modifier = Modifier.weight(1f).focusRequester(searchFocus),
+				SearchRow(
+					state = state,
+					onSearch = onSearch,
+					searchFocus = searchFocus,
+					filtersOpen = filtersOpen,
+					activeFilters = activeFilters,
+					onToggleFilters = { filtersOpen = !filtersOpen },
 				)
-				FilterMenu(state, onLocale, onHideBroken, onShowAdult)
+				TabRow(state, onFilter)
 			}
-			Row(
-				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
-				verticalAlignment = Alignment.CenterVertically,
-			) {
-				for (option in SourceFilter.entries) {
-					AgehaChip(
-						label = option.label,
-						isSelected = state.filter == option,
-						onClick = { onFilter(option) },
-						// Counts come from the *unfiltered* set, as the handoff specifies. A tab
-						// whose count already had the current filter applied would read zero on
-						// the tab you are not looking at and tell you nothing about whether
-						// switching to it is worth the click.
-						count = when (option) {
-							SourceFilter.ENABLED -> state.enabledCount.toString()
-							SourceFilter.ALL -> state.totalCount.toString()
-							SourceFilter.BROKEN -> null
-						},
+			SourceList(state, onOpenSource, onSetEnabled, onFilter)
+		}
+		if (filtersOpen) {
+			FilterRail(
+				state = state,
+				activeFilters = activeFilters,
+				onLocale = onLocale,
+				onHideBroken = onHideBroken,
+				onShowAdult = onShowAdult,
+				onSearch = onSearch,
+			)
+		}
+	}
+}
+
+/**
+ * The handoff's 50dp field, and the button that opens the rail.
+ *
+ * The CTRL K cap is a promise the application has to keep, so it is drawn only because the
+ * shortcut exists. A key cap printed beside a field that does not answer to that key is worse than
+ * no cap at all: it teaches someone a shortcut and then fails them with it.
+ */
+@Composable
+private fun SearchRow(
+	state: ExploreUiState,
+	onSearch: (String) -> Unit,
+	searchFocus: FocusRequester,
+	filtersOpen: Boolean,
+	activeFilters: Int,
+	onToggleFilters: () -> Unit,
+) {
+	val skin = AgehaTheme.skin
+	Row(
+		Modifier.fillMaxWidth(),
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Row(
+			Modifier
+				.weight(1f)
+				.height(FIELD_HEIGHT)
+				.glassSurface(MaterialTheme.shapes.large, GlassTone.PANEL)
+				.padding(horizontal = AgehaSpacing.lg),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+		) {
+			Icon(
+				Icons.Default.Search,
+				contentDescription = null,
+				tint = skin.inkFaint,
+				modifier = Modifier.size(17.dp),
+			)
+			Box(Modifier.weight(1f)) {
+				if (state.query.isEmpty()) {
+					Text(
+						"Search " + state.totalCount + " sources",
+						style = AgehaTextStyles.monoControl,
+						color = skin.inkFaint,
 					)
 				}
-				Box(Modifier.weight(1f))
-				// The handoff's `N SHOWN`, at the right end of the tab row: how many rows survived
-				// the tab and the filters together. It is the one number that answers "why is this
-				// list shorter than I expected", and it sits where the eye lands after reading the
-				// tabs left to right.
-				Text(
-					"${state.sources.size} shown",
-					style = AgehaTextStyles.monoEyebrow,
-					color = AgehaTheme.skin.inkFaint,
+				BasicTextField(
+					value = state.query,
+					onValueChange = onSearch,
+					singleLine = true,
+					textStyle = AgehaTextStyles.monoControl.copy(
+						color = MaterialTheme.colorScheme.onSurface,
+					),
+					cursorBrush = SolidColor(skin.accent),
+					modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
 				)
 			}
-			// Said out loud, every time. See ExploreUiState.hiddenAdultCount for why.
-			//
-			// A tinted note rather than another grey line, which is the handoff's treatment for
-			// exactly this: a sentence about the screen's own state, where a plain paragraph gets
-			// skipped and a warning colour would overstate it. Nothing has gone wrong; rows are
-			// merely not being shown, and the user is the one who asked for that.
-			if (state.hasHiddenSources) {
-				NoteBox(
-					listOfNotNull(
-						state.hiddenAdultCount.takeIf { it > 0 }?.let { "$it 18+ hidden" },
-						state.hiddenBrokenCount.takeIf { it > 0 }?.let { "$it known broken hidden" },
-					).joinToString(" · ") + " by the current filters.",
-					modifier = Modifier.testTag(HIDDEN_COUNT_TAG),
+			KeyCap("CTRL K")
+		}
+		FiltersButton(filtersOpen, activeFilters, onToggleFilters)
+	}
+}
+
+/** The 50dp button beside the field, with the handoff's accent pill counting active filters. */
+@Composable
+private fun FiltersButton(isOpen: Boolean, activeFilters: Int, onClick: () -> Unit) {
+	val skin = AgehaTheme.skin
+	val shape = MaterialTheme.shapes.large
+	Row(
+		Modifier
+			.height(FIELD_HEIGHT)
+			.clip(shape)
+			.background(
+				if (isOpen) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+			)
+			.border(1.dp, if (isOpen) skin.accentLine else skin.line, shape)
+			.clickable(role = Role.Button, onClick = onClick)
+			.testTag(FILTER_MENU_TAG)
+			.padding(horizontal = AgehaSpacing.lg),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
+		Text(
+			"Filters",
+			style = MaterialTheme.typography.labelMedium,
+			color = if (isOpen) {
+				MaterialTheme.colorScheme.onSurface
+			} else {
+				MaterialTheme.colorScheme.onSurfaceVariant
+			},
+		)
+		// Drawn only when something is actually filtering. A counter permanently reading zero is a
+		// badge that has stopped meaning anything by the time it means something.
+		if (activeFilters > 0) {
+			Box(
+				Modifier
+					.clip(CircleShape)
+					.background(skin.accent)
+					.padding(horizontal = 6.dp, vertical = 1.dp),
+			) {
+				Text(
+					activeFilters.toString(),
+					style = AgehaTextStyles.monoEyebrow,
+					// White rather than onPrimary: this fill is the raw accent, not the
+					// contrast-corrected one. See AgehaSkin.accent.
+					color = Color.White,
 				)
 			}
 		}
-		when {
-			state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+	}
+}
 
-			state.sources.isEmpty() && state.filter == SourceFilter.ENABLED && state.query.isEmpty() ->
-				EmptyState(
-					title = "No sources enabled",
-					detail = "Ageha ships ${state.totalCount} sources and starts with all of them " +
-						"off, so it only ever talks to sites you chose. Turn some on to begin.",
-					action = { TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") } },
-				)
-
-			// Found nothing here, but the full catalogue has it. Always the case on a fresh
-			// installation, where nothing is enabled yet and so *every* search of the enabled
-			// sources comes back empty -- and "no sources match" sends someone looking for a
-			// source that is sitting right there, switched off.
-			state.sources.isEmpty() && state.matchesInAllSources > 0 -> EmptyState(
-				title = if (state.matchesInAllSources == 1) {
-					"1 source matches, but it is not enabled"
-				} else {
-					"${state.matchesInAllSources} sources match, but none are enabled"
+/** The three tabs, and N SHOWN at the right end of the row. */
+@Composable
+private fun TabRow(state: ExploreUiState, onFilter: (SourceFilter) -> Unit) {
+	Row(
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		for (option in SourceFilter.entries) {
+			AgehaChip(
+				label = option.label,
+				isSelected = state.filter == option,
+				onClick = { onFilter(option) },
+				// Counts come from the *unfiltered* set, as the handoff specifies. A tab whose
+				// count already had the current filter applied would read zero on the tab you are
+				// not looking at and tell you nothing about whether switching to it is worth the
+				// click.
+				count = when (option) {
+					SourceFilter.ENABLED -> state.enabledCount.toString()
+					SourceFilter.ALL -> state.totalCount.toString()
+					SourceFilter.BROKEN -> null
 				},
-				detail = "Ageha starts with every source off, so it only ever talks to sites you " +
-					"chose. Show the full list to turn this one on.",
-				action = { TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") } },
 			)
+		}
+		Box(Modifier.weight(1f))
+		// The handoff's N SHOWN: how many rows survived the tab and the filters together. It is
+		// the one number that answers "why is this list shorter than I expected", and it sits
+		// where the eye lands after reading the tabs left to right.
+		Text(
+			state.sources.size.toString() + " shown",
+			style = AgehaTextStyles.monoEyebrow,
+			color = AgehaTheme.skin.inkFaint,
+		)
+	}
+}
 
-			// Nothing matches *here*, but a filter is withholding rows. Offering the search term
-			// back without mentioning the filter would be the app hiding its own doing.
-			state.sources.isEmpty() && state.hasHiddenSources -> EmptyState(
-				title = "No sources match",
-				detail = "Nothing here matches that search, and " +
-					listOfNotNull(
-						state.hiddenAdultCount.takeIf { it > 0 }?.let { "$it 18+ source(s)" },
-						state.hiddenBrokenCount.takeIf { it > 0 }?.let { "$it known broken source(s)" },
-					).joinToString(" and ") +
-					" are hidden by your filters.",
-			)
+/**
+ * The list itself: a --panel2 container whose rows are divided by --line.
+ *
+ * A container rather than rows floating on the backdrop. Forty hairline-separated rows inside one
+ * bordered card read as a *list*; forty free-standing rows read as forty cards, and the eye has to
+ * work out the grouping for itself every time the screen opens.
+ */
+@Composable
+private fun SourceList(
+	state: ExploreUiState,
+	onOpenSource: (String) -> Unit,
+	onSetEnabled: (String, Boolean) -> Unit,
+	onFilter: (SourceFilter) -> Unit,
+) {
+	when {
+		state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+			CircularProgressIndicator()
+		}
 
-			state.sources.isEmpty() -> EmptyState(
-				title = "No sources match",
-				detail = "Nothing here matches that search and filter.",
-			)
+		state.sources.isEmpty() &&
+			state.filter == SourceFilter.ENABLED &&
+			state.query.isEmpty() -> EmptyState(
+			title = "No sources enabled",
+			detail = "Ageha ships " + state.totalCount + " sources and starts with all of them " +
+				"off, so it only ever talks to sites you chose. Turn some on to begin.",
+			action = {
+				TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") }
+			},
+		)
 
-			else -> LazyColumn(Modifier.fillMaxSize()) {
-				items(state.sources, key = { it.name }) { listing ->
-					SourceRow(listing, onOpenSource, onSetEnabled)
+		// Found nothing here, but the full catalogue has it. Always the case on a fresh
+		// installation, where nothing is enabled yet and so *every* search of the enabled sources
+		// comes back empty -- and "no sources match" sends someone looking for a source that is
+		// sitting right there, switched off.
+		state.sources.isEmpty() && state.matchesInAllSources > 0 -> EmptyState(
+			title = if (state.matchesInAllSources == 1) {
+				"1 source matches, but it is not enabled"
+			} else {
+				state.matchesInAllSources.toString() + " sources match, but none are enabled"
+			},
+			detail = "Ageha starts with every source off, so it only ever talks to sites you " +
+				"chose. Show the full list to turn this one on.",
+			action = {
+				TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") }
+			},
+		)
+
+		// Nothing matches *here*, but a filter is withholding rows. Offering the search term back
+		// without mentioning the filter would be the app hiding its own doing.
+		state.sources.isEmpty() && state.hasHiddenSources -> EmptyState(
+			title = "No sources match",
+			detail = "Nothing here matches that search, and " +
+				listOfNotNull(
+					state.hiddenAdultCount.takeIf { it > 0 }?.let {
+						it.toString() + " 18+ source(s)"
+					},
+					state.hiddenBrokenCount.takeIf { it > 0 }?.let {
+						it.toString() + " known broken source(s)"
+					},
+				).joinToString(" and ") +
+				" are hidden by your filters.",
+		)
+
+		state.sources.isEmpty() -> EmptyState(
+			title = "No sources match",
+			detail = "Nothing here matches that search and filter.",
+		)
+
+		else -> LazyColumn(
+			Modifier
+				.fillMaxSize()
+				.padding(
+					start = AgehaSpacing.lg,
+					end = AgehaSpacing.lg,
+					bottom = AgehaSpacing.lg,
+				)
+				.clip(MaterialTheme.shapes.large)
+				.background(MaterialTheme.colorScheme.surfaceContainerLow)
+				.border(1.dp, AgehaTheme.skin.line, MaterialTheme.shapes.large),
+		) {
+			itemsIndexed(state.sources, key = { _, listing -> listing.name }) { index, listing ->
+				// Drawn by the list rather than by the row, so no hairline hangs under the last
+				// one against the container's own border -- two lines 1dp apart, which is the
+				// most visible way to get this construction wrong.
+				if (index > 0) {
+					Box(
+						Modifier
+							.fillMaxWidth()
+							.height(1.dp)
+							.background(AgehaTheme.skin.line),
+					)
 				}
+				SourceRow(listing, onOpenSource, onSetEnabled)
 			}
 		}
 	}
 }
 
 /**
- * The three filters that are not a view: language, broken, and adult.
+ * The handoff's 292dp filter rail.
  *
- * A menu rather than three more chips in the bar. Chips are for the slice being shown and read as
- * one exclusive choice; these are independent switches that mostly stay where the user put them,
- * and putting six controls in a row makes the two that matter harder to find rather than easier.
+ * Three toggle rows, a run of language chips, and the note box that says what is being withheld.
+ * The handoff has four toggles; there is no unverified-mirror tier in the parsers library, so that
+ * row is absent rather than present and inert.
  *
- * The button says how many are active, so a filtered catalogue is legible without opening it.
+ * The language *chips* are here rather than in Settings for the reason the handoff puts them here:
+ * the set of languages is derived from the catalogue currently loaded, so it belongs beside the
+ * catalogue rather than in a preferences screen that would have to be told about it.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FilterMenu(
+private fun FilterRail(
 	state: ExploreUiState,
+	activeFilters: Int,
 	onLocale: (String?) -> Unit,
 	onHideBroken: (Boolean) -> Unit,
 	onShowAdult: (Boolean) -> Unit,
+	onSearch: (String) -> Unit,
 ) {
-	var expanded by remember { mutableStateOf(false) }
-	val active = listOf(state.locale != null, state.hideBroken, state.showAdult).count { it }
-	Box {
-		TextButton(onClick = { expanded = true }, modifier = Modifier.testTag(FILTER_MENU_TAG)) {
-			Text(if (active == 0) "Filters" else "Filters ($active)")
+	val skin = AgehaTheme.skin
+	Column(
+		Modifier
+			.width(RAIL_WIDTH)
+			.fillMaxHeight()
+			.padding(end = AgehaSpacing.lg, top = AgehaSpacing.md, bottom = AgehaSpacing.lg)
+			.glassSurface(MaterialTheme.shapes.large, GlassTone.PANEL)
+			.verticalScroll(rememberScrollState())
+			.padding(18.dp),
+		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+	) {
+		Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+			Text(
+				"FILTERS",
+				style = AgehaTextStyles.monoEyebrow,
+				color = skin.accent,
+				modifier = Modifier.weight(1f),
+			)
+			// Clears the filters and the query, and deliberately not the tab or the enabled
+			// states: those are decisions, not a narrowing you might want to undo in one go.
+			Text(
+				"reset",
+				style = AgehaTextStyles.monoMeta,
+				color = if (activeFilters > 0 || state.query.isNotEmpty()) {
+					skin.accent
+				} else {
+					skin.inkFaint
+				},
+				modifier = Modifier
+					.clip(MaterialTheme.shapes.extraSmall)
+					.clickable {
+						onHideBroken(false)
+						onShowAdult(false)
+						onLocale(null)
+						onSearch("")
+					}
+					.padding(horizontal = AgehaSpacing.xs, vertical = 2.dp),
+			)
 		}
-		DropdownMenu(
-			expanded = expanded,
-			onDismissRequest = { expanded = false },
-			modifier = Modifier.glassSurface(MaterialTheme.shapes.medium, GlassTone.RAISED),
+		ToggleRow(
+			label = "Hide 18+ content",
+			hint = "adult catalogues stay out of the list",
+			checked = !state.showAdult,
+			onToggle = { onShowAdult(!it) },
+			testTag = ADULT_TOGGLE_TAG,
+		)
+		ToggleRow(
+			label = "Hide broken sources",
+			hint = "upstream flagged these as not working",
+			checked = state.hideBroken,
+			onToggle = onHideBroken,
+		)
+		ToggleRow(
+			label = "Only my language",
+			hint = if (state.locale == null) "showing every language" else "one language at a time",
+			checked = state.locale != null,
+			// Turning it on with nothing chosen would be a switch that does nothing, so it takes
+			// the largest catalogue's language -- which is what someone means by "my language" far
+			// more often than not, and is one chip click from being corrected.
+			onToggle = { on ->
+				onLocale(if (on) state.availableLocales.firstOrNull()?.tag else null)
+			},
+		)
+		Text("LANGUAGE", style = AgehaTextStyles.monoEyebrow, color = skin.inkFaint)
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
 		) {
-			ToggleItem(
-				label = "Hide known broken",
-				detail = "Sources upstream has flagged as not currently working.",
-				checked = state.hideBroken,
-				onToggle = { onHideBroken(!state.hideBroken) },
-			)
-			ToggleItem(
-				label = "Show 18+ sources",
-				detail = "Adult sources are hidden until you ask for them.",
-				checked = state.showAdult,
-				onToggle = { onShowAdult(!state.showAdult) },
-				testTag = ADULT_TOGGLE_TAG,
-			)
-			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-			DropdownMenuItem(
-				text = { Text("Any language") },
-				trailingIcon = { if (state.locale == null) Text("*", style = AgehaTextStyles.metadata) },
-				onClick = { onLocale(null); expanded = false },
+			AgehaChip(
+				label = "Any",
+				isSelected = state.locale == null,
+				onClick = { onLocale(null) },
 			)
 			for (option in state.availableLocales) {
-				DropdownMenuItem(
-					text = { Text("${option.displayName} (${option.count})") },
-					trailingIcon = {
-						if (state.locale == option.tag) Text("*", style = AgehaTextStyles.metadata)
-					},
-					onClick = { onLocale(option.tag); expanded = false },
+				AgehaChip(
+					label = option.displayName,
+					isSelected = state.locale == option.tag,
+					onClick = { onLocale(option.tag) },
+					count = option.count.toString(),
 				)
 			}
+		}
+		// Said out loud, every time. See ExploreUiState.hiddenAdultCount for why.
+		//
+		// A tinted note rather than another grey line, which is the handoff's treatment for
+		// exactly this: a sentence about the screen's own state, where a plain paragraph gets
+		// skipped and a warning colour would overstate it. Nothing has gone wrong; rows are merely
+		// not being shown, and the user is the one who asked for that.
+		if (state.hasHiddenSources) {
+			NoteBox(
+				listOfNotNull(
+					state.hiddenAdultCount.takeIf { it > 0 }?.let { it.toString() + " 18+ hidden" },
+					state.hiddenBrokenCount.takeIf { it > 0 }?.let {
+						it.toString() + " known broken hidden"
+					},
+				).joinToString(" · ") + " by the current filters.",
+				modifier = Modifier.testTag(HIDDEN_COUNT_TAG),
+			)
 		}
 	}
 }
 
-/**
- * A switch inside the filter menu.
- *
- * The whole row toggles, and the switch itself is passed a null handler so it renders as state
- * rather than as a second, smaller target sitting inside the first one.
- */
+/** One row of the rail: a label, a mono hint, and the switch, over a --line divider. */
 @Composable
-private fun ToggleItem(
+private fun ToggleRow(
 	label: String,
-	detail: String,
+	hint: String,
 	checked: Boolean,
-	onToggle: () -> Unit,
+	onToggle: (Boolean) -> Unit,
 	testTag: String? = null,
 ) {
-	DropdownMenuItem(
-		modifier = if (testTag != null) Modifier.testTag(testTag) else Modifier,
-		text = {
-			Column {
-				Text(label, style = MaterialTheme.typography.bodyMedium)
+	Column {
+		Row(
+			Modifier
+				.fillMaxWidth()
+				.then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
+				.padding(vertical = AgehaSpacing.sm),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Column(Modifier.weight(1f)) {
 				Text(
-					detail,
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					label,
+					style = MaterialTheme.typography.titleSmall,
+					color = MaterialTheme.colorScheme.onSurface,
 				)
+				Text(hint, style = AgehaTextStyles.monoMeta, color = AgehaTheme.skin.inkFaint)
 			}
-		},
-		trailingIcon = { Switch(checked = checked, onCheckedChange = null) },
-		onClick = onToggle,
-	)
+			AgehaSwitch(checked = checked, onCheckedChange = onToggle)
+		}
+		Box(Modifier.fillMaxWidth().height(1.dp).background(AgehaTheme.skin.line))
+	}
 }
+
+/** The handoff's 50px search field and Filters button. */
+private val FIELD_HEIGHT = 50.dp
+
+/** The handoff's 292px filter rail. */
+private val RAIL_WIDTH = 292.dp
 
 @Composable
 private fun SourceRow(

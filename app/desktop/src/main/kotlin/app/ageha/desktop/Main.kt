@@ -80,6 +80,11 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 	var preferences by remember { mutableStateOf(store.load()) }
 	val navigator = remember { Navigator() }
 	val searchFocus = remember { FocusRequester() }
+
+	// The command panel's open state lives here rather than in the shell, because two things open
+	// it and only one of them is inside the shell: the magnifier in the nav pill, and Ctrl+K,
+	// which is bound on the window because that is where key events arrive.
+	var commandPanelOpen by remember { mutableStateOf(false) }
 	val keyRouter = remember { KeyRouter() }
 	var isFullscreen by remember { mutableStateOf(false) }
 
@@ -194,10 +199,18 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					event.isCtrlPressed && event.key == Key.Comma -> {
 						navigator.switchTo(Section.SETTINGS); true
 					}
-					// Ctrl+Shift+F searches every enabled source, from wherever you are -- the
-					// keyboard half of the magnifier in the navigation pill. Tested *before*
-					// plain Ctrl+F, because a shifted event reports Ctrl as pressed too and the
-					// unshifted branch would otherwise swallow it.
+					// Ctrl+K opens the command panel: the keyboard half of the magnifier in the
+					// navigation pill, and the shortcut the `CTRL K` cap beside Explore's search
+					// field promises. It toggles rather than only opening, because the key that
+					// summoned a panel is the one a hand already on the keyboard reaches for to
+					// dismiss it.
+					event.isCtrlPressed && event.key == Key.K -> {
+						commandPanelOpen = !commandPanelOpen
+						true
+					}
+					// Ctrl+Shift+F searches every enabled source, from wherever you are. Tested
+					// *before* plain Ctrl+F, because a shifted event reports Ctrl as pressed too
+					// and the unshifted branch would otherwise swallow it.
 					event.isCtrlPressed && event.isShiftPressed && event.key == Key.F -> {
 						navigator.openGlobalSearch()
 						runCatching { searchFocus.requestFocus() }
@@ -282,6 +295,8 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 						onImportBackup = { importBackup(app, navigator) },
 						onExportBackup = { exportBackup(app) },
 						onOpenArchive = { openLocalArchive(app, navigator) },
+						isCommandPanelOpen = commandPanelOpen,
+						onCommandPanelOpenChange = { commandPanelOpen = it },
 					)
 				}
 				// Last, so the edges sit above the content that would otherwise swallow the drag.

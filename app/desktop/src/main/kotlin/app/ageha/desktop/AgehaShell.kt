@@ -111,6 +111,17 @@ fun AgehaShell(
 	onOpenArchive: () -> Unit = {},
 	/** Which settings panel opens first. Used by the headless render; see SettingsScreen. */
 	initialSettingsSection: SettingsSection = SettingsSection.APPEARANCE,
+	/**
+	 * Whether the command panel is up.
+	 *
+	 * Hoisted rather than kept here, because two things open it and only one of them is inside
+	 * this composable: the magnifier in the nav pill, and Ctrl+K, which is bound on the window
+	 * because that is where key events arrive. A `CTRL K` cap is drawn beside Explore's search
+	 * field, and a cap printed next to a field that does not answer to that key is worse than no
+	 * cap at all -- so the shortcut has to be real, and it has to reach this state.
+	 */
+	isCommandPanelOpen: Boolean = false,
+	onCommandPanelOpenChange: (Boolean) -> Unit = {},
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember {
@@ -188,11 +199,10 @@ fun AgehaShell(
 	var appUpdateChecking by remember { mutableStateOf(false) }
 	var appUpdateResult by remember { mutableStateOf<String?>(null) }
 
-	// Whether the command panel is up. Shell state rather than a destination, and deliberately so:
-	// search is an *action* you take on the screen you are already looking at, not a place you
-	// navigate to. Giving it a destination put it in the same back stack as the screen that
-	// launched it and made Escape ambiguous.
-	var searchOpen by remember { mutableStateOf(false) }
+	// The panel is *state*, not a destination, and deliberately so: search is an action you take on
+	// the screen you are already looking at, not a place you navigate to. Giving it a destination
+	// put it in the same back stack as the screen that launched it and made Escape ambiguous.
+	val searchOpen = isCommandPanelOpen
 
 	val notices by application.notices.notices.collectAsState()
 
@@ -633,7 +643,7 @@ fun AgehaShell(
 		if (!navigator.isImmersive) {
 			FloatingNav(
 				navigator = navigator,
-				onSearchAllSources = { searchOpen = true },
+				onSearchAllSources = { onCommandPanelOpenChange(true) },
 				modifier = Modifier.align(Alignment.TopCenter),
 			)
 		}
@@ -665,14 +675,14 @@ fun AgehaShell(
 				isSearchingRemote = globalState.isSearching,
 				imageHeaders = headers,
 				onOpen = { manga ->
-					searchOpen = false
+					onCommandPanelOpenChange(false)
 					navigator.openManga(manga)
 				},
 				onSeeAllResults = {
-					searchOpen = false
+					onCommandPanelOpenChange(false)
 					navigator.searchAllSources(libraryState.query)
 				},
-				onDismiss = { searchOpen = false },
+				onDismiss = { onCommandPanelOpenChange(false) },
 			)
 		}
 
@@ -783,7 +793,7 @@ private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
 					.padding(AgehaSpacing.sm),
 			) {
 				Text(
-					"Search all enabled sources - Ctrl+Shift+F",
+					"Search your library and every enabled source - Ctrl+K",
 					style = AgehaTextStyles.metadata,
 					color = MaterialTheme.colorScheme.onSurface,
 				)
@@ -816,7 +826,7 @@ private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
 		) {
 			Icon(
 				imageVector = Icons.Default.Search,
-				contentDescription = "Search all enabled sources",
+				contentDescription = "Search your library and every enabled source",
 				// White rather than `onPrimary`, because this fill is the *raw* accent rather than
 				// the contrast-corrected one -- see AgehaSkin.accent. Both skins' accents are
 				// mid-tone enough that white clears the 3:1 a non-text glyph is held to.
