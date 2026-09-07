@@ -173,17 +173,45 @@ sumi moves `surface` off the tone Material's own contrast curves assumed.
 
 ## 3. Type
 
-**Nothing is bundled yet, and that is a decision rather than an omission.** Full CJK faces run
-10–20MB each and Ageha needs four scripts' worth; bundling would put ~40MB of binary in the
-repository before the design has been reviewed. Instead the families are an explicit ordered
-preference chain resolved against what is actually installed, and the gallery *reports what it
-found* so the gap is visible rather than theoretical. Bundling a subset lands with packaging in
-milestone 9, when there is an installer to put it in.
+**Latin is bundled. CJK is not, except on Linux.** Those are two different questions and they got
+two different answers.
+
+The Ember & Glass handoff names its faces by weight — Archivo 400/500/600/700/800 for anything
+operated or read as prose, JetBrains Mono 400/500/700 for anything read as *data* — and specifies a
+scale built on them down to the half-pixel. Neither is on a typical machine, so a preference chain
+would have delivered the design to almost nobody. They ship as classpath resources of
+`:core:designsystem`: **1.8MB**, both SIL Open Font Licence 1.1, credited in `NOTICE.md`.
+
+The earlier argument here was against bundling on a ~40MB figure. That figure was about **CJK** —
+full pan-CJK faces run 10–20MB each and Ageha needs four scripts' worth — and it still holds, so
+CJK is still resolved from the system, with one 16MB fallback shipped to the Linux packages alone
+where a machine may genuinely have nothing to fall back to. 1.8MB of Latin is a different question
+with a different answer.
+
+`BundledTypeTest` fails if any weight goes missing. That matters because the fallback is silent by
+design: `AgehaFonts.bundle` returns null for a missing or corrupt resource and the app degrades to
+a system sans rather than refusing to start, which is right at runtime and useless as a signal. A
+dropped file, a renamed weight or a committed LFS pointer would otherwise produce an app that runs,
+looks plausible, and matches the handoff nowhere.
+
+**UI** (chrome, titles, body, manga names): **Archivo**, bundled. Falls back to the sans chain
+below only if the resources are absent.
+
+**Data** (counts, hosts, page positions, the uppercase micro-labels): **JetBrains Mono**, bundled.
+Not routed through the CJK fallback, because everything in this role is ASCII by construction —
+`Ch 214 / 260`, `mangadex.org`, `MY LIBRARY` — and a proportional pan-CJK face here would cost the
+tabular alignment that is the entire reason the role is monospaced.
+
+There is no serif role any more. A manga title in the handoff's grid is Archivo SemiBold at 12.5px,
+not an editorial serif; `AgehaFonts.serif` survives as an alias so the gallery and the About dialog
+do not churn.
 
 Compose Desktop resolves a family by name through Skia's font manager, which also supplies
 automatic per-glyph fallback — a Japanese title inside a Latin-only family still renders. The CJK
 chains are therefore about the *quality and consistency* of that fallback, except on Linux, where a
 machine with no CJK font installed genuinely has nothing to fall back to and will show tofu.
+
+**Legacy chains**, still used when a bundled resource is missing:
 
 **Serif** (titles, manga names): Source Serif 4 → Source Serif Pro → Charter → Iowan Old Style →
 Noto Serif → Georgia → DejaVu Serif → generic serif.
@@ -516,8 +544,12 @@ The brief asks for design work to go through this skill, so it was run. Three th
 
 ## 10. Open items
 
-- **Fonts are not bundled.** Deliberate (§3); revisit at milestone 9. Linux without a CJK package
-  will show tofu, and the gallery names the missing script rather than failing silently.
+- **CJK fonts are not bundled off Linux.** Deliberate (§3). The Latin faces the design is drawn in
+  *are* bundled now, so the interface looks the same everywhere; a Linux machine without a CJK
+  package still shows tofu in titles, and the gallery names the missing script rather than failing
+  silently.
+- **Glass has no backdrop blur** and cannot have one on Compose Desktop (§11.3). The translucency,
+  the specular edge and the shadow stand in for it.
 - **`FontFamily(String)` is experimental** on Compose Desktop. It is the only way to honour a named
   preference chain; the fallback to the generic family means an API removal degrades rather than
   breaks the build.
@@ -526,3 +558,87 @@ The brief asks for design work to go through this skill, so it was run. Three th
   set aside — an unlit pixel is that variant's entire reason to exist. Confined to the backmost
   surfaces; every elevated container stays on the sumi ramp so cards and sheets remain visible as
   separate objects.
+
+---
+
+## 11. Ember and Glass — the two skins
+
+`design_handoff_ageha/` (README, WIRING, `skins.css`, an interactive HTML prototype) is a
+high-fidelity aesthetic layer for the reader Ageha already was: two switchable skins, one component
+vocabulary, five screens. Colours, type, spacing, radii and states are declared final, and this
+section records how they were taken and where they were not.
+
+### 11.1 They are two materials, not two palettes
+
+Ember is **flat**: opaque panels, warm near-black, small radii, `--blur: none`. Glass is **frosted**:
+translucent panels over a cool blue-grey, fully round pills, a 22px backdrop blur.
+
+The first implementation gave both the same translucent fill and the same specular edge at
+different alphas, which made Ember read as a dimmer Glass rather than as a different material — and
+the contrast between them is most of what the handoff is for. `AgehaSkin.isFlat` splits them:
+
+| | Ember | Glass |
+|---|---|---|
+| Panel fill | opaque | translucent (`GlassTone` alphas) |
+| Edge | plain `--line` hairline | specular gradient |
+| Pill radius | 10dp | fully round |
+| Chip radius | 5dp | fully round |
+| Accent seed | `#d9432f` | `#8b7ff2` |
+
+### 11.2 The accents are seeds, not literals
+
+`#d9432f` and `#8b7ff2` never appear as fills. They go through `:tools:brandkit`'s
+`PaletteGenerator` like every other Ageha colour, and `AgehaContrastTest` holds the results to the
+same AA floor as the brand themes. The **one** exception is the title bar's skin switcher, which
+has to show both skins at once — exactly one of two swatches can come from the active theme, so
+`AgehaSkin.EmberSwatch` and `GlassSwatch` are literal, live in the design system, and are used
+nowhere else.
+
+### 11.3 The blur does not exist, and cannot
+
+`--blur: blur(22px)` is a `backdrop-filter`. Compose Desktop has none: `Modifier.blur` blurs a
+composable's *own* content, not what is behind it (§8.1). Glass is therefore translucency over
+`AgehaBackdrop`, a hairline specular edge, and a cast shadow — the two-layer construction that
+predates backdrop filters. **This is a real fidelity gap**, recorded rather than papered over.
+
+### 11.4 Where the handoff was not followed
+
+Each of these is a deliberate departure, not an omission.
+
+| Handoff | What Ageha does | Why |
+|---|---|---|
+| Settings → **Tracking** (AniList / MAL / Kitsu) | Not built. The rail's seventh slot is **Sync**, Ageha's own. | CLAUDE.md rule 9 puts external tracking permanently out of scope. WIRING.md itself notes it needs an OAuth flow the mockup lacks. |
+| Reader progress fill, page ticks and **Close** in `--accent` | Neutral, from `ReaderChrome` | Rule 8: nothing brand-coloured touches the reader. `ReaderNeutralityTest` measures every reader colour for hue and would fail the build. |
+| Card position reads `Ch 214 / 260` | A percentage | A `LibraryEntry` has no chapter *total*. The Android schema this database stays compatible with has no per-chapter read table, and a total only exists after a source has been asked for a fresh list. |
+| Source health: `Healthy / Slow 1.8s / Broken 404` | `Healthy / Broken` | There is no latency probe. Inventing a number with nothing behind it is worse than reporting upstream's own broken flag. |
+| Storage bar: "of 64 GB used" | The volume's real capacity | One filesystem call, and it makes the bar mean something: the same library is nothing on a 2TB desktop and a problem on a 128GB laptop. |
+| Trash deletes on the first click | Confirms, naming the chapter count | WIRING.md flags the instant delete as wrong. These are files kept deliberately for offline reading, and there is no undo. |
+| Settings rows as **select popovers** | Radio groups, as before | The popover saves vertical space in a mockup with more rows than screen. Ageha's radios already show every option without a click; hiding a visible choice is a loss dressed as fidelity. The reader's chips *are* popovers, where the alternative was cycling through full redraws of somebody's artwork. |
+| Reader chips **cycle** on click | Open a menu | Three options each means up to two unwanted states rendered on the way to the one wanted — and a cycler never shows what the options are. |
+| Reader is a layer "above everything" | The 38dp title bar stays | The handoff describes a browser prototype with no window to manage. Hiding it takes minimise and close from someone mid-chapter to hide 38px they are not looking at. Fullscreen is the real immersion path. |
+| Nav pill: 5 items | 4 items and the search button | Continue Reading became the Library banner, which is where the handoff puts it. It keeps Ctrl+2 and the banner's see-all link. |
+
+### 11.5 The rule the handoff and CLAUDE.md agree on
+
+> *"No literal hex in component styles. Only `var(--…)`."*
+
+That is rule 7 written for a stylesheet, and `NoLiteralHexTest` enforces the Kotlin form of it
+across `feature/` and `app/desktop`. It found one real offender on its first run: the reader's page
+placeholders carried `Color(0xFF9A9A9A)`, chosen against the black background everyone develops on
+and barely legible on Paper — two of the four backgrounds that screen offers.
+
+### 11.6 Window chrome
+
+The window is undecorated so the title bar can carry what a native caption cannot: a context line
+with live counts, the skin switcher, and the app's own mark at 21dp. What a caption did for free is
+written back in `TitleBar.kt` and `WindowResize.kt` — dragging, double-click to maximise, three
+window buttons, eight resize edges anchored to the drag origin so they do not drift.
+
+**One thing does not come back.** Edge-drag Aero Snap is driven by non-client hit-testing that an
+undecorated window has opted out of; restoring it needs `WM_NCHITTEST` over JNI. `Win`+arrow still
+snaps, because the shell handles that path rather than the window.
+
+The native `MenuBar` went with it. Compose's is a Swing `JMenuBar` inside the frame, which under a
+custom caption renders as a native strip belonging to another application. Nothing it carried was
+lost: navigation and the theme picker duplicated the pill and the switcher, backup already lived in
+Settings, and "Open comic archive" moved there rather than surviving only on Ctrl+O.

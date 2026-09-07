@@ -6,6 +6,54 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Two skins, Ember and Glass.** The interface is rebuilt to the Ember & Glass design handoff:
+  same layout, two materials. Ember is flat — opaque panels, warm near-black, small radii, a red
+  accent. Glass is frosted — translucent panels over a cool blue-grey, fully round pills, a violet
+  accent. Switch them from the square/circle control in the title bar or from Settings → Appearance;
+  the choice is the same setting in both places. See `docs/DESIGN.md` §11.
+- **The design's own typefaces ship with the app.** Archivo for the interface and JetBrains Mono
+  for counts, hosts, page positions and the uppercase section labels — 1.8MB, both OFL-1.1, credited
+  in `NOTICE.md`. Ageha no longer looks different depending on what happens to be installed.
+- **Ageha draws its own title bar.** 38dp: the app's mark, a context line with live counts
+  ("Library · 12 titles · 312 chapters cached"), the skin switcher, and window buttons. Dragging,
+  double-click to maximise and all eight resize edges are reimplemented, since an undecorated
+  window loses them.
+- **Downloads shows what is on this device**, not just what is downloading right now. A storage
+  card with the real used figure, your volume's real capacity, and pages counted separately from
+  the thumbnail cache — the two behave differently and folding them together invites deleting
+  chapters to reclaim space the cache would have returned for free. Deleting a title's downloads
+  confirms first and reports what it actually reclaimed.
+- **The library's Continue banner** carries the title at full size, the chapter you stopped on, and
+  two lines of synopsis. Resuming after a fortnight away is mostly a memory problem, and a title
+  with a chapter number does not answer "what was this about".
+- **The reader's controls are two floating pills** — position, proportion and pages-left over a
+  progress bar up top; a chapter pill below whose page ticks are both a readout and a way to seek.
+
+### Changed
+
+- **Continue Reading left the navigation pill.** It is the banner at the top of the Library now,
+  which is where you were already looking. `Ctrl+2` and the banner's see-all link still open the
+  full list.
+- **The menu bar is gone.** Ageha draws its own caption, and a native menu strip underneath it
+  looked like a second application. Everything it carried is still reachable: navigation and the
+  theme picker were duplicates of the pill and the switcher, backup import and export already lived
+  in Settings → Library and backup, and "Open comic archive" moved there too. Every keyboard
+  shortcut is unchanged, including `Ctrl+O`.
+- **Settings switches are drawn for a pointer**, not a fingertip.
+- **Reader page placeholders follow the reader background.** The "could not be loaded" text and the
+  loading spinner were a fixed grey chosen against black; on the Paper and White backgrounds they
+  were barely legible.
+
+### Known limitations
+
+- **Dragging the window to a screen edge no longer triggers Aero Snap on Windows.** Snap is driven
+  by non-client hit-testing that an undecorated window has opted out of, and restoring it needs a
+  native call Ageha does not make. `Win`+arrow still snaps.
+- **Glass has no true backdrop blur.** Compose Desktop cannot blur what is behind a panel, only what
+  is inside it. The translucency, the lit edge and the shadow stand in for it.
+
 ### Fixed
 
 - **A source listing stopped after its first page.** Browsing any source showed twenty titles and
