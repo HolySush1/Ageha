@@ -4,7 +4,6 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -89,20 +88,11 @@ object AgehaMotion {
 }
 
 /**
- * Corner radii.
+ * The corner used on manga covers. Enough to soften the grid, not enough to eat the art.
  *
- * Restrained on purpose. Material 3's defaults are drawn for phones, where a 28dp dialog corner
- * looks right next to a rounded screen; on a desktop window next to native chrome the same radius
- * reads as a toy. These are roughly half Material's, and covers get almost none -- manga art is
- * rectangular and rounding it crops the artwork.
+ * The one radius that does not change with the skin. Manga art is rectangular, and how much of it
+ * gets cropped is not a question of taste -- so where Ember rounds at 6dp and Glass at 11dp, a
+ * cover is 3dp in both. The rest of the shape scale moved to [AgehaSkin], because Ember and Glass
+ * disagree about every step of it.
  */
-val AgehaShapes = Shapes(
-	extraSmall = RoundedCornerShape(2.dp),
-	small = RoundedCornerShape(4.dp),
-	medium = RoundedCornerShape(6.dp),
-	large = RoundedCornerShape(10.dp),
-	extraLarge = RoundedCornerShape(14.dp),
-)
-
-/** The corner used on manga covers. Enough to soften the grid, not enough to eat the art. */
 val CoverShape = RoundedCornerShape(3.dp)

@@ -110,7 +110,12 @@ class ReaderNeutralityTest {
 	 */
 	@Test
 	fun `no reader colour is also a theme token`() {
-		val tokens = listOf(AgehaColorTokens.Light, AgehaColorTokens.Dark, AgehaColorTokens.Amoled)
+		val tokens = listOf(
+			AgehaColorTokens.Light,
+			AgehaColorTokens.Ember,
+			AgehaColorTokens.Glass,
+			AgehaColorTokens.Amoled,
+		)
 			.flatMap { scheme -> scheme.all.entries.map { it.key to it.value } }
 		val readerColours = ReaderBackground.entries.flatMap { background ->
 			val chrome = ReaderChrome.forBackground(background)

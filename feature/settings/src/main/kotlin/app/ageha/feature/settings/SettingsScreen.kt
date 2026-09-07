@@ -96,6 +96,16 @@ fun SettingsScreen(
 	showAdultSources: Boolean,
 	onHideBrokenSources: (Boolean) -> Unit,
 	onShowAdultSources: (Boolean) -> Unit,
+	/**
+	 * Opens a CBZ from disk.
+	 *
+	 * Here because the window's native menu bar is gone -- Ageha draws its own caption now, and a
+	 * Swing menu strip under a custom title bar looks like two applications stacked. Every other
+	 * item that menu carried already existed somewhere on this screen; this one did not, and
+	 * leaving it on Ctrl+O alone would have made it a feature only someone reading the source
+	 * could find.
+	 */
+	onOpenArchive: () -> Unit = {},
 	modifier: Modifier = Modifier,
 	/**
 	 * Which panel opens first.
@@ -137,7 +147,7 @@ fun SettingsScreen(
 					onHideBrokenSources, onShowAdultSources,
 				)
 				SettingsSection.LIBRARY -> LibraryPanel(
-					onImportBackup, onExportBackup, onClearHistory, historyCount,
+					onImportBackup, onExportBackup, onClearHistory, historyCount, onOpenArchive,
 				)
 				SettingsSection.SYNC -> SyncPanel(sync, onSignIn, onSignOut, onSyncNow, onSyncOnStart)
 				SettingsSection.ABOUT -> AboutPanel(parsers)
@@ -195,9 +205,12 @@ private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> 
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	val coverage = remember { FontCoverage.detect() }
 	Text("Fonts", style = MaterialTheme.typography.titleMedium)
-	Explain("Ageha uses whichever of its preferred families this machine has installed.")
-	Text("Titles: ${coverage.serif}", style = AgehaTextStyles.metadata)
-	Text("Interface: ${coverage.sans}", style = AgehaTextStyles.metadata)
+	Explain(
+		"Ageha bundles the two faces its design is drawn in, so they look the same on every " +
+			"machine. Only CJK coverage depends on what is installed here.",
+	)
+	Text("Interface: ${coverage.ui}", style = AgehaTextStyles.metadata)
+	Text("Data and labels: ${coverage.mono}", style = AgehaTextStyles.metadata)
 	if (coverage.usesBundledCjk) {
 		// Said out loud, because it explains why titles look different here than on a machine with
 		// its own CJK fonts -- and because someone who then installs their distribution's font
@@ -466,7 +479,16 @@ private fun LibraryPanel(
 	onExportBackup: () -> Unit,
 	onClearHistory: () -> Unit,
 	historyCount: Int,
+	onOpenArchive: () -> Unit,
 ) {
+	PanelTitle("Local files")
+	Explain(
+		"Open a comic archive from this machine -- a .cbz or a plain .zip of images. It opens in " +
+			"the reader without being added to your library. Ctrl+O does the same thing from " +
+			"anywhere in the app.",
+	)
+	Button(onClick = onOpenArchive) { Text("Open a comic archive...") }
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 	PanelTitle("Library and backup")
 	Explain(
 		"Ageha reads the backup file the Android app produces: library, categories, favourites, " +

@@ -134,11 +134,28 @@ class PreferencesStore(private val file: File = File(AgehaPaths.dataDir, "prefer
 
 	fun load(): Preferences {
 		if (!file.exists()) return Preferences()
-		return runCatching { json.decodeFromString<Preferences>(file.readText()) }
+		return runCatching { json.decodeFromString<Preferences>(migrate(file.readText())) }
 			// A corrupt file falls back to defaults rather than refusing to start. The user loses
 			// a window size; the alternative is losing the application.
 			.getOrElse { Preferences() }
 	}
+
+	/**
+	 * Rewrites values this version of Ageha no longer has a name for.
+	 *
+	 * `ignoreUnknownKeys` covers an unknown *key*; it does nothing for an unknown enum *value*,
+	 * which throws. So the one file every existing installation has -- a `theme` of `DARK`, from
+	 * before the two skins replaced it -- would take the whole file down with it and land the
+	 * user on defaults, losing their window geometry and every other setting along the way. That
+	 * is a poor trade for a rename, so `DARK` becomes `EMBER`, which is the skin it most nearly
+	 * already was.
+	 *
+	 * String surgery rather than a custom serializer: there is one value to fix, the rewritten
+	 * text is discarded as soon as it has been parsed, and the next `save` writes the new name,
+	 * so this fires once per installation and then never again.
+	 */
+	private fun migrate(text: String): String =
+		text.replace("\"theme\": \"DARK\"", "\"theme\": \"EMBER\"")
 
 	fun save(preferences: Preferences) {
 		runCatching {

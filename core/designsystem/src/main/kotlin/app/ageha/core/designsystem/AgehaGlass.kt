@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -114,16 +115,55 @@ object AgehaGlass {
 	internal const val EDGE_HIGHLIGHT = 0.22f
 	internal const val EDGE_SHADOW = 0.10f
 
-	/** The pill radius used by the floating navigation and by the chips that sit beside it. */
-	val PillShape: Shape = RoundedCornerShape(percent = 50)
+	/**
+	 * The pill radius used by the floating navigation and by the chips that sit beside it.
+	 *
+	 * Reads through the skin rather than being a constant, because Ember and Glass disagree about
+	 * it -- 10dp against a full lozenge -- and the handoff is explicit that the same markup has to
+	 * produce both. A composable getter rather than a `val` for exactly that reason.
+	 */
+	val PillShape: Shape
+		@Composable get() = AgehaTheme.skin.pill
 
-	/** The fill a tone composites onto the backdrop, in the current theme. */
+	/**
+	 * The fill a tone composites onto the backdrop, in the current theme.
+	 *
+	 * Opaque in a flat skin. Ember's panels are transcribed from the handoff as solid hex over a
+	 * solid window, and the generated token is already that colour composited -- so applying an
+	 * alpha to it a second time would let the backdrop through a surface the design says is
+	 * closed. See `AgehaSkin.isFlat`.
+	 */
 	@Composable
-	fun fill(tone: GlassTone): Color = when (tone) {
-		GlassTone.CHROME -> MaterialTheme.colorScheme.surfaceContainer
-		GlassTone.PANEL -> MaterialTheme.colorScheme.surfaceContainerHigh
-		GlassTone.RAISED -> MaterialTheme.colorScheme.surfaceContainerHighest
-	}.copy(alpha = tone.fillAlpha)
+	fun fill(tone: GlassTone): Color {
+		val base = when (tone) {
+			GlassTone.CHROME -> MaterialTheme.colorScheme.surfaceContainer
+			GlassTone.PANEL -> MaterialTheme.colorScheme.surfaceContainerHigh
+			GlassTone.RAISED -> MaterialTheme.colorScheme.surfaceContainerHighest
+		}
+		return if (AgehaTheme.skin.isFlat) base else base.copy(alpha = tone.fillAlpha)
+	}
+
+	/**
+	 * The edge a panel draws.
+	 *
+	 * Two materials, two edges. A frosted skin gets the specular gradient -- bright along the top,
+	 * shadowed by the bottom -- which is the cue that sells a translucent panel as glass and the
+	 * closest this can get to the backdrop blur Compose Desktop has no primitive for. A flat skin
+	 * gets the handoff's literal `--line`: one hairline, one value, all the way round. Giving
+	 * Ember a specular edge would be lighting a surface the design describes as unlit.
+	 */
+	@Composable
+	internal fun edge(): Brush = if (AgehaTheme.skin.isFlat) {
+		SolidColor(AgehaTheme.skin.line)
+	} else {
+		Brush.verticalGradient(
+			listOf(
+				Color.White.copy(alpha = EDGE_HIGHLIGHT),
+				Color.Transparent,
+				Color.Black.copy(alpha = EDGE_SHADOW),
+			),
+		)
+	}
 }
 
 /**
@@ -142,17 +182,7 @@ fun Modifier.glassSurface(
 	.shadow(tone.elevation, shape, clip = false)
 	.clip(shape)
 	.background(AgehaGlass.fill(tone))
-	.border(
-		width = 1.dp,
-		brush = Brush.verticalGradient(
-			listOf(
-				Color.White.copy(alpha = AgehaGlass.EDGE_HIGHLIGHT),
-				Color.Transparent,
-				Color.Black.copy(alpha = AgehaGlass.EDGE_SHADOW),
-			),
-		),
-		shape = shape,
-	)
+	.border(width = 1.dp, brush = AgehaGlass.edge(), shape = shape)
 
 /** A glass card. The default container for anything that sits on the backdrop and holds content. */
 @Composable

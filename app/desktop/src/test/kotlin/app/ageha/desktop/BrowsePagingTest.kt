@@ -99,7 +99,7 @@ class BrowsePagingTest {
 			)
 		}
 		var pages by remember { mutableStateOf(1) }
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			BrowseScreen(
 				state = state,
 				onOpenManga = {},

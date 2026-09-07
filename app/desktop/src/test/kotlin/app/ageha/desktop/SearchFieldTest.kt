@@ -88,7 +88,7 @@ class SearchFieldTest {
 	 */
 	@Composable
 	private fun SearchFieldHarness(query: MutableStateFlow<String> = remember { MutableStateFlow("") }) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			val value by query.collectAsState()
 			AgehaSearchField(
 				value = value,

@@ -1,6 +1,9 @@
 package app.ageha.desktop
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,7 +22,6 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ApplicationScope
-import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
@@ -164,6 +166,9 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 		state = windowState,
 		title = "Ageha",
 		icon = BrandAssets.windowIcon(),
+		// Ageha draws its own caption. See TitleBar.kt for what that buys and what it costs --
+		// including the one thing it cannot give back, which is edge-drag Aero Snap.
+		undecorated = true,
 		onPreviewKeyEvent = { event ->
 			if (event.type != KeyEventType.KeyDown) {
 				false
@@ -203,6 +208,11 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					event.isCtrlPressed && event.key == Key.F -> {
 						runCatching { searchFocus.requestFocus() }; true
 					}
+					// Ctrl+O opens a comic archive. Bound here rather than advertised by a menu
+					// that no longer exists; the visible way in is Settings > Library.
+					event.isCtrlPressed && event.key == Key.O -> {
+						openLocalArchive(app, navigator); true
+					}
 					// Escape goes back, and is *not* consumed at the root -- otherwise it would
 					// swallow the key that dismisses a dropdown or a dialog.
 					event.key == Key.Escape -> navigator.back()
@@ -213,78 +223,76 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 			}
 		},
 	) {
-		MenuBar {
-			Menu("File", mnemonic = 'F') {
-				Item("Open comic archive...", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.O, ctrl = true)) {
-					openLocalArchive(app, navigator)
-				}
-				Separator()
-				Item("Import Android backup...") { importBackup(app, navigator) }
-				Item("Export backup...") { exportBackup(app) }
-				Separator()
-				Item("Quit", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Q, ctrl = true), onClick = onExit)
-			}
-			Menu("View", mnemonic = 'V') {
-				Item("Library", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.One, ctrl = true)) {
-					navigator.switchTo(Section.LIBRARY)
-				}
-				Item("Continue reading", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Two, ctrl = true)) {
-					navigator.switchTo(Section.CONTINUE)
-				}
-				Item("Explore", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Three, ctrl = true)) {
-					navigator.switchTo(Section.EXPLORE)
-				}
-				// In the menu as well as in the pill. The magnifier is discoverable by looking at
-				// the window; this is where someone goes when they want to know the shortcut.
-				Item(
-					"Search all sources",
-					shortcut = androidx.compose.ui.input.key.KeyShortcut(
-						Key.F,
-						ctrl = true,
-						shift = true,
-					),
-				) {
-					navigator.openGlobalSearch()
-					runCatching { searchFocus.requestFocus() }
-				}
-				Item("Downloads", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Four, ctrl = true)) {
-					navigator.switchTo(Section.DOWNLOADS)
-				}
-				Item("Settings", shortcut = androidx.compose.ui.input.key.KeyShortcut(Key.Comma, ctrl = true)) {
-					navigator.switchTo(Section.SETTINGS)
-				}
-				Separator()
-				for (mode in AgehaThemeMode.entries) {
-					RadioButtonItem(
-						text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
-						selected = preferences.theme == mode,
-						onClick = {
-							preferences = preferences.copy(theme = mode)
-							store.save(preferences)
-						},
-					)
-				}
-			}
-		}
+		// No `MenuBar`. Ageha draws its own caption now, and Compose's menu bar is a Swing
+		// `JMenuBar` inside the frame -- under a custom title bar it renders as a native grey
+		// strip belonging to a different application.
+		//
+		// Nothing it carried was lost. Navigation and the theme picker were duplicates of the
+		// nav pill, the skin switcher and Settings > Appearance. Import and export already lived
+		// in Settings > Library and backup. "Open comic archive" lived *only* here, so it moved
+		// there too -- and every shortcut the menu advertised is still bound below, because they
+		// were always handled by `onPreviewKeyEvent` rather than by the menu.
 		AgehaTheme(
 			mode = preferences.theme,
 			systemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme(),
 		) {
-			AgehaShell(
-				application = app,
-				navigator = navigator,
-				searchFocus = searchFocus,
-				modifier = Modifier.fillMaxSize(),
-				preferences = preferences,
-				onPreferencesChange = { updated ->
-					preferences = updated
-					store.save(updated)
-				},
-				keyRouter = keyRouter,
-				onToggleFullscreen = { isFullscreen = !isFullscreen },
-				onImportBackup = { importBackup(app, navigator) },
-				onExportBackup = { exportBackup(app) },
-			)
+			Box(Modifier.fillMaxSize()) {
+				Column(Modifier.fillMaxSize()) {
+					// The bar stays put while reading, and that is deliberate. The handoff calls
+					// the reader a layer "above everything", but it is describing a browser
+					// prototype with no window to manage: hiding this strip on a desktop takes
+					// minimise and close away from someone halfway through a chapter, to hide
+					// 38px they are not looking at. True immersion is fullscreen, which the
+					// reader already has a key for.
+					WindowDraggableArea {
+						AgehaTitleBar(
+							context = windowContextLine(app, navigator),
+							theme = preferences.theme,
+							onTheme = { mode ->
+								preferences = preferences.copy(theme = mode)
+								store.save(preferences)
+							},
+							onMinimize = { windowState.isMinimized = true },
+							onToggleMaximize = {
+								// Reads the *placement* rather than the saved preference, so the
+								// button always reverses whatever the window is doing now --
+								// including after a Win+arrow snap this app never saw.
+								windowState.placement =
+									if (windowState.placement == WindowPlacement.Maximized) {
+										WindowPlacement.Floating
+									} else {
+										WindowPlacement.Maximized
+									}
+							},
+							onClose = onExit,
+						)
+					}
+					AgehaShell(
+						application = app,
+						navigator = navigator,
+						searchFocus = searchFocus,
+						modifier = Modifier.fillMaxSize(),
+						preferences = preferences,
+						onPreferencesChange = { updated ->
+							preferences = updated
+							store.save(updated)
+						},
+						keyRouter = keyRouter,
+						onToggleFullscreen = { isFullscreen = !isFullscreen },
+						onImportBackup = { importBackup(app, navigator) },
+						onExportBackup = { exportBackup(app) },
+						onOpenArchive = { openLocalArchive(app, navigator) },
+					)
+				}
+				// Last, so the edges sit above the content that would otherwise swallow the drag.
+				// Off while maximised or fullscreen: resizing a window that has no free edges is
+				// meaningless, and leaving the handles live there lets a stray drag pull a
+				// maximised window into a strange half-state.
+				WindowResizeHandles(
+					window = window,
+					enabled = windowState.placement == WindowPlacement.Floating,
+				)
+			}
 		}
 	}
 }

@@ -21,18 +21,31 @@ class AgehaPaletteTest {
 	private val black = Color(0xFF000000)
 	private val white = Color(0xFFFFFFFF)
 
+	/** The two skins' `--bg`, straight out of the handoff's `skins.css`. */
+	private val emberBackground = Color(0xFF0F0B0A)
+	private val glassBackground = Color(0xFF12141A)
+
 	private val schemes = mapOf(
 		"light" to AgehaColorTokens.Light,
-		"dark" to AgehaColorTokens.Dark,
+		"ember" to AgehaColorTokens.Ember,
+		"glass" to AgehaColorTokens.Glass,
 		"amoled" to AgehaColorTokens.Amoled,
 	)
 
+	/**
+	 * Every theme's window is the tone it was specified as.
+	 *
+	 * Light is still paper, from the brief. The two skins are their handoff values rather than
+	 * sumi -- that is the whole substance of the decision recorded in docs/DESIGN.md 11, so it is
+	 * asserted here where a future "fix" back to the brand tone would trip over it.
+	 */
 	@Test
-	fun `light surfaces are paper and dark surfaces are sumi`() {
+	fun `each theme's window is the tone it was specified as`() {
 		assertEquals(paper, AgehaColorTokens.Light.surface, "light surface must be the paper tone")
 		assertEquals(paper, AgehaColorTokens.Light.background, "light background must be the paper tone")
-		assertEquals(sumi, AgehaColorTokens.Dark.surface, "dark surface must be the sumi tone")
-		assertEquals(sumi, AgehaColorTokens.Dark.background, "dark background must be the sumi tone")
+		assertEquals(emberBackground, AgehaColorTokens.Ember.surface, "Ember must be the handoff's --bg")
+		assertEquals(glassBackground, AgehaColorTokens.Glass.surface, "Glass must be the handoff's --bg")
+		assertNotEquals(sumi, AgehaColorTokens.Ember.surface, "Ember is not the brand's sumi")
 	}
 
 	/**
@@ -83,30 +96,45 @@ class AgehaPaletteTest {
 	 * quietly ignored.
 	 */
 	@Test
-	fun `dark primary is a light tone, not the raw seed`() {
+	fun `the brand dark primary is a light tone, not the raw seed`() {
 		val seed = Color(0xFF2B3A67)
-		assertNotEquals(seed, AgehaColorTokens.Dark.primary)
+		assertNotEquals(seed, AgehaColorTokens.Amoled.primary)
 		assertTrue(
-			AgehaColorTokens.Dark.primary.luminanceApprox() > 0.4,
-			"dark primary is too dark to carry text or sit on a dark surface",
+			AgehaColorTokens.Amoled.primary.luminanceApprox() > 0.4,
+			"the brand dark primary is too dark to carry text or sit on a dark surface",
 		)
 	}
 
-	/** One red. The accent and the error colour are deliberately the same hue. */
+	/**
+	 * One accent. Error is deliberately the same hue as the accent in every theme.
+	 *
+	 * For the brand themes that is the hanko red standing in for Material's generic error red.
+	 * For the skins it falls out of the handoff, whose `--bad` is literally `var(--accent)`.
+	 */
 	@Test
 	fun `error and tertiary share the hanko red`() {
 		for ((name, scheme) in schemes) {
-			assertEquals(scheme.tertiary, scheme.error, "$name: error and tertiary must be one red")
+			assertEquals(scheme.tertiary, scheme.error, "$name: error and tertiary must be one colour")
 		}
 	}
 
-	/** Light neutrals are warm, dark neutrals are cool. Both halves of the brief, each honoured. */
+	/**
+	 * Light neutrals are warm and the brand's dark neutrals are cool -- both halves of the brief.
+	 *
+	 * The skins add a third claim, and it is the one that makes them read as two designs rather
+	 * than as one design in two accent colours: Ember's greys are warm all the way down and
+	 * Glass's are cool. Neither is tinted by hand; each takes its hue from its own panel colour.
+	 */
 	@Test
-	fun `neutrals are warm in light and cool in dark`() {
+	fun `neutrals carry the temperature their theme was built for`() {
 		val lightWarmth = AgehaColorTokens.Light.surfaceContainer.warmth()
-		val darkWarmth = AgehaColorTokens.Dark.surfaceContainer.warmth()
+		val amoledWarmth = AgehaColorTokens.Amoled.surfaceContainer.warmth()
+		val emberWarmth = AgehaColorTokens.Ember.surfaceContainer.warmth()
+		val glassWarmth = AgehaColorTokens.Glass.surfaceContainer.warmth()
 		assertTrue(lightWarmth > 0.01f, "light neutrals should be warm, got $lightWarmth")
-		assertTrue(darkWarmth < 0.0f, "dark neutrals should be cool, got $darkWarmth")
+		assertTrue(amoledWarmth < 0.0f, "the brand dark neutrals should be cool, got $amoledWarmth")
+		assertTrue(emberWarmth > 0.0f, "Ember's neutrals should be warm, got $emberWarmth")
+		assertTrue(glassWarmth < 0.0f, "Glass's neutrals should be cool, got $glassWarmth")
 	}
 
 	@Test

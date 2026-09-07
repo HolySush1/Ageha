@@ -136,7 +136,7 @@ private fun profile(
 	viewModel.open(manga, chapter, startPage = 0)
 
 	val scene = ImageComposeScene(width = WINDOW_WIDTH, height = WINDOW_HEIGHT, density = Density(1f)) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			val state by viewModel.state.collectAsState()
 			ReaderScreen(
 				state = state,

@@ -147,7 +147,7 @@ class AgehaJourneyTest {
 			val navigator = Navigator()
 			val keyRouter = KeyRouter()
 			setContent {
-				AgehaTheme(mode = AgehaThemeMode.DARK) {
+				AgehaTheme(mode = AgehaThemeMode.EMBER) {
 					AgehaShell(
 						app,
 						navigator,
@@ -214,7 +214,7 @@ class AgehaJourneyTest {
 		try {
 			val navigator = Navigator()
 			setContent {
-				AgehaTheme(mode = AgehaThemeMode.DARK) {
+				AgehaTheme(mode = AgehaThemeMode.EMBER) {
 					AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
 				}
 			}
@@ -250,7 +250,7 @@ class AgehaJourneyTest {
 		try {
 			val navigator = Navigator()
 			setContent {
-				AgehaTheme(mode = AgehaThemeMode.DARK) {
+				AgehaTheme(mode = AgehaThemeMode.EMBER) {
 					AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
 				}
 			}

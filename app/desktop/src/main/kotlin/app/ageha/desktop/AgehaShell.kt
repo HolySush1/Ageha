@@ -48,6 +48,9 @@ import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryRepository
 import app.ageha.core.data.SourceRepository
 import app.ageha.core.model.AgehaVersion
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.BrandAssets
@@ -99,6 +102,8 @@ fun AgehaShell(
 	onToggleFullscreen: () -> Unit = {},
 	onImportBackup: () -> Unit = {},
 	onExportBackup: () -> Unit = {},
+	/** Opens a CBZ from disk. Reached from Settings > Library, and from Ctrl+O. */
+	onOpenArchive: () -> Unit = {},
 	/** Which settings panel opens first. Used by the headless render; see SettingsScreen. */
 	initialSettingsSection: SettingsSection = SettingsSection.APPEARANCE,
 ) {
@@ -335,6 +340,7 @@ fun AgehaShell(
 						onPin = parsersViewModel::pin,
 						onImportBackup = onImportBackup,
 						onExportBackup = onExportBackup,
+						onOpenArchive = onOpenArchive,
 						appUpdates = AppUpdatesUiState(
 							policy = preferences.appUpdatePolicy,
 							currentVersion = AgehaVersion.NAME,
@@ -564,17 +570,11 @@ private fun FloatingNav(
 		modifier
 			.padding(top = AgehaSpacing.md)
 			.glassSurface(AgehaGlass.PillShape, GlassTone.CHROME)
-			.padding(horizontal = AgehaSpacing.sm, vertical = AgehaSpacing.xs),
+			.padding(AgehaSpacing.xs),
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xxs),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		// One of the places brand colour belongs -- navigation and library chrome, never the reader.
-		androidx.compose.foundation.Image(
-			painter = BrandAssets.painter("icon-64.png"),
-			contentDescription = "Ageha",
-			modifier = Modifier.size(20.dp).padding(end = AgehaSpacing.xs),
-		)
-		for (section in Section.entries) {
+		for (section in NAV_PILL_LEADING) {
 			TooltipArea(tooltip = { ShortcutTooltip(section) }) {
 				NavPillItem(
 					label = section.label,
@@ -587,8 +587,31 @@ private fun FloatingNav(
 			isSelected = navigator.current is Destination.SearchAll,
 			onClick = onSearchAllSources,
 		)
+		for (section in NAV_PILL_TRAILING) {
+			TooltipArea(tooltip = { ShortcutTooltip(section) }) {
+				NavPillItem(
+					label = section.label,
+					isSelected = navigator.section == section,
+					onClick = { navigator.switchTo(section) },
+				)
+			}
+		}
 	}
 }
+
+/**
+ * The sections either side of the search button.
+ *
+ * Written out rather than derived from `Section.entries` with a filter, because the split point is
+ * the design -- search sits *between* Explore and Downloads -- and a filter would have to encode
+ * that as an index, which is the kind of thing that reorders silently when someone adds a section.
+ *
+ * [Section.CONTINUE] is in neither list, and that is the handoff's doing rather than an oversight:
+ * Continue Reading is the *banner at the top of the Library* there, not a place you navigate to.
+ * The screen survives, keeps Ctrl+2, and is still reached by the banner's see-all link.
+ */
+private val NAV_PILL_LEADING = listOf(Section.LIBRARY, Section.EXPLORE)
+private val NAV_PILL_TRAILING = listOf(Section.DOWNLOADS, Section.SETTINGS)
 
 /**
  * Search every enabled source, from anywhere.
@@ -631,22 +654,35 @@ private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
 	) {
 		Box(
 			Modifier
-				.clip(AgehaGlass.PillShape)
-				.background(
-					if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+				.padding(horizontal = 5.dp)
+				.size(40.dp)
+				// Circular in both skins, unlike everything else in the pill. Ember's items are
+				// 10dp boxes and Glass's are lozenges, but the handoff draws this one as a circle
+				// either way -- it is a *button* among labels, and the shape is what says so.
+				.clip(CircleShape)
+				// Always the accent, selected or not. The handoff fills this circle
+				// unconditionally -- it is the pill's one fixed landmark, and a button that
+				// changed colour when you were looking at its results would make the brightest
+				// point in the bar wander. Selection shows as a ring instead.
+				.background(AgehaTheme.skin.accent)
+				.then(
+					if (isSelected) {
+						Modifier.border(2.dp, AgehaTheme.skin.accentLine, CircleShape)
+					} else {
+						Modifier
+					},
 				)
 				.clickable(onClick = onClick)
-				.padding(horizontal = AgehaSpacing.sm, vertical = AgehaSpacing.sm)
 				.testTag(SEARCH_ALL_TAG),
+			contentAlignment = Alignment.Center,
 		) {
 			Icon(
 				imageVector = Icons.Default.Search,
 				contentDescription = "Search all enabled sources",
-				tint = if (isSelected) {
-					MaterialTheme.colorScheme.onSecondaryContainer
-				} else {
-					MaterialTheme.colorScheme.onSurfaceVariant
-				},
+				// White rather than `onPrimary`, because this fill is the *raw* accent rather than
+				// the contrast-corrected one -- see AgehaSkin.accent. Both skins' accents are
+				// mid-tone enough that white clears the 3:1 a non-text glyph is held to.
+				tint = Color.White,
 				modifier = Modifier.size(18.dp),
 			)
 		}
@@ -673,22 +709,39 @@ private fun ShortcutTooltip(section: Section) {
 	}
 }
 
+/**
+ * One word in the pill.
+ *
+ * Active is the handoff's three-part treatment, and it needs all three: `--accent-soft` fill,
+ * `--accent-line` border, full-strength ink. The fill alone is too quiet against a translucent
+ * container in Glass, and the border alone reads as a focus ring rather than as a selection.
+ *
+ * Inactive still draws a border -- `--line` -- rather than none. Without it the items have no
+ * edges until you select one, and the pill reads as a strip of text that happens to be clickable
+ * instead of as a row of controls.
+ */
 @Composable
 private fun NavPillItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+	val shape = AgehaGlass.PillShape
 	Box(
 		Modifier
-			.clip(AgehaGlass.PillShape)
+			.clip(shape)
 			.background(
-				if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+				if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+			)
+			.border(
+				1.dp,
+				if (isSelected) AgehaTheme.skin.accentLine else AgehaTheme.skin.line,
+				shape,
 			)
 			.clickable(onClick = onClick)
-			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm),
+			.padding(horizontal = 19.dp, vertical = 9.dp),
 	) {
 		Text(
 			label,
 			style = MaterialTheme.typography.labelLarge,
 			color = if (isSelected) {
-				MaterialTheme.colorScheme.onSecondaryContainer
+				MaterialTheme.colorScheme.onSurface
 			} else {
 				MaterialTheme.colorScheme.onSurfaceVariant
 			},

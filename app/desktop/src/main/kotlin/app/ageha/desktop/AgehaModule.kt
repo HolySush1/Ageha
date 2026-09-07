@@ -18,6 +18,7 @@ import app.ageha.core.sync.SyncAccountStore
 import app.ageha.core.sync.SyncApi
 import app.ageha.core.sync.SyncEngine
 import app.ageha.core.data.ChapterDownloader
+import app.ageha.core.data.DownloadInventory
 import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.SourceStack
 import app.ageha.core.source.MangaSourceRegistry
@@ -101,6 +102,15 @@ val agehaModule = module {
 	single { SyncApi(get<SourceStack>().httpClient) }
 	single { SyncEngine(get<AgehaDatabase>(), get(), get()) }
 	single { AppUpdateChecker(get<SourceStack>().httpClient) }
+	// Reads back what the downloader wrote. Given the *same* root, deliberately: the Downloads
+	// screen's figures come from the directory the downloader actually writes to, so the two
+	// cannot disagree about where a library lives.
+	single {
+		DownloadInventory(
+			root = File(AgehaPaths.dataDir, "downloads"),
+			thumbnailCache = AgehaPaths.imageCacheDir,
+		)
+	}
 	single {
 		ChapterDownloader(
 			catalog = get(),
@@ -176,6 +186,7 @@ class AgehaApplication private constructor(
 	val syncAccounts: SyncAccountStore get() = koin.get()
 	val appUpdates: AppUpdateChecker get() = koin.get()
 	val downloader: ChapterDownloader get() = koin.get()
+	val downloadInventory: DownloadInventory get() = koin.get()
 	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()
 

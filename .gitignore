@@ -3,6 +3,8 @@
 # Gradle
 .gradle/
 build/
+# Kotlin 2.x's build-tools session directory. Local scratch, regenerated every build.
+.kotlin/
 !gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
 local.properties

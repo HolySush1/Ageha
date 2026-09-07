@@ -71,7 +71,7 @@ class ReaderStatusBarTest {
 	 */
 	@Composable
 	private fun Reader(state: ReaderUiState) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			ReaderScreen(
 				state = state,
 				background = ReaderBackground.BLACK,

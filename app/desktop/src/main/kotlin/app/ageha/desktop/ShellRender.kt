@@ -35,6 +35,11 @@ fun main(args: Array<String>) {
 	val outDir = File(args.firstOrNull() ?: "build/shell").apply { mkdirs() }
 	val app = AgehaApplication.start()
 	try {
+		// Both skins, every screen. One skin's screenshots cannot show what the other looks like,
+		// and the whole premise of the design is that the two are different materials rather than
+		// two palettes -- so a review set that only ever renders Ember is a review set that
+		// cannot catch Glass being broken.
+		for ((skinName, mode) in listOf("ember" to AgehaThemeMode.EMBER, "glass" to AgehaThemeMode.GLASS))
 		for ((name, section) in listOf(
 			"library" to Section.LIBRARY,
 			"continue" to Section.CONTINUE,
@@ -44,8 +49,8 @@ fun main(args: Array<String>) {
 		)) {
 			val navigator = Navigator().apply { switchTo(section) }
 			val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
-				AgehaTheme(mode = AgehaThemeMode.DARK) {
-					AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
+				AgehaTheme(mode = mode) {
+					ChromedShell(app, navigator, mode)
 				}
 			}
 			try {
@@ -57,8 +62,8 @@ fun main(args: Array<String>) {
 				runBlocking { delay(RENDER_SETTLE_MS) }
 				val image = scene.render()
 				val data = checkNotNull(image.encodeToData(EncodedImageFormat.PNG))
-				File(outDir, "shell-$name.png").writeBytes(data.bytes)
-				println("wrote shell-$name.png")
+				File(outDir, "shell-$skinName-$name.png").writeBytes(data.bytes)
+				println("wrote shell-$skinName-$name.png")
 			} finally {
 				scene.close()
 			}
@@ -99,7 +104,7 @@ private fun renderSettingsPanels(app: AgehaApplication, outDir: File) {
 	for (section in SettingsSection.entries) {
 		val navigator = Navigator().apply { switchTo(Section.SETTINGS) }
 		val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
-			AgehaTheme(mode = AgehaThemeMode.DARK) {
+			AgehaTheme(mode = AgehaThemeMode.EMBER) {
 				AgehaShell(
 					app,
 					navigator,
@@ -133,7 +138,7 @@ private fun renderSettingsPanels(app: AgehaApplication, outDir: File) {
 private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { switchTo(Section.LIBRARY) }
 	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			AgehaShell(
 				app,
 				navigator,
@@ -170,7 +175,7 @@ private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
 private fun renderSearchAll(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { searchAllSources("berserk", subject = "Berserk") }
 	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
 		}
 	}
@@ -226,7 +231,7 @@ private fun renderContinueHero(app: AgehaApplication, outDir: File) {
 		chapterNumber = 34f,
 		chapterName = null,
 	)
-	for ((name, mode) in listOf("dark" to AgehaThemeMode.DARK, "light" to AgehaThemeMode.LIGHT)) {
+	for ((name, mode) in listOf("dark" to AgehaThemeMode.EMBER, "light" to AgehaThemeMode.LIGHT)) {
 		val scene = ImageComposeScene(width = 1000, height = 320, density = Density(1f)) {
 			AgehaTheme(mode = mode) {
 				AgehaBackdrop(Modifier.fillMaxSize()) {
@@ -276,7 +281,7 @@ private fun renderReader(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { read(manga, chapter) }
 
 	val scene = ImageComposeScene(width = 1000, height = 720, density = Density(1f)) {
-		AgehaTheme(mode = AgehaThemeMode.DARK) {
+		AgehaTheme(mode = AgehaThemeMode.EMBER) {
 			AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
 		}
 	}
@@ -324,5 +329,33 @@ private fun writeSampleArchive(
 			javax.imageio.ImageIO.write(page, "png", zip)
 			zip.closeEntry()
 		}
+	}
+}
+
+/**
+ * The shell with its title bar, as the window actually assembles it.
+ *
+ * Duplicated from `Main.kt` rather than shared, and that is the honest trade: the real one is
+ * bound to a `Window` -- it minimises, maximises and closes a thing that does not exist here --
+ * so extracting a common composable would mean inventing an abstraction over "has a window" whose
+ * only second implementation is a screenshot. The part worth keeping in step is the *layout*: a
+ * title bar above a shell, both drawn in the same theme. That is what this repeats, in six lines.
+ */
+@androidx.compose.runtime.Composable
+private fun ChromedShell(
+	app: AgehaApplication,
+	navigator: Navigator,
+	mode: AgehaThemeMode,
+) {
+	androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+		AgehaTitleBar(
+			context = windowContextLine(app, navigator),
+			theme = mode,
+			onTheme = {},
+			onMinimize = {},
+			onToggleMaximize = {},
+			onClose = {},
+		)
+		AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
 	}
 }

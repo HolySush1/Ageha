@@ -9,7 +9,7 @@ import kotlin.math.pow
 /**
  * WCAG contrast, enforced rather than eyeballed.
  *
- * The brief asks for AA on body text in all three themes and says explicitly to verify with a
+ * The brief asks for AA on body text in every theme and says explicitly to verify with a
  * checker. A checker run once verifies the palette on the day someone ran it; this verifies it on
  * every build, which is the difference that matters, because the failure mode here is a later
  * tweak to one token quietly dropping one pair below threshold.
@@ -37,7 +37,8 @@ class AgehaContrastTest {
 
 	private val themes = listOf(
 		"light" to AgehaColorTokens.Light,
-		"dark" to AgehaColorTokens.Dark,
+		"ember" to AgehaColorTokens.Ember,
+		"glass" to AgehaColorTokens.Glass,
 		"amoled" to AgehaColorTokens.Amoled,
 	)
 

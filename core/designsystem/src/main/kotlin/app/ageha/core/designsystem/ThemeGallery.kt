@@ -53,16 +53,16 @@ fun ThemeGallery(modifier: Modifier = Modifier) {
 			verticalArrangement = Arrangement.spacedBy(28.dp),
 		) {
 			GalleryTitle()
-			GallerySection("Colour roles") { ThemedTriple { ColourRoles() } }
-			GallerySection("Surface ramp") { ThemedTriple { SurfaceRamp() } }
-			GallerySection("Type scale") { ThemedTriple { TypeScale() } }
+			GallerySection("Colour roles") { ThemedRow { ColourRoles() } }
+			GallerySection("Surface ramp") { ThemedRow { SurfaceRamp() } }
+			GallerySection("Type scale") { ThemedRow { TypeScale() } }
 			GallerySection("The vermillion accent, and its only permitted uses") {
-				ThemedTriple { AccentUses() }
+				ThemedRow { AccentUses() }
 			}
 			GallerySection("Reader backgrounds -- theme-independent, and brand-free by rule") {
 				ReaderBackgrounds()
 			}
-			GallerySection("Spacing, shape and motion") { ThemedTriple { ScaleTokens() } }
+			GallerySection("Spacing, shape and motion") { ThemedRow { ScaleTokens() } }
 			GallerySection("Icon crossover: simplified mark vs downscaled master") { IconLadder() }
 			GallerySection("Fonts resolved on this machine") { FontReport() }
 		}
@@ -95,11 +95,16 @@ private fun GallerySection(title: String, content: @Composable () -> Unit) {
 	}
 }
 
-/** The same content, once per theme, in three columns. */
+/** The same content, once per theme, in four columns. */
 @Composable
-private fun ThemedTriple(content: @Composable () -> Unit) {
+private fun ThemedRow(content: @Composable () -> Unit) {
 	Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-		for (mode in listOf(AgehaThemeMode.LIGHT, AgehaThemeMode.DARK, AgehaThemeMode.AMOLED)) {
+		for (mode in listOf(
+			AgehaThemeMode.LIGHT,
+			AgehaThemeMode.EMBER,
+			AgehaThemeMode.GLASS,
+			AgehaThemeMode.AMOLED,
+		)) {
 			AgehaTheme(mode = mode) {
 				Surface(
 					modifier = Modifier.width(360.dp).clip(MaterialTheme.shapes.medium),
@@ -370,8 +375,8 @@ private fun IconLadder() {
 private fun FontReport() {
 	val coverage = remember { FontCoverage.detect() }
 	Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-		Text("serif -> ${coverage.serif}", color = Color.White, fontSize = 12.sp)
-		Text("sans  -> ${coverage.sans}", color = Color.White, fontSize = 12.sp)
+		Text("ui   -> ${coverage.ui}", color = Color.White, fontSize = 12.sp)
+		Text("mono -> ${coverage.mono}", color = Color.White, fontSize = 12.sp)
 		for ((script, family) in coverage.cjk) {
 			Text(
 				"$script -> ${family ?: "NOT INSTALLED - titles in this script will render as boxes"}",
