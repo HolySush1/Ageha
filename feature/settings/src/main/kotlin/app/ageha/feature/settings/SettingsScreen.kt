@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,7 +23,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,40 +31,71 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.ageha.core.designsystem.AgehaAccent
-import androidx.compose.foundation.layout.Spacer
-import app.ageha.core.designsystem.AgehaTheme
-import app.ageha.core.designsystem.dashedBorder
-import app.ageha.core.network.AgehaPaths
-import app.ageha.core.designsystem.AgehaSwitch
+import app.ageha.core.designsystem.AgehaSegmented
+import app.ageha.core.designsystem.AgehaSelect
 import app.ageha.core.designsystem.AgehaSpacing
+import app.ageha.core.designsystem.AgehaSwitch
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.FontCoverage
+import app.ageha.core.designsystem.PanelHeading
 import app.ageha.core.designsystem.ReaderBackground
+import app.ageha.core.designsystem.SettingRow
+import app.ageha.core.designsystem.SettingsRows
+import app.ageha.core.designsystem.dashedBorder
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.JsCapability
+import app.ageha.core.model.PageScale
+import app.ageha.core.model.ReaderMode
+import app.ageha.core.network.AgehaPaths
 import app.ageha.core.parsers.LockVerification
 
-/** Which panel of the settings screen is showing. */
+/**
+ * Which panel of the settings screen is showing.
+ *
+ * Seven slots, in the handoff's order. Six carry the handoff's own name; the seventh is where it
+ * puts **Tracking** (AniList / MAL / Kitsu) and Ageha puts [SYNC] instead. That is CLAUDE.md rule
+ * 9 -- external tracking services are permanently out of scope -- and it is not an unfinished
+ * corner: WIRING.md itself notes that row needs an OAuth flow the mockup has no UI for, and
+ * "where was I and what is next" is answered locally by Continue Reading.
+ */
 enum class SettingsSection(val label: String) {
+	READING("Reading"),
+	LIBRARY("Library"),
+	SOURCES("Sources"),
+	DOWNLOADS("Downloads"),
 	APPEARANCE("Appearance"),
-	READER("Reader"),
-	PARSERS("Sources and updates"),
-	LIBRARY("Library and backup"),
 	SYNC("Sync"),
 	ABOUT("About"),
 }
 
 /**
- * Settings, laid out as a desktop preferences window: a section list on the left, the panel on the
- * right. Not a scrolling list of every option, which is a phone pattern that stops working the
- * moment there are more than a screenful.
+ * Settings: a 188dp rail on the left, one panel on the right.
+ *
+ * ## Why the controls are selects and segments now, and not radio groups
+ *
+ * This screen used to be a vertical stack of radio buttons under sub-headings, which shows every
+ * option without a click and is the better control *given room*. The handoff's layout does not
+ * have that room: its rows are a label and a mono hint on the left with one control on the right,
+ * and a stack of radios cannot enter that layout. Matching the look meant matching the control.
+ *
+ * The division between the two is arity rather than taste. Two or three short options are a
+ * segmented group -- everything visible, one click to change. Four or more, or options long enough
+ * to wrap, are a select. See `AgehaSelect`.
+ *
+ * ## What sits below the rows
+ *
+ * Not everything here is a setting. Sign-in is a form, the parsers block is three buttons and a
+ * status, and the licence list is a document. Those follow the row container rather than being
+ * forced into it -- a row whose "control" is a 200dp password field is a row in name only.
  */
 @Composable
 fun SettingsScreen(
@@ -110,25 +141,43 @@ fun SettingsScreen(
 	 * could find.
 	 */
 	onOpenArchive: () -> Unit = {},
+	/** The handoff's `opts.mode`. A default for manga that have never been given one. */
+	readerMode: ReaderMode = ReaderMode.DEFAULT,
+	onReaderMode: (ReaderMode) -> Unit = {},
+	/** The handoff's `opts.fit`. */
+	pageScale: PageScale = PageScale.FIT_PAGE,
+	onPageScale: (PageScale) -> Unit = {},
+	/** The handoff's `opts.preload`. Zero means the whole chapter. */
+	preloadPages: Int = 6,
+	onPreloadPages: (Int) -> Unit = {},
+	/** The handoff's `opts.grid`. */
+	cardStyle: CardStyle = CardStyle.COVER,
+	onCardStyle: (CardStyle) -> Unit = {},
+	/** The handoff's `opts.nsfwBlur`. */
+	blurAdultCovers: Boolean = false,
+	onBlurAdultCovers: (Boolean) -> Unit = {},
+	/** The handoff's `opts.parallel`, per source. */
+	parallelDownloads: Int = 2,
+	onParallelDownloads: (Int) -> Unit = {},
+	/** Whether the library's shelf rail starts folded. */
+	railCollapsed: Boolean = false,
+	onRailCollapsed: (Boolean) -> Unit = {},
 	modifier: Modifier = Modifier,
 	/**
 	 * Which panel opens first.
 	 *
-	 * A parameter rather than always Appearance so the headless render can draw each panel.
-	 * Every one of them is a screen that can fail to compose, and the ones reached by three
-	 * clicks are precisely the ones nobody checks before a release.
+	 * A parameter rather than always Appearance so the headless render can draw each panel. Every
+	 * one of them is a screen that can fail to compose, and the ones reached by three clicks are
+	 * precisely the ones nobody checks before a release.
 	 */
 	initialSection: SettingsSection = SettingsSection.APPEARANCE,
 ) {
 	var section by remember { mutableStateOf(initialSection) }
-	Row(modifier.fillMaxSize()) {
-		Column(
-			Modifier
-				.width(188.dp)
-				.fillMaxHeight()
-				.background(MaterialTheme.colorScheme.surfaceContainerLow)
-				.padding(vertical = AgehaSpacing.sm),
-		) {
+	Row(
+		modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 22.dp, bottom = 40.dp),
+		horizontalArrangement = Arrangement.spacedBy(26.dp),
+	) {
+		Column(Modifier.width(188.dp).fillMaxHeight()) {
 			for (option in SettingsSection.entries) {
 				SectionRow(option.label, option == section) { section = option }
 			}
@@ -161,27 +210,44 @@ fun SettingsScreen(
 			}
 		}
 		Column(
-			Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AgehaSpacing.xl),
+			Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
 			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.lg),
 		) {
 			when (section) {
-				SettingsSection.APPEARANCE -> AppearancePanel(theme, onTheme)
-				SettingsSection.READER -> ReaderPanel(
-					readerBackground, doublePage, coverOffset,
-					onReaderBackground, onDoublePage, onCoverOffset,
+				SettingsSection.READING -> ReadingPanel(
+					readerMode, onReaderMode,
+					doublePage, onDoublePage,
+					coverOffset, onCoverOffset,
+					pageScale, onPageScale,
+					readerBackground, onReaderBackground,
+					preloadPages, onPreloadPages,
 				)
-				SettingsSection.PARSERS -> ParsersPanel(
+
+				SettingsSection.LIBRARY -> LibraryPanel(
+					cardStyle, onCardStyle,
+					blurAdultCovers, onBlurAdultCovers,
+					railCollapsed, onRailCollapsed,
+					onImportBackup, onExportBackup, onClearHistory, historyCount, onOpenArchive,
+				)
+
+				SettingsSection.SOURCES -> SourcesPanel(
 					parsers, jsRuntime, parsersDescription,
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
-					appUpdates, onAppUpdatePolicy, onCheckForAppUpdate,
 					hideBrokenSources, showAdultSources,
 					onHideBrokenSources, onShowAdultSources,
 				)
-				SettingsSection.LIBRARY -> LibraryPanel(
-					onImportBackup, onExportBackup, onClearHistory, historyCount, onOpenArchive,
+
+				SettingsSection.DOWNLOADS -> DownloadsPanel(parallelDownloads, onParallelDownloads)
+
+				SettingsSection.APPEARANCE -> AppearancePanel(theme, onTheme)
+
+				SettingsSection.SYNC -> SyncPanel(
+					sync, onSignIn, onSignOut, onSyncNow, onSyncOnStart,
 				)
-				SettingsSection.SYNC -> SyncPanel(sync, onSignIn, onSignOut, onSyncNow, onSyncOnStart)
-				SettingsSection.ABOUT -> AboutPanel(parsers)
+
+				SettingsSection.ABOUT -> AboutPanel(
+					parsers, appUpdates, onAppUpdatePolicy, onCheckForAppUpdate,
+				)
 			}
 		}
 	}
@@ -192,12 +258,14 @@ private fun SectionRow(label: String, isSelected: Boolean, onClick: () -> Unit) 
 	Row(
 		Modifier
 			.fillMaxWidth()
-			.padding(horizontal = AgehaSpacing.sm, vertical = 1.dp)
+			.padding(vertical = 1.dp)
 			.clip(MaterialTheme.shapes.medium)
 			// `--accent-soft` and full-strength ink, as the handoff's selected rail row is.
 			// Unselected carries no fill and no border at all: a rail is a list of places, and
 			// bordering every one of them turns a quiet column into seven competing buttons.
-			.background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+			.background(
+				if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+			)
 			.clickable(onClick = onClick)
 			.padding(horizontal = 13.dp, vertical = 10.dp),
 	) {
@@ -213,10 +281,411 @@ private fun SectionRow(label: String, isSelected: Boolean, onClick: () -> Unit) 
 	}
 }
 
+/**
+ * Reading.
+ *
+ * ## The page-flow controls are one decision split three ways
+ *
+ * `Reading mode` picks the flow, `Right to left` picks the direction, and `Two pages` pairs them.
+ * The handoff offers Single / Double / Long strip as one segmented control, which folds the
+ * pairing into the mode; Ageha keeps them apart because its reader mode is *per manga* while the
+ * pairing is global -- a reader who set one webtoon to strip mode has not asked every tankoubon to
+ * stop pairing pages.
+ *
+ * The direction and pairing rows disappear in Long strip. A control that cannot do anything is
+ * worse than a missing one: it invites a click and answers with nothing.
+ */
 @Composable
-private fun PanelTitle(text: String) {
-	Text(text, style = MaterialTheme.typography.headlineSmall)
+private fun ReadingPanel(
+	mode: ReaderMode,
+	onMode: (ReaderMode) -> Unit,
+	doublePage: Boolean,
+	onDoublePage: (Boolean) -> Unit,
+	coverOffset: Boolean,
+	onCoverOffset: (Boolean) -> Unit,
+	scale: PageScale,
+	onScale: (PageScale) -> Unit,
+	background: ReaderBackground,
+	onBackground: (ReaderBackground) -> Unit,
+	preload: Int,
+	onPreload: (Int) -> Unit,
+) {
+	PanelHeading(
+		"Reading",
+		"How a chapter opens when you have not told Ageha anything about that title in " +
+			"particular. Everything here is a default: the reader's own controls still write a " +
+			"per-manga override, because a webtoon and a scanlated volume want different answers.",
+	)
+	val isStrip = mode == ReaderMode.WEBTOON
+	SettingsRows(
+		buildList {
+			add {
+				SettingRow(
+					"Reading mode",
+					if (isStrip) "continuous vertical strip" else "one page at a time",
+				) {
+					AgehaSegmented(
+						value = isStrip,
+						options = listOf(false, true),
+						onSelect = { strip ->
+							onMode(if (strip) ReaderMode.WEBTOON else ReaderMode.DEFAULT)
+						},
+						label = { if (it) "Long strip" else "Paged" },
+					)
+				}
+			}
+			if (!isStrip) {
+				add {
+					SettingRow(
+						"Right to left",
+						"japanese reading order · flips arrows and page ticks",
+					) {
+						AgehaSwitch(
+							checked = mode == ReaderMode.REVERSED,
+							onCheckedChange = {
+								onMode(if (it) ReaderMode.REVERSED else ReaderMode.STANDARD)
+							},
+						)
+					}
+				}
+				add {
+					SettingRow(
+						"Two pages side by side",
+						"needs a window wide enough for both at a readable size",
+					) {
+						AgehaSwitch(checked = doublePage, onCheckedChange = onDoublePage)
+					}
+				}
+				if (doublePage) {
+					add {
+						SettingRow(
+							"First page stands alone",
+							"a printed book pairs from page 2, so spreads line up",
+						) {
+							AgehaSwitch(checked = coverOffset, onCheckedChange = onCoverOffset)
+						}
+					}
+				}
+			}
+			add {
+				SettingRow("Page fit", "how a page is scaled into the window") {
+					AgehaSelect(
+						value = scale,
+						options = PageScale.entries,
+						onSelect = onScale,
+						label = { it.label },
+					)
+				}
+			}
+			add {
+				SettingRow(
+					"Reader background",
+					"always a neutral · no brand colour touches the artwork",
+				) {
+					AgehaSelect(
+						value = background,
+						options = ReaderBackground.entries,
+						onSelect = onBackground,
+						label = { it.label },
+					)
+				}
+			}
+			add {
+				SettingRow("Preload next pages", "fetched ahead so a page turn does not wait") {
+					AgehaSelect(
+						value = preload,
+						options = PRELOAD_OPTIONS,
+						onSelect = onPreload,
+						label = ::preloadLabel,
+					)
+				}
+			}
+		},
+	)
+	Text("Keyboard", style = MaterialTheme.typography.titleMedium)
+	SettingsRows(
+		readerHelp.map { (keys, meaning) ->
+			{
+				SettingRow(meaning, keys) {}
+			}
+		},
+	)
 }
+
+/** The handoff's 3 / 6 / 12 / Whole chapter. Zero is the whole chapter; see `Preferences`. */
+private val PRELOAD_OPTIONS = listOf(3, 6, 12, 0)
+
+private fun preloadLabel(pages: Int): String = if (pages == 0) "Whole chapter" else "$pages pages"
+
+/**
+ * Library: how the shelf is drawn, and the things that move data in or out of it.
+ *
+ * Backup, archive-opening and history-clearing sit below the rows rather than inside them. They
+ * are actions, not settings -- a row whose control is "Import an Android backup" reads as a
+ * preference you can leave switched on.
+ */
+@Composable
+private fun LibraryPanel(
+	cardStyle: CardStyle,
+	onCardStyle: (CardStyle) -> Unit,
+	blurAdult: Boolean,
+	onBlurAdult: (Boolean) -> Unit,
+	railCollapsed: Boolean,
+	onRailCollapsed: (Boolean) -> Unit,
+	onImportBackup: () -> Unit,
+	onExportBackup: () -> Unit,
+	onClearHistory: () -> Unit,
+	historyCount: Int,
+	onOpenArchive: () -> Unit,
+) {
+	PanelHeading(
+		"Library",
+		"Your own collection: how densely it is drawn, and how it gets in and out of Ageha. " +
+			"Nothing here leaves this machine.",
+	)
+	SettingsRows(
+		listOf(
+			{
+				SettingRow("Card style", "how many covers fit across the shelf") {
+					AgehaSegmented(
+						value = cardStyle,
+						options = CardStyle.entries,
+						onSelect = onCardStyle,
+						label = { it.label },
+					)
+				}
+			},
+			{
+				SettingRow(
+					"Blur 18+ covers",
+					"until the pointer is on them · titles stay legible",
+				) {
+					AgehaSwitch(checked = blurAdult, onCheckedChange = onBlurAdult)
+				}
+			},
+			{
+				SettingRow(
+					"Fold the shelf rail",
+					"hands roughly one more column back to the grid",
+				) {
+					AgehaSwitch(checked = railCollapsed, onCheckedChange = onRailCollapsed)
+				}
+			},
+		),
+	)
+
+	Text("Local files", style = MaterialTheme.typography.titleMedium)
+	Explain(
+		"Open a comic archive from this machine -- a .cbz or a plain .zip of images. It opens in " +
+			"the reader without being added to your library. Ctrl+O does the same from anywhere.",
+	)
+	Button(onClick = onOpenArchive) { Text("Open a comic archive...") }
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	Text("Backup", style = MaterialTheme.typography.titleMedium)
+	Explain(
+		"Ageha reads the backup file the Android app produces: library, categories, favourites, " +
+			"history and reading positions. Anything it cannot restore is reported rather than " +
+			"skipped quietly. Export writes the same format back, so it restores into Ageha and " +
+			"into Kotatsu-Redo on a phone. Downloaded chapters are not included -- they are " +
+			"ordinary CBZ files already, and copying the folder moves them.",
+	)
+	Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+		Button(onClick = onImportBackup) { Text("Import an Android backup") }
+		OutlinedButton(onClick = onExportBackup) { Text("Export a backup") }
+	}
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	Text("Reading history", style = MaterialTheme.typography.titleMedium)
+	Explain(
+		"Continue Reading is built from this history, and it never leaves your machine -- there " +
+			"is no account behind it and nothing is sent anywhere. Clearing it empties the " +
+			"Continue Reading banner and shelf. Your library, favourites and downloads are not " +
+			"touched.",
+	)
+	// Two-step, and the second step names the number. This is the one irreversible button in
+	// settings -- soft-deleted rows are tombstones, not an undo -- and a single click that
+	// silently discards years of reading positions is not a button, it is a trap.
+	var confirming by remember { mutableStateOf(false) }
+	if (confirming) {
+		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+			Button(
+				onClick = {
+					onClearHistory()
+					confirming = false
+				},
+				colors = ButtonDefaults.buttonColors(
+					containerColor = MaterialTheme.colorScheme.error,
+					contentColor = MaterialTheme.colorScheme.onError,
+				),
+			) {
+				Text("Clear $historyCount entries permanently")
+			}
+			TextButton(onClick = { confirming = false }) { Text("Cancel") }
+		}
+	} else {
+		TextButton(onClick = { confirming = true }, enabled = historyCount > 0) {
+			Text(if (historyCount > 0) "Clear reading history" else "Nothing to clear")
+		}
+	}
+}
+
+/**
+ * Sources: what the catalogue shows, and where the parsers come from.
+ *
+ * The two filter rows write the **same keys** the Explore filter rail writes, which is the
+ * handoff's own instruction ("Sources mirrors the four Explore filters -- same state object").
+ * Ageha has three real filters rather than four: there is no unverified-mirror tier to show, so
+ * that row is absent rather than present and inert. The language filter lives only in Explore,
+ * where the handoff puts its chips and where the list of languages actually exists.
+ */
+@Composable
+private fun SourcesPanel(
+	state: ParsersUiState,
+	jsRuntime: JsRuntime,
+	describe: (app.ageha.core.parsers.UpdateOutcome?) -> String,
+	onPolicy: (UpdatePolicy) -> Unit,
+	onCheck: () -> Unit,
+	onRollBack: () -> Unit,
+	onPin: (String?) -> Unit,
+	hideBrokenSources: Boolean,
+	showAdultSources: Boolean,
+	onHideBrokenSources: (Boolean) -> Unit,
+	onShowAdultSources: (Boolean) -> Unit,
+) {
+	PanelHeading(
+		"Sources",
+		"Ageha's ${state.sourceCount} manga sources come from a library that updates " +
+			"independently of the app. Sites change constantly, so this is the update that " +
+			"matters most -- and it does not need a new version of Ageha.",
+	)
+	SettingsRows(
+		listOf(
+			{
+				SettingRow("Hide 18+ content", "adult catalogues stay out of explore and search") {
+					AgehaSwitch(
+						checked = !showAdultSources,
+						onCheckedChange = { onShowAdultSources(!it) },
+					)
+				}
+			},
+			{
+				SettingRow("Hide broken sources", "upstream has flagged these as not working") {
+					AgehaSwitch(checked = hideBrokenSources, onCheckedChange = onHideBrokenSources)
+				}
+			},
+			{
+				SettingRow("When a new build is found", state.policy.detail.lowercase()) {
+					AgehaSelect(
+						value = state.policy,
+						options = UpdatePolicy.entries,
+						onSelect = onPolicy,
+						label = { it.label },
+					)
+				}
+			},
+		),
+	)
+	Explain(
+		"The same two switches live in the source picker's filter rail -- they are one setting " +
+			"seen from two places. They change what the catalogue offers you, not what Ageha can " +
+			"do: a source you have already turned on keeps working everywhere, search included.",
+	)
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	SelectionContainer {
+		Column {
+			Text("Active build: ${state.activeVersion}", style = AgehaTextStyles.readerHud)
+			Text("Bundled with this app: ${state.bundledVersion}", style = AgehaTextStyles.metadata)
+		}
+	}
+
+	when (val verification = state.verification) {
+		is LockVerification.Verified, null -> Unit
+		else -> Text(
+			// Verification runs before every load, not only after a download: a build can be
+			// corrupted on disk between launches, and loading unvouched-for code is worse than
+			// losing some source coverage.
+			"This build did not verify against its checksum lock and will not be loaded. " +
+				"Ageha will fall back to the bundled build. ($verification)",
+			style = AgehaTextStyles.metadata,
+			color = MaterialTheme.colorScheme.error,
+		)
+	}
+
+	Row(
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Button(onClick = onCheck, enabled = !state.isChecking) { Text("Check now") }
+		if (state.isChecking) CircularProgressIndicator(Modifier.size(18.dp))
+		if (state.canRollBack) OutlinedButton(onClick = onRollBack) { Text("Roll back") }
+		if (state.isPinned) {
+			OutlinedButton(onClick = { onPin(null) }) { Text("Unpin") }
+		} else {
+			OutlinedButton(onClick = { onPin(state.activeVersion) }) { Text("Pin this build") }
+		}
+	}
+	if (state.isPinned) {
+		Explain(
+			"Pinned to ${state.state.pinnedVersion}. Ageha will still tell you when a newer " +
+				"build exists, but will not install one.",
+		)
+	}
+	describe(state.lastOutcome).takeIf { it.isNotEmpty() }?.let { Explain(it) }
+	if (state.rejectedCount > 0) {
+		Explain(
+			"${state.rejectedCount} build(s) were checked and refused. A refused build is never " +
+				"retried, and refusing one costs you nothing -- the build you have keeps working.",
+		)
+	}
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	JavaScriptStatus(jsRuntime)
+}
+
+/**
+ * Downloads.
+ *
+ * One row, and it is the only one here with a real backend. The handoff also lists Wi-Fi only and
+ * an image-quality setting; neither is built, and neither is drawn. A desktop JVM has no portable
+ * way to ask whether a connection is metered, and Ageha stores what the source served rather than
+ * recompressing it -- so both rows would be switches that change nothing, which is worse than a
+ * shorter panel.
+ */
+@Composable
+private fun DownloadsPanel(parallel: Int, onParallel: (Int) -> Unit) {
+	PanelHeading(
+		"Downloads",
+		"Chapters are saved as ordinary CBZ files, readable in any comic reader. What is on " +
+			"this device, and the controls for reclaiming space, live on the Downloads screen.",
+	)
+	SettingsRows(
+		listOf(
+			{
+				SettingRow(
+					"Parallel downloads",
+					"per source · low on purpose, these are small sites",
+				) {
+					AgehaSelect(
+						value = parallel,
+						options = PARALLEL_OPTIONS,
+						onSelect = onParallel,
+						label = { "$it at a time" },
+					)
+				}
+			},
+		),
+	)
+	Explain(
+		"Per source rather than overall, which is the number that matters: eighty connections to " +
+			"one small site is how an application gets its whole user base blocked. Raising this " +
+			"speeds up a queue spread across several sources and does very little for one.",
+	)
+}
+
+/** The handoff's 1 / 3 / 5 / 8, plus Ageha's own polite default of 2. */
+private val PARALLEL_OPTIONS = listOf(1, 2, 3, 5, 8)
 
 @Composable
 private fun Explain(text: String) {
@@ -229,14 +698,26 @@ private fun Explain(text: String) {
 
 @Composable
 private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> Unit) {
-	PanelTitle("Appearance")
-	for (mode in AgehaThemeMode.entries) {
-		Row(verticalAlignment = Alignment.CenterVertically) {
-			RadioButton(selected = theme == mode, onClick = { onTheme(mode) })
-			Text(mode.name.lowercase().replaceFirstChar { it.uppercase() })
-		}
-	}
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	PanelHeading(
+		"Appearance",
+		"Ember is flat, warm and opaque; Glass is frosted, cool and fully rounded. They are the " +
+			"same layout in two materials, and the switcher in the title bar changes the same " +
+			"setting this row does.",
+	)
+	SettingsRows(
+		listOf(
+			{
+				SettingRow("Skin", themeHint(theme)) {
+					AgehaSelect(
+						value = theme,
+						options = AgehaThemeMode.entries,
+						onSelect = onTheme,
+						label = ::themeLabel,
+					)
+				}
+			},
+		),
+	)
 	val coverage = remember { FontCoverage.detect() }
 	Text("Fonts", style = MaterialTheme.typography.titleMedium)
 	Explain(
@@ -267,209 +748,20 @@ private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> 
 	}
 }
 
-@Composable
-private fun ReaderPanel(
-	background: ReaderBackground,
-	doublePage: Boolean,
-	coverOffset: Boolean,
-	onBackground: (ReaderBackground) -> Unit,
-	onDoublePage: (Boolean) -> Unit,
-	onCoverOffset: (Boolean) -> Unit,
-) {
-	PanelTitle("Reader")
-	Text("Background", style = MaterialTheme.typography.titleMedium)
-	Explain(
-		"Independent of the app theme, and always a neutral -- no brand colour is drawn " +
-			"anywhere the artwork is visible.",
-	)
-	for (option in ReaderBackground.entries) {
-		Row(verticalAlignment = Alignment.CenterVertically) {
-			RadioButton(selected = background == option, onClick = { onBackground(option) })
-			Box(Modifier.size(18.dp).clip(MaterialTheme.shapes.extraSmall).background(option.color))
-			Text(option.label, Modifier.padding(start = AgehaSpacing.sm))
-		}
-	}
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	Text("Page layout", style = MaterialTheme.typography.titleMedium)
-	Row(verticalAlignment = Alignment.CenterVertically) {
-		AgehaSwitch(checked = doublePage, onCheckedChange = onDoublePage)
-		Text("Two pages side by side", Modifier.padding(start = AgehaSpacing.sm))
-	}
-	if (doublePage) {
-		Row(verticalAlignment = Alignment.CenterVertically) {
-			AgehaSwitch(checked = coverOffset, onCheckedChange = onCoverOffset)
-			Text("First page stands alone", Modifier.padding(start = AgehaSpacing.sm))
-		}
-		Explain(
-			"A printed book puts page 1 alone on the right and pairs the rest, so artwork drawn " +
-				"across a fold lines up. Turn this off for releases with no cover page.",
-		)
-	}
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	Text("Keyboard", style = MaterialTheme.typography.titleMedium)
-	for ((keys, meaning) in app.ageha.feature.settings.readerHelp) {
-		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md)) {
-			Text(keys, style = AgehaTextStyles.readerHud, modifier = Modifier.width(150.dp))
-			Text(meaning, style = AgehaTextStyles.metadata, color = MaterialTheme.colorScheme.onSurfaceVariant)
-		}
-	}
+private fun themeLabel(mode: AgehaThemeMode): String = when (mode) {
+	AgehaThemeMode.SYSTEM -> "Follow system"
+	AgehaThemeMode.LIGHT -> "Light"
+	AgehaThemeMode.EMBER -> "Ember"
+	AgehaThemeMode.GLASS -> "Glass"
+	AgehaThemeMode.AMOLED -> "AMOLED"
 }
 
-@Composable
-private fun ParsersPanel(
-	state: ParsersUiState,
-	jsRuntime: JsRuntime,
-	describe: (app.ageha.core.parsers.UpdateOutcome?) -> String,
-	onPolicy: (UpdatePolicy) -> Unit,
-	onCheck: () -> Unit,
-	onRollBack: () -> Unit,
-	onPin: (String?) -> Unit,
-	appUpdates: AppUpdatesUiState,
-	onAppUpdatePolicy: (AppUpdatePolicy) -> Unit,
-	onCheckForAppUpdate: () -> Unit,
-	hideBrokenSources: Boolean,
-	showAdultSources: Boolean,
-	onHideBrokenSources: (Boolean) -> Unit,
-	onShowAdultSources: (Boolean) -> Unit,
-) {
-	PanelTitle("Sources and updates")
-	Explain(
-		"Ageha's ${state.sourceCount} manga sources come from an external library that updates " +
-			"independently of the app. Sites change constantly, so this is the update that " +
-			"matters most -- and it does not need a new version of Ageha.",
-	)
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	Text("What the source list shows", style = MaterialTheme.typography.titleMedium)
-	Explain(
-		"The same two switches live in the source picker's filter menu. They change what the " +
-			"catalogue offers you, not what Ageha can do: a source you have already turned on " +
-			"keeps working everywhere, including search across every source.",
-	)
-	Row(verticalAlignment = Alignment.CenterVertically) {
-		AgehaSwitch(checked = hideBrokenSources, onCheckedChange = onHideBrokenSources)
-		Text("Hide sources known to be broken", Modifier.padding(start = AgehaSpacing.sm))
-	}
-	Row(verticalAlignment = Alignment.CenterVertically) {
-		AgehaSwitch(checked = showAdultSources, onCheckedChange = onShowAdultSources)
-		Text("Show 18+ sources", Modifier.padding(start = AgehaSpacing.sm))
-	}
-	Explain(
-		"Adult sources are hidden until you ask for them. The source list always says how many " +
-			"it is holding back, so a filter never looks like a missing source.",
-	)
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	SelectionContainer {
-		Column {
-			Text("Active build: ${state.activeVersion}", style = AgehaTextStyles.readerHud)
-			Text("Bundled with this app: ${state.bundledVersion}", style = AgehaTextStyles.metadata)
-		}
-	}
-
-	when (val verification = state.verification) {
-		is LockVerification.Verified, null -> Unit
-		else -> Text(
-			// Verification runs before every load, not only after a download: a build can be
-			// corrupted on disk between launches, and loading unvouched-for code is worse than
-			// losing some source coverage.
-			"This build did not verify against its checksum lock and will not be loaded. " +
-				"Ageha will fall back to the bundled build. ($verification)",
-			style = AgehaTextStyles.metadata,
-			color = MaterialTheme.colorScheme.error,
-		)
-	}
-
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	Text("When a new build is found", style = MaterialTheme.typography.titleMedium)
-	for (option in UpdatePolicy.entries) {
-		Row(verticalAlignment = Alignment.Top) {
-			RadioButton(selected = state.policy == option, onClick = { onPolicy(option) })
-			Column(Modifier.padding(top = AgehaSpacing.sm)) {
-				Text(option.label, style = MaterialTheme.typography.bodyMedium)
-				Text(
-					option.detail,
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-			}
-		}
-	}
-
-	Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
-		Button(onClick = onCheck, enabled = !state.isChecking) { Text("Check now") }
-		if (state.isChecking) CircularProgressIndicator(Modifier.size(18.dp))
-		if (state.canRollBack) {
-			OutlinedButton(onClick = onRollBack) { Text("Roll back") }
-		}
-		if (state.isPinned) {
-			OutlinedButton(onClick = { onPin(null) }) { Text("Unpin") }
-		} else {
-			OutlinedButton(onClick = { onPin(state.activeVersion) }) { Text("Pin this build") }
-		}
-	}
-	if (state.isPinned) {
-		Explain(
-			"Pinned to ${state.state.pinnedVersion}. Ageha will still tell you when a newer " +
-				"build exists, but will not install one.",
-		)
-	}
-	describe(state.lastOutcome).takeIf { it.isNotEmpty() }?.let { Explain(it) }
-	if (state.rejectedCount > 0) {
-		Explain(
-			"${state.rejectedCount} build(s) were checked and refused. A refused build is never " +
-				"retried, and refusing one costs you nothing -- the build you have keeps working.",
-		)
-	}
-
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	AppUpdatesStatus(appUpdates, onAppUpdatePolicy, onCheckForAppUpdate)
-
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	JavaScriptStatus(jsRuntime)
-}
-
-/**
- * Ageha's own updates, as distinct from the sources'.
- *
- * Sitting under the parsers panel on purpose: these are the two things that update, they update
- * for completely different reasons and at completely different rates, and a user who has just read
- * about one is in the right frame of mind to be told how the other differs.
- */
-@Composable
-private fun AppUpdatesStatus(
-	state: AppUpdatesUiState,
-	onPolicy: (AppUpdatePolicy) -> Unit,
-	onCheck: () -> Unit,
-) {
-	PanelTitle("Ageha itself")
-	Explain(
-		"Ageha ${state.currentVersion}. This updates far more rarely than the sources do -- a " +
-			"site changing needs a new parsers build, not a new Ageha.",
-	)
-	Explain(
-		"Installing an update is your installer's job, not Ageha's: Windows, macOS and Linux each " +
-			"handle it their own way and none of them can be switched on or off from in here. " +
-			"What this setting controls is whether Ageha looks, and whether it tells you.",
-	)
-	for (option in AppUpdatePolicy.entries) {
-		Row(
-			Modifier.fillMaxWidth().clickable { onPolicy(option) },
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			RadioButton(selected = state.policy == option, onClick = { onPolicy(option) })
-			Column(Modifier.padding(start = AgehaSpacing.sm)) {
-				Text(option.label, style = MaterialTheme.typography.bodyLarge)
-				Text(
-					option.detail,
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
-				)
-			}
-		}
-	}
-	OutlinedButton(onClick = onCheck, enabled = !state.isChecking) {
-		Text(if (state.isChecking) "Checking..." else "Check for updates")
-	}
-	state.lastResult?.let { SelectionContainer { Explain(it) } }
+private fun themeHint(mode: AgehaThemeMode): String = when (mode) {
+	AgehaThemeMode.SYSTEM -> "follows the os, resolving dark to ember"
+	AgehaThemeMode.LIGHT -> "paper surfaces, indigo chrome"
+	AgehaThemeMode.EMBER -> "flat · warm near-black · red accent"
+	AgehaThemeMode.GLASS -> "frosted · cool blue-grey · violet accent"
+	AgehaThemeMode.AMOLED -> "true black backmost surfaces, for oled panels"
 }
 
 /**
@@ -484,7 +776,10 @@ private fun JavaScriptStatus(jsRuntime: JsRuntime) {
 	Text("JavaScript", style = MaterialTheme.typography.titleMedium)
 	val hasPlain = JsCapability.PLAIN_SCRIPT in jsRuntime.capabilities
 	val hasBrowser = jsRuntime.capabilities.any { it.requiresBrowser }
-	Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+	Row(
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
 		if (hasPlain) AgehaAccent.NewChapterDot()
 		Text(
 			if (hasPlain) {
@@ -507,89 +802,109 @@ private fun JavaScriptStatus(jsRuntime: JsRuntime) {
 	)
 }
 
+/**
+ * About: what this is, what updates it, and what it is built out of.
+ *
+ * The licence list is here rather than behind a dead button. It was a `TextButton(onClick = {})`,
+ * which was the one control on this screen that genuinely did nothing -- and for a GPL-3.0
+ * application whose dependencies carry their own terms, an inert Licences button is not a cosmetic
+ * omission.
+ */
 @Composable
-private fun LibraryPanel(
-	onImportBackup: () -> Unit,
-	onExportBackup: () -> Unit,
-	onClearHistory: () -> Unit,
-	historyCount: Int,
-	onOpenArchive: () -> Unit,
+private fun AboutPanel(
+	parsers: ParsersUiState,
+	appUpdates: AppUpdatesUiState,
+	onPolicy: (AppUpdatePolicy) -> Unit,
+	onCheck: () -> Unit,
 ) {
-	PanelTitle("Local files")
-	Explain(
-		"Open a comic archive from this machine -- a .cbz or a plain .zip of images. It opens in " +
-			"the reader without being added to your library. Ctrl+O does the same thing from " +
-			"anywhere in the app.",
+	PanelHeading(
+		"About",
+		"Ageha ${appUpdates.currentVersion} -- a desktop manga reader, GPL-3.0, ported from the " +
+			"Kotatsu-Redo Android app. It updates far more rarely than its sources do: a site " +
+			"changing needs a new parsers build, not a new Ageha.",
 	)
-	Button(onClick = onOpenArchive) { Text("Open a comic archive...") }
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	PanelTitle("Library and backup")
-	Explain(
-		"Ageha reads the backup file the Android app produces: library, categories, favourites, " +
-			"history and reading positions. Anything it cannot restore is reported rather than " +
-			"skipped quietly.",
+	SettingsRows(
+		listOf(
+			{
+				SettingRow("Update channel", appUpdates.policy.detail.lowercase()) {
+					AgehaSelect(
+						value = appUpdates.policy,
+						options = AppUpdatePolicy.entries,
+						onSelect = onPolicy,
+						label = { it.label },
+					)
+				}
+			},
+			{
+				SettingRow(
+					"Version",
+					"sources ${parsers.sourceCount} · parsers ${parsers.activeVersion}",
+				) {
+					OutlinedButton(onClick = onCheck, enabled = !appUpdates.isChecking) {
+						Text(if (appUpdates.isChecking) "Checking..." else "Check for updates")
+					}
+				}
+			},
+		),
 	)
-	Button(onClick = onImportBackup) { Text("Import an Android backup") }
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	PanelTitle("Reading history")
 	Explain(
-		"Continue Reading is built from this history, and it never leaves your machine -- there " +
-			"is no account behind it and nothing is sent anywhere. Clearing it empties the " +
-			"Continue Reading list and the shelf on the library screen. Your library, favourites " +
-			"and downloads are not touched.",
+		"Installing an update is your installer's job, not Ageha's: Windows, macOS and Linux each " +
+			"handle it their own way and none of them can be switched on or off from in here. " +
+			"What this setting controls is whether Ageha looks, and whether it tells you.",
 	)
-	// Two-step, and the second step names the number. This is the one irreversible button in
-	// settings -- soft-deleted rows are tombstones, not an undo -- and a single click that
-	// silently discards years of reading positions is not a button, it is a trap.
-	var confirming by remember { mutableStateOf(false) }
-	if (confirming) {
-		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
-			Button(
-				onClick = {
-					onClearHistory()
-					confirming = false
-				},
-				colors = ButtonDefaults.buttonColors(
-					containerColor = MaterialTheme.colorScheme.error,
-					contentColor = MaterialTheme.colorScheme.onError,
-				),
-			) {
-				Text("Clear $historyCount entries permanently")
-			}
-			TextButton(onClick = { confirming = false }) { Text("Cancel") }
-		}
-	} else {
-		TextButton(onClick = { confirming = true }, enabled = historyCount > 0) {
-			Text(if (historyCount > 0) "Clear reading history" else "Nothing to clear")
-		}
-	}
-	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	PanelTitle("Export")
-	Explain(
-		"Writes your library, favourites, categories, reading history and enabled sources to a " +
-			"backup file. It is the same format the Android app uses, so it restores into Ageha " +
-			"and back into Kotatsu-Redo on a phone. Downloaded chapters are not included -- they " +
-			"are ordinary CBZ files already, and copying the folder moves them.",
-	)
-	Button(onClick = onExportBackup) { Text("Export a backup") }
-}
+	appUpdates.lastResult?.let { SelectionContainer { Explain(it) } }
 
-@Composable
-private fun AboutPanel(parsers: ParsersUiState) {
-	PanelTitle("Ageha")
-	Explain("A desktop manga reader. GPL-3.0, ported from the Kotatsu-Redo Android app.")
-	SelectionContainer {
-		Column(verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs)) {
-			Text("Sources: ${parsers.sourceCount}", style = AgehaTextStyles.metadata)
-			Text("Parsers build: ${parsers.activeVersion}", style = AgehaTextStyles.metadata)
-			Text(
-				"Parsers come from Kotatsu-Redo/kotatsu-parsers-redo and are not part of Ageha.",
-				style = AgehaTextStyles.metadata,
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+	var licences by remember { mutableStateOf(false) }
+	TextButton(onClick = { licences = !licences }) {
+		Text(if (licences) "Hide licences" else "Licences")
+	}
+	if (licences) {
+		SelectionContainer {
+			SettingsRows(
+				LICENCES.map { entry ->
+					{
+						SettingRow(entry.name, entry.role) {
+							Text(
+								entry.terms,
+								style = AgehaTextStyles.monoMeta,
+								color = AgehaTheme.skin.inkFaint,
+							)
+						}
+					}
+				},
 			)
 		}
+		Explain(
+			"Ageha itself is GPL-3.0. The full text ships as LICENSE beside the application, and " +
+				"NOTICE.md records every component above with its copyright line. The parsers " +
+				"are a separate project and are not part of Ageha.",
+		)
 	}
-	TextButton(onClick = {}) { Text("Licences") }
 }
+
+/** One row of the licence list. */
+private data class Licence(val name: String, val terms: String, val role: String)
+
+/**
+ * What Ageha is built out of, as the About panel lists it.
+ *
+ * A constant rather than a generated list. A build-time scan of the resolved dependency graph
+ * would be more complete and much less useful -- it would name forty transitive artefacts nobody
+ * chose, and bury the handful that actually shape what this application is.
+ */
+private val LICENCES = listOf(
+	Licence("Ageha", "GPL-3.0-or-later", "this application"),
+	Licence("kotatsu-parsers-redo", "Apache-2.0", "every manga source"),
+	Licence("Archivo", "SIL OFL 1.1", "the interface face"),
+	Licence("JetBrains Mono", "SIL OFL 1.1", "counts, paths and labels"),
+	Licence("Compose Multiplatform", "Apache-2.0", "the whole interface"),
+	Licence("OkHttp", "Apache-2.0", "every network request"),
+	Licence("Room", "Apache-2.0", "the library database"),
+	Licence("Coil", "Apache-2.0", "cover art"),
+	Licence("Koin", "Apache-2.0", "wiring"),
+	Licence("Rhino", "MPL-2.0", "the script engine"),
+)
 
 /**
  * The reader's key bindings, restated for the settings screen.
@@ -623,6 +938,8 @@ internal val readerHelp: List<Pair<String, String>> = listOf(
  *    making that choice and discovering it.
  *  - **That the server is theirs.** This is not an Ageha service, and there is no default host.
  *    Nothing is sent anywhere until an address is typed here.
+ *
+ * This is the slot the handoff gives to **Tracking**. See [SettingsSection] for why Ageha has none.
  */
 @Composable
 private fun SyncPanel(
@@ -632,8 +949,8 @@ private fun SyncPanel(
 	onSyncNow: () -> Unit,
 	onSyncOnStart: (Boolean) -> Unit,
 ) {
-	PanelTitle("Sync")
-	Explain(
+	PanelHeading(
+		"Sync",
 		"Ageha syncs reading history, favourites and categories with a kotatsu-syncserver you " +
 			"run yourself -- the same protocol and the same server the Android app uses, so the " +
 			"two stay in step. There is no Ageha-hosted service and no default address: nothing " +
@@ -641,31 +958,43 @@ private fun SyncPanel(
 	)
 
 	if (state.isSignedIn) {
-		Text("Signed in as ${state.email}", style = MaterialTheme.typography.bodyLarge)
-		Text(
-			state.syncUrl,
-			style = AgehaTextStyles.metadata,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		SettingsRows(
+			listOf(
+				{
+					SettingRow("Account", "${state.email} · ${state.syncUrl}") {
+						TextButton(onClick = onSignOut, enabled = !state.isBusy) {
+							Text("Sign out")
+						}
+					}
+				},
+				{
+					SettingRow(
+						"Sync when Ageha starts",
+						"the moment another device's changes are most likely waiting",
+					) {
+						AgehaSwitch(
+							checked = state.syncOnStart,
+							onCheckedChange = onSyncOnStart,
+							enabled = !state.isBusy,
+						)
+					}
+				},
+				{
+					SettingRow(
+						"Sync now",
+						if (state.isPasswordStored) {
+							"password stored on this machine, in ageha's data folder"
+						} else {
+							"password not stored · ageha will ask when the session expires"
+						},
+					) {
+						Button(onClick = onSyncNow, enabled = !state.isBusy) {
+							Text(if (state.isBusy) "Syncing..." else "Sync now")
+						}
+					}
+				},
+			),
 		)
-		Explain(
-			if (state.isPasswordStored) {
-				"The password is stored on this machine so Ageha can sign in again when the " +
-					"session expires. It is a file in Ageha's data folder, protected by your " +
-					"user account and nothing stronger."
-			} else {
-				"The password is not stored. Ageha will ask for it again when the session expires."
-			},
-		)
-		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
-			Button(onClick = onSyncNow, enabled = !state.isBusy) {
-				Text(if (state.isBusy) "Syncing..." else "Sync now")
-			}
-			TextButton(onClick = onSignOut, enabled = !state.isBusy) { Text("Sign out") }
-		}
-		Row(verticalAlignment = Alignment.CenterVertically) {
-			AgehaSwitch(checked = state.syncOnStart, onCheckedChange = onSyncOnStart, enabled = !state.isBusy)
-			Text("Sync when Ageha starts", modifier = Modifier.padding(start = AgehaSpacing.sm))
-		}
 		Explain(
 			"Ageha syncs at startup and when you ask it to. It does not sync on a timer -- a " +
 				"desktop app that is open all day would spend the day re-sending your whole " +

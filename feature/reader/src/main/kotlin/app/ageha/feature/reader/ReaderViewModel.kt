@@ -68,6 +68,16 @@ data class ReaderUiState(
 class ReaderViewModel(
 	private val reader: ReaderRepository,
 	private val scope: CoroutineScope,
+	/**
+	 * Settings' "Reading mode", for a manga that has never been given one of its own.
+	 *
+	 * A constructor parameter rather than something read on every open, because the shell already
+	 * `remember`s this view model against the preferences it was built from -- changing the
+	 * setting rebuilds it, which is the path every other preference here takes.
+	 */
+	private val defaultMode: ReaderMode = ReaderMode.DEFAULT,
+	/** Settings' "Page fit". Applies on open; the reader's own chip still changes it live. */
+	private val defaultScale: PageScale = PageScale.FIT_PAGE,
 ) {
 
 	private val _state = MutableStateFlow(ReaderUiState())
@@ -94,10 +104,13 @@ class ReaderViewModel(
 			chapterIndex = index,
 			chapterCount = chapters.size,
 			imageHeaders = reader.imageHeaders(manga.sourceName),
+			mode = defaultMode,
+			scale = defaultScale,
 			isLoading = true,
 		)
 		scope.launch {
-			reader.observeMode(manga.id).collect { mode -> _state.update { it.copy(mode = mode) } }
+			reader.observeMode(manga.id, defaultMode)
+				.collect { mode -> _state.update { it.copy(mode = mode) } }
 		}
 		loadChapter(chapter, startPage)
 	}

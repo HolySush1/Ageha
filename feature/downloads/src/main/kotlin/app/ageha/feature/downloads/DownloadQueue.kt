@@ -67,8 +67,23 @@ data class DownloadJob(
 class DownloadQueue(
 	private val downloader: ChapterDownloader,
 	private val scope: CoroutineScope,
-	private val perSourceConcurrency: Int = DEFAULT_PER_SOURCE_CONCURRENCY,
+	perSourceConcurrency: Int = DEFAULT_PER_SOURCE_CONCURRENCY,
 ) {
+
+	/**
+	 * Settings' "Parallel downloads", changeable while the queue is alive.
+	 *
+	 * Setting it clears the permit map, so the *next* chapter from each source is admitted under
+	 * the new limit. Work already holding a permit keeps running on the old semaphore and finishes
+	 * normally -- cancelling it to apply a setting would throw away a partly written chapter to
+	 * enforce a number the user changed to make downloads faster.
+	 */
+	var perSourceConcurrency: Int = perSourceConcurrency
+		set(value) {
+			if (value == field) return
+			field = value.coerceAtLeast(1)
+			permits.clear()
+		}
 
 	private val _jobs = MutableStateFlow<List<DownloadJob>>(emptyList())
 	val jobs: StateFlow<List<DownloadJob>> = _jobs.asStateFlow()

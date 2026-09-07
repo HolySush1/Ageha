@@ -1,7 +1,10 @@
 package app.ageha.desktop
 
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.ReaderBackground
+import app.ageha.core.model.PageScale
+import app.ageha.core.model.ReaderMode
 import app.ageha.core.network.AgehaPaths
 import app.ageha.feature.settings.AppUpdatePolicy
 import kotlinx.serialization.Serializable
@@ -96,6 +99,43 @@ data class Preferences(
 	val showAdultSources: Boolean = false,
 	/** The picker's language filter, as an upstream tag. Null means every language. */
 	val sourceLanguage: String? = null,
+	/**
+	 * The reader mode a manga gets when it has never been given one of its own.
+	 *
+	 * The handoff's `opts.mode`, and it is a *default* rather than a global: the reader's own chip
+	 * still writes a per-manga override, because a webtoon and a scanlated tankoubon want
+	 * different modes and one setting for both would make one of them wrong every time.
+	 */
+	val defaultReaderMode: ReaderMode = ReaderMode.DEFAULT,
+	/** The handoff's `opts.fit`. How a page is scaled when the reader opens. */
+	val defaultPageScale: PageScale = PageScale.FIT_PAGE,
+	/** The handoff's `opts.grid`: how dense the library shelf is. */
+	val cardStyle: CardStyle = CardStyle.COVER,
+	/**
+	 * The handoff's `opts.nsfwBlur`. Blurs adult-rated covers until the pointer is on them.
+	 *
+	 * Off by default, unlike [showAdultSources], and the two point opposite ways on purpose:
+	 * adult *sources* are hidden until asked for because the catalogue is 1360 sites the user has
+	 * not chosen, while an adult title in the *library* is one they deliberately added. Blurring
+	 * their own shelf by default would be the app second-guessing a decision already made.
+	 */
+	val blurAdultCovers: Boolean = false,
+	/**
+	 * The handoff's `opts.parallel`: simultaneous downloads per source.
+	 *
+	 * Per source rather than overall, which is the number that actually matters -- see
+	 * `DownloadQueue`. Two by default, because the cost of being impolite to a small site is not
+	 * a slow download, it is a block affecting every Ageha user of that source.
+	 */
+	val parallelDownloads: Int = 2,
+	/**
+	 * The handoff's `opts.preload`: how many pages ahead the reader fetches.
+	 *
+	 * Zero means the whole chapter. Six by default: enough that a fast reader never waits on a
+	 * page turn, few enough that opening a chapter does not fetch forty images for someone who
+	 * will close it after two.
+	 */
+	val preloadPages: Int = 6,
 )
 
 /**

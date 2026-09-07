@@ -196,9 +196,17 @@ class ReaderRepository(
 		)
 	}
 
-	fun observeMode(mangaId: Long): Flow<ReaderMode> =
+	/**
+	 * The reader mode for one manga.
+	 *
+	 * @param fallback what a manga with no stored mode of its own gets. Settings' "Reading mode"
+	 *   row writes this, and it stays a *fallback* rather than an override: a per-manga row always
+	 *   wins, because a webtoon and a scanlated tankoubon want different modes and one global
+	 *   setting would make one of them wrong every time.
+	 */
+	fun observeMode(mangaId: Long, fallback: ReaderMode = ReaderMode.DEFAULT): Flow<ReaderMode> =
 		prefs.observe(mangaId).map { row ->
-			row?.mode?.let(ReaderMode::fromId) ?: ReaderMode.DEFAULT
+			row?.mode?.let(ReaderMode::fromId) ?: fallback
 		}
 
 	/**

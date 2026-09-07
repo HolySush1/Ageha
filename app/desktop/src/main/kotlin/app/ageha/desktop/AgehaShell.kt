@@ -145,8 +145,21 @@ fun AgehaShell(
 	val detailsViewModel = remember {
 		DetailsViewModel(application.catalog, application.library, scope)
 	}
-	val readerViewModel = remember { ReaderViewModel(application.reader, scope) }
-	val downloadQueue = remember { DownloadQueue(application.downloader, scope) }
+	// Keyed on the two defaults it reads, so changing them in Settings rebuilds the view model
+	// rather than leaving the new value to take effect at the next launch.
+	val readerViewModel = remember(preferences.defaultReaderMode, preferences.defaultPageScale) {
+		ReaderViewModel(
+			reader = application.reader,
+			scope = scope,
+			defaultMode = preferences.defaultReaderMode,
+			defaultScale = preferences.defaultPageScale,
+		)
+	}
+	// *Not* keyed on the concurrency setting: rebuilding the queue would drop every job in it.
+	// The setting is pushed into the live queue instead, from the row that changes it.
+	val downloadQueue = remember {
+		DownloadQueue(application.downloader, scope, preferences.parallelDownloads)
+	}
 	val parsersViewModel = remember {
 		ParsersViewModel(
 			installation = application.sourceStack.installation,
@@ -435,6 +448,37 @@ fun AgehaShell(
 							}
 						},
 						historyCount = continueState.totalCount,
+						readerMode = preferences.defaultReaderMode,
+						onReaderMode = {
+							onPreferencesChange(preferences.copy(defaultReaderMode = it))
+						},
+						pageScale = preferences.defaultPageScale,
+						onPageScale = {
+							onPreferencesChange(preferences.copy(defaultPageScale = it))
+						},
+						preloadPages = preferences.preloadPages,
+						onPreloadPages = {
+							onPreferencesChange(preferences.copy(preloadPages = it))
+						},
+						cardStyle = preferences.cardStyle,
+						onCardStyle = { onPreferencesChange(preferences.copy(cardStyle = it)) },
+						blurAdultCovers = preferences.blurAdultCovers,
+						onBlurAdultCovers = {
+							onPreferencesChange(preferences.copy(blurAdultCovers = it))
+						},
+						parallelDownloads = preferences.parallelDownloads,
+						onParallelDownloads = {
+							// Applied to the live queue as well as stored. The queue outlives this
+							// screen, so writing only the preference would leave the setting
+							// taking effect at the next launch -- which for a control whose whole
+							// point is "make this download finish sooner" is no effect at all.
+							downloadQueue.perSourceConcurrency = it
+							onPreferencesChange(preferences.copy(parallelDownloads = it))
+						},
+						railCollapsed = preferences.libraryRailCollapsed,
+						onRailCollapsed = {
+							onPreferencesChange(preferences.copy(libraryRailCollapsed = it))
+						},
 						hideBrokenSources = preferences.hideBrokenSources,
 						showAdultSources = preferences.showAdultSources,
 						onHideBrokenSources = {

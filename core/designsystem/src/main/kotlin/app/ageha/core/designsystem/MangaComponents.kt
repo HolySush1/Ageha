@@ -4,6 +4,15 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -55,6 +64,50 @@ import coil3.compose.AsyncImage
 const val COVER_ASPECT_RATIO = 2f / 3f
 
 /**
+ * How dense the library grid is: the handoff's `opts.grid`.
+ *
+ * Three densities rather than three layouts. [COVER] and [COMPACT] are the same card at two
+ * reflow widths, which is why the difference between them is one number -- a "compact" card that
+ * dropped the title or the progress bar would be a second card implementation, and two cover
+ * cards one click apart is exactly what putting them in the design system was meant to prevent.
+ *
+ * [LIST] is genuinely different, and it earns that: a row can carry a long title without clipping
+ * it to two lines, which is the whole reason someone chooses it. It reuses [MangaThumbnail] rather
+ * than a shrunken card, so the cover, the fallback and the progress hairline stay one thing.
+ */
+enum class CardStyle(val label: String) {
+	COVER("Cover"),
+	COMPACT("Compact"),
+	LIST("List"),
+	;
+
+	/** The reflow width the grid adapts on. Ignored by [LIST], which is one column by definition. */
+	val minCoverWidth: androidx.compose.ui.unit.Dp
+		get() = when (this) {
+			COVER -> AgehaSpacing.minCoverWidth
+			COMPACT -> COMPACT_COVER_WIDTH
+			LIST -> AgehaSpacing.minCoverWidth
+		}
+}
+
+/**
+ * Compact's reflow width.
+ *
+ * 104dp rather than something smaller. Below about this the two-line title under a cover stops
+ * fitting a real manga name at all and every card ends in an ellipsis, at which point the grid is
+ * denser and less useful -- which is not a trade the setting is offering.
+ */
+private val COMPACT_COVER_WIDTH = 104.dp
+
+/**
+ * How hard an 18+ cover is blurred before it is pointed at.
+ *
+ * Enough to defeat recognition at a glance across a room, not so much that the card becomes a
+ * grey rectangle -- the point is that the shelf is still navigable, not that the artwork is gone.
+ */
+private val NSFW_BLUR_RADIUS = 14.dp
+
+/**
  * One manga, as a cover with its title beneath.
  *
  * @param badgeCount unread chapters. Zero draws nothing.
@@ -75,11 +128,22 @@ fun MangaCard(
 	stateLabel: String? = null,
 	/** Every chapter read. Draws the accent tick, and turns [stateLabel] accent-coloured. */
 	isComplete: Boolean = false,
+	/**
+	 * Blur the artwork until the pointer is on it: the handoff's `opts.nsfwBlur`.
+	 *
+	 * Only the *cover* blurs. The title, the badge and the progress bar stay sharp, because the
+	 * setting exists so a shelf can be scanned in a room with other people in it -- blurring the
+	 * text as well would make it a shelf nobody can use, including the person who turned it on.
+	 */
+	blurCover: Boolean = false,
 ) {
+	val hover = remember { MutableInteractionSource() }
+	val isHovered by hover.collectIsHoveredAsState()
 	Column(
 		modifier = modifier
 			.testTag(MANGA_CARD_TAG)
 			.clip(MaterialTheme.shapes.small)
+			.hoverable(hover)
 			.clickable(onClick = onClick)
 			.padding(AgehaSpacing.xs),
 		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
@@ -100,7 +164,19 @@ fun MangaCard(
 					},
 				),
 		) {
-			CoverImage(manga, imageHeaders)
+			// The blur wraps only the image, so the badge, the tick and the progress bar drawn
+			// after it stay legible. `Modifier.blur` blurs its own content, which is exactly the
+			// primitive wanted here -- and the one place in Ageha where that is true; see
+			// AgehaGlass for why it is useless for the chrome.
+			Box(
+				if (blurCover && !isHovered) {
+					Modifier.fillMaxSize().blur(NSFW_BLUR_RADIUS)
+				} else {
+					Modifier.fillMaxSize()
+				},
+			) {
+				CoverImage(manga, imageHeaders)
+			}
 			if (progress != null && progress > 0f) ReadingProgressBar(progress)
 			if (badgeCount > 0) {
 				CoverBadge(
@@ -365,9 +441,26 @@ fun MangaGrid(
 	contentPadding: androidx.compose.foundation.layout.PaddingValues =
 		androidx.compose.foundation.layout.PaddingValues(AgehaSpacing.md),
 	footer: @Composable (() -> Unit)? = null,
+	/** The handoff's card style. [CardStyle.LIST] switches this to a one-column row list. */
+	style: CardStyle = CardStyle.COVER,
+	/** Blur the covers of adult-rated titles until pointed at. See `MangaCard.blurCover`. */
+	blurAdult: Boolean = false,
 ) {
+	if (style == CardStyle.LIST) {
+		MangaList(manga, onClick, modifier, contentPadding, footer, blurAdult)
+		return
+	}
 	LazyVerticalGrid(
-		columns = GridCells.Adaptive(minSize = minCoverWidth),
+		columns = GridCells.Adaptive(
+			// The style's own reflow width wins over the caller's, unless the caller asked for
+			// something other than the default -- Explore's catalogue grid sets its own and is
+			// not a library shelf, so the library's density setting has no business there.
+			minSize = if (minCoverWidth == AgehaSpacing.minCoverWidth) {
+				style.minCoverWidth
+			} else {
+				minCoverWidth
+			},
+		),
 		state = state,
 		modifier = modifier,
 		contentPadding = contentPadding,
@@ -385,6 +478,7 @@ fun MangaGrid(
 				positionLabel = item.positionLabel,
 				stateLabel = item.stateLabel,
 				isComplete = item.isComplete,
+				blurCover = blurAdult && item.manga.isAdult,
 			)
 		}
 		if (footer != null) {
@@ -394,6 +488,86 @@ fun MangaGrid(
 		}
 	}
 }
+
+/** True when the source rated this title adult. Null means the source said nothing. */
+private val AgehaManga.isAdult: Boolean
+	get() = contentRating == app.ageha.core.model.AgehaContentRating.ADULT
+
+/**
+ * The same shelf as one column of rows: [CardStyle.LIST].
+ *
+ * The trade this style makes is horizontal room for vertical room -- a row gives a long title one
+ * unclipped line and a place to put the position and the state beside it, and costs the ability to
+ * see twenty covers at once. That is a real preference rather than a skin, which is why it is a
+ * setting and not a breakpoint.
+ */
+@Composable
+private fun MangaList(
+	manga: List<MangaGridItem>,
+	onClick: (AgehaManga) -> Unit,
+	modifier: Modifier,
+	contentPadding: androidx.compose.foundation.layout.PaddingValues,
+	footer: @Composable (() -> Unit)?,
+	blurAdult: Boolean,
+) {
+	LazyColumn(
+		modifier = modifier,
+		contentPadding = contentPadding,
+		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
+		items(manga, key = { it.key }) { item ->
+			Row(
+				Modifier
+					.fillMaxWidth()
+					.clip(MaterialTheme.shapes.medium)
+					.clickable { onClick(item.manga) }
+					.padding(AgehaSpacing.sm),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+			) {
+				Box(
+					if (blurAdult && item.manga.isAdult) {
+						Modifier.width(LIST_COVER_WIDTH).blur(NSFW_BLUR_RADIUS)
+					} else {
+						Modifier.width(LIST_COVER_WIDTH)
+					},
+				) {
+					MangaThumbnail(
+						manga = item.manga,
+						imageHeaders = item.imageHeaders,
+						progress = item.progress,
+					)
+				}
+				Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+					Text(
+						item.manga.title,
+						style = AgehaTextStyles.mangaTitle,
+						color = MaterialTheme.colorScheme.onSurface,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+					Text(
+						listOfNotNull(item.positionLabel, item.stateLabel, item.manga.sourceName)
+							.joinToString(" · "),
+						style = AgehaTextStyles.monoMeta,
+						color = AgehaTheme.skin.inkFaint,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+				if (item.badgeCount > 0) {
+					CoverBadge(
+						if (item.badgeCount == 1) "NEW" else "NEW ${item.badgeCount}",
+					)
+				}
+			}
+		}
+		if (footer != null) item { footer() }
+	}
+}
+
+/** A list row's cover. Wide enough to recognise the artwork, narrow enough to stay a row. */
+private val LIST_COVER_WIDTH = 44.dp
 
 /**
  * One cell's worth of state.
