@@ -60,6 +60,7 @@ import app.ageha.feature.explore.DetailsScreen
 import app.ageha.feature.explore.DetailsViewModel
 import app.ageha.feature.explore.ExploreViewModel
 import app.ageha.feature.downloads.DownloadQueue
+import app.ageha.feature.downloads.DownloadStatus
 import app.ageha.feature.downloads.DownloadsScreen
 import app.ageha.feature.explore.SourcePickerScreen
 import app.ageha.core.data.ResumePoint
@@ -331,6 +332,23 @@ fun AgehaShell(
 						onRetry = downloadQueue::retry,
 						onCancelAll = downloadQueue::cancelAll,
 						onClearFinished = downloadQueue::clearFinished,
+						onPause = downloadQueue::pause,
+						onResume = downloadQueue::resume,
+						onPauseAll = downloadQueue::pauseAll,
+						onResumeAll = downloadQueue::resumeAll,
+						// Derived from `queued` rather than read off the queue's own getter, so
+						// the label recomposes when the list does. The getter reads the same
+						// flow, but Compose has no way to know that.
+						hasRunningWork = queued.any {
+							it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING
+						},
+						// The thumbnail opens the reader. The inventory is keyed by a sanitised
+						// directory name rather than by a manga id, so the way back to the title
+						// is a search for that name -- which is also the only path that works
+						// when the download came from a source that is no longer enabled.
+						onOpenTitle = { title ->
+							navigator.searchAllSources(title.title, subject = title.title)
+						},
 						storage = storage,
 						onDeleteTitle = { title ->
 							scope.launch {

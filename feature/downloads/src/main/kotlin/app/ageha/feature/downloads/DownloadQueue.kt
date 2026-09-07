@@ -16,7 +16,28 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
 /** Where one queued chapter has got to. */
-enum class DownloadStatus { QUEUED, RUNNING, COMPLETE, PARTIAL, FAILED, CANCELLED }
+enum class DownloadStatus {
+	QUEUED,
+	RUNNING,
+
+	/**
+	 * Held by the user, and resumable.
+	 *
+	 * Distinct from [CANCELLED], which is a decision rather than a pause: a cancelled job is
+	 * finished with, a paused one is waiting. The handoff's Downloads screen carries a Pause chip
+	 * and a trash button on the same row, and collapsing the two states would make them mean the
+	 * same thing.
+	 */
+	PAUSED,
+	COMPLETE,
+	PARTIAL,
+	FAILED,
+	CANCELLED,
+	;
+
+	/** True while the queue still owes this job work. */
+	val isOutstanding: Boolean get() = this == QUEUED || this == RUNNING || this == PAUSED
+}
 
 /** One chapter in the queue. */
 data class DownloadJob(
@@ -99,15 +120,62 @@ class DownloadQueue(
 	}
 
 	fun cancelAll() {
-		_jobs.value.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING }
-			.forEach { cancel(it.key) }
+		_jobs.value.filter { it.status.isOutstanding }.forEach { cancel(it.key) }
 	}
+
+	/**
+	 * Hold one chapter without giving it up.
+	 *
+	 * ## What "resume" honestly means here
+	 *
+	 * The chapter restarts. [ChapterDownloader] writes into a single `ZipOutputStream` and deletes
+	 * its `.part` file on cancellation, so there is no half-written archive to append to -- and
+	 * that deletion is deliberate rather than an oversight: it is what guarantees a `.cbz` on disk
+	 * is never a partial download wearing a finished name.
+	 *
+	 * WIRING.md asks for resumption from the last finished page, and that is a real gap. Closing
+	 * it means staging pages as loose files and zipping at the end, which trades the guarantee
+	 * above for a directory of orphans after a crash. Said out loud here rather than papered over
+	 * with a resume that quietly re-downloads what it already had.
+	 */
+	fun pause(key: String) {
+		if (statusOf(key)?.isOutstanding != true) return
+		update(key) { it.copy(status = DownloadStatus.PAUSED, detail = "Paused") }
+		running.remove(key)?.cancel()
+	}
+
+	fun resume(key: String) {
+		val job = _jobs.value.firstOrNull { it.key == key } ?: return
+		if (job.status != DownloadStatus.PAUSED) return
+		update(key) { it.copy(status = DownloadStatus.QUEUED, detail = null, progress = DownloadProgress(0, 0)) }
+		start(job)
+	}
+
+	fun pauseAll() {
+		_jobs.value.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING }
+			.forEach { pause(it.key) }
+	}
+
+	fun resumeAll() {
+		_jobs.value.filter { it.status == DownloadStatus.PAUSED }.forEach { resume(it.key) }
+	}
+
+	/**
+	 * Whether the one button at the top of the screen should read "Pause all" or "Resume all".
+	 *
+	 * The handoff makes it one control whose label follows the queue, which is the right shape:
+	 * two buttons would leave one of them inert most of the time. Anything still moving means
+	 * pausing is the useful action, so this leans towards Pause and only flips when everything
+	 * outstanding is already held.
+	 */
+	val hasRunningWork: Boolean
+		get() = _jobs.value.any {
+			it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING
+		}
 
 	/** Drop finished rows. The queue is a work list, not a history. */
 	fun clearFinished() {
-		_jobs.update { jobs ->
-			jobs.filter { it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.RUNNING }
-		}
+		_jobs.update { jobs -> jobs.filter { it.status.isOutstanding } }
 	}
 
 	fun retry(key: String) {
