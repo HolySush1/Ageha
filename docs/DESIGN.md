@@ -173,6 +173,9 @@ sumi moves `surface` off the tone Material's own contrast curves assumed.
 
 ## 3. Type
 
+**Latin is bundled. CJK is not.** (Historical: the exception below was Linux, which Ageha no
+longer ships to. The font is still built and tested; nothing carries it. See CLAUDE.md 9.)
+
 **Latin is bundled. CJK is not, except on Linux.** Those are two different questions and they got
 two different answers.
 
@@ -409,6 +412,11 @@ Conflating them is how icon directories rot.
 **Crossover:** the simplified mark below 48px, the downscaled master at 48 and above. This is the
 one number in the pipeline set by looking rather than measuring, so the gallery renders both
 variants at every size and keeps the call reviewable.
+
+The macOS and Freedesktop outputs below are **still generated and no longer shipped** -- Ageha is
+Windows-only (CLAUDE.md 9). The `.ico` is the one that reaches a user; the PNG ladder is what
+Conveyor reads. The rest is kept because deleting a working generator to remove dead output is a
+bigger risk than the output being unused.
 
 **macOS** gets its own treatment: the seal is *placed on* a paper-coloured squircle rather than
 clipped into one, which would shave off the rough stamped edge that gives it its character — and

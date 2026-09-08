@@ -496,7 +496,7 @@ Restating the brief's milestones with the findings folded in. Gates unchanged โ€
 | 6 | Compose UI: explore + library | **done.** Desktop shell with a navigation rail, per-section back stacks and keyboard shortcuts; `isBroken` surfaced in the picker; the shell renders headlessly against the real graph |
 | 7 | Reader | **done.** Paged LTR/RTL, double-page with cover offset, webtoon, zoom/pan, full keyboard, exact position restore, CBZ. Webtoon uses a lazy list and the ยง1.4 risk is now **closed by measurement** -- 200 pages, every frame inside budget, heap bounded |
 | 8 | Downloads, continue reading, settings | **done.** Settings, downloads and the JavaScript engine landed; the engine is **Rhino, not QuickJS** (7b). External tracking was cut from scope and replaced by local **Continue Reading** over the history tables (7b) |
-| 9 | Layer 2 + 3 packaging and CI | **done, one caveat.** Conveyor config, four workflows, `UPDATING.md` and `RELEASING.md`, and Layer 2's automatic/notify/manual toggle -- which controls whether Ageha *looks and tells you*, since the installer owns installation on all three platforms and exposes no runtime switch. Conveyor itself is not installed on this machine, so the config is written and syntax-checked but has not built an installer |
+| 9 | Layer 2 + 3 packaging and CI | **done, one caveat.** Conveyor config, four workflows, `UPDATING.md` and `RELEASING.md`, and Layer 2's automatic/notify/manual toggle -- which controls whether Ageha *looks and tells you*, since the installer owns installation and exposes no runtime switch. Conveyor itself is not installed on this machine, so the config is written and syntax-checked but has not built an installer |
 
 ---
 

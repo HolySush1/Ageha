@@ -1,9 +1,9 @@
-# Builds and publishes installers, on a tag.
+# Builds and publishes the installer, on a tag.
 #
-# One runner, six targets. Conveyor cross-builds Windows, macOS and Linux packages from a single
-# machine, which is why the Compose Desktop Skia natives for every platform are declared in
-# app/desktop/build.gradle.kts rather than relying on whatever the runner happens to be. A
-# jpackage-based release would need three runners and could not produce a shared update feed.
+# One runner, one target: Windows on x64 (CLAUDE.md 9). Conveyor still earns its place with a
+# single platform -- it produces a signed, self-updating package and the update feed beside it,
+# which jpackage does not -- and it runs on Linux here because that is the only OS its own build
+# action supports, not because anything is built for Linux.
 name: release
 
 on:
@@ -20,19 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Zulu here, unlike every other workflow, and for one specific reason.
-      #
-      # The Conveyor Gradle plugin exports the JDK that Gradle's toolchain resolved -- and since
-      # `jvmToolchain(21)` names no vendor, that is whatever this step installed. The Microsoft
-      # build of OpenJDK publishes no Windows/ARM64 21, so Conveyor built five of the six targets
-      # and then failed the entire release on the last one: "JAR files were imported but no JVM
-      # inputs were supplied for 'windows.aarch64'". Zulu ships all six.
-      #
-      # Only this workflow needs it. Nothing else packages anything, and leaving the others on the
-      # ordinary JDK keeps them representative of what a contributor actually builds with.
       - uses: actions/setup-java@v4
         with:
-          distribution: zulu
+          distribution: microsoft
           java-version: "21"
 
       - uses: gradle/actions/setup-gradle@v4

@@ -37,16 +37,15 @@ dependencies {
 	// does not drag JUnit 4 into a JUnit 5 project.
 	testImplementation(compose.desktop.uiTestJUnit4)
 
-	// Skia is native, so Compose Desktop ships a different artifact per platform. `currentOS`
-	// above is right for running and testing here; these are what Conveyor needs to build an
-	// installer for a machine that is not this one. Without them, a Linux build made on Windows
-	// would carry Windows Skia and fail at first paint.
-	"linuxAmd64"(compose.desktop.linux_x64)
-	"linuxAarch64"(compose.desktop.linux_arm64)
-	"macAmd64"(compose.desktop.macos_x64)
-	"macAarch64"(compose.desktop.macos_arm64)
+	// Skia is native, so Compose Desktop ships a different artifact per platform, and Conveyor
+	// needs the one for the machine it is packaging rather than the one this build happens to run
+	// on. Ageha ships Windows on x64 and nothing else (CLAUDE.md 9), so that is the only extra
+	// native declared.
+	//
+	// This used to list all six. Each entry is around 40MB that every packaging build downloads,
+	// and five of them were for platforms nobody has run the app on -- including a windows.aarch64
+	// that could never be packaged at all, because no JDK vendor publishes a Windows/ARM64 21.
 	"windowsAmd64"(compose.desktop.windows_x64)
-	"windowsAarch64"(compose.desktop.windows_arm64)
 }
 
 compose.desktop {
@@ -141,16 +140,6 @@ compose.desktop {
 				iconFile.set(rootProject.layout.projectDirectory.file("brand/generated/ageha.ico"))
 			}
 
-			macOS {
-				bundleID = "app.ageha"
-				iconFile.set(rootProject.layout.projectDirectory.file("brand/generated/ageha.icns"))
-			}
-
-			linux {
-				iconFile.set(
-					rootProject.layout.projectDirectory.file("brand/generated/linux/ageha-256.png"),
-				)
-			}
 		}
 	}
 }
@@ -289,7 +278,7 @@ val e2e by tasks.registering(Test::class) {
 }
 
 /*
- * The bundled CJK font, for Linux packages only.
+ * The bundled CJK font. Built and tested, no longer shipped -- see the dependency block below.
  *
  * Windows and macOS both ship CJK coverage, so Skia's per-glyph fallback already has somewhere to
  * go and bundling buys them nothing. A Linux machine with no CJK font package installed has
@@ -368,13 +357,13 @@ val cjkFontJar by tasks.registering(Jar::class) {
 }
 
 dependencies {
-	// Linux only. The other four machines resolve CJK from the system and are not asked to carry
-	// this. `AgehaFonts` treats the resource as optional and is what decides whether to use it.
-	"linuxAmd64"(files(cjkFontJar))
-	"linuxAarch64"(files(cjkFontJar))
-
-	// On the test classpath too, so `CjkFontTest` checks the same artifact that ships rather than
-	// a copy of it. This is the only way the claim "one file covers four scripts" gets verified
-	// on a machine that is not Linux -- which is every machine this is developed on.
+	// Not shipped, and deliberately still built and tested.
+	//
+	// This font existed so Linux packages had CJK coverage; Windows has it from the system, so
+	// with Linux out of scope (CLAUDE.md 9) nothing ships it any more. It stays on the *test*
+	// classpath rather than being deleted because `AgehaFonts` still has a bundled-resource path,
+	// `CjkFontTest` is what proves one file covers four scripts, and a fallback chain that is
+	// never exercised is one that quietly rots. Removing the path as well as the platform would be
+	// a larger change than this rule asks for.
 	testRuntimeOnly(files(cjkFontJar))
 }

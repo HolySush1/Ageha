@@ -1,6 +1,6 @@
 # Ageha (アゲハ)
 
-A desktop manga reader for Windows, Linux and macOS. Kotlin, Compose Multiplatform, JDK 21.
+A desktop manga reader for **Windows**. Kotlin, Compose Multiplatform, JDK 21.
 
 Ageha is a desktop port of [Kotatsu-Redo](https://github.com/Kotatsu-Redo/Kotatsu-Redo), an Android
 manga reader. It reads from the same 1360 manga sources by consuming the same parser library, so
@@ -146,24 +146,26 @@ Brand assets and colour tokens are generated, not hand-edited:
 
 ## Packaging
 
-Ageha's installers are built with **[Hydraulic Conveyor](https://www.hydraulic.dev/)**, which
-produces signed, self-updating packages for Windows, macOS and Linux from a single machine.
-Conveyor is free for projects under an OSI-approved licence; Ageha is GPL-3.0, so it qualifies.
+Ageha's installer is built with **[Hydraulic Conveyor](https://www.hydraulic.dev/)**, which
+produces a signed, self-updating package and the update feed beside it. Conveyor is free for
+projects under an OSI-approved licence; Ageha is GPL-3.0, so it qualifies.
+
+Ageha targets **Windows on x64 and nothing else**. Conveyor can package for macOS and Linux, and
+was configured to; that was a mistake this project paid for, and the reasoning is in `CLAUDE.md`.
 
 ```
-conveyor make site                                  # every platform
-conveyor -Kapp.machines=windows.amd64 make windows-installer
+conveyor make site
 ```
 
 The configuration is [conveyor.conf](conveyor.conf); the release process, including the current
 lack of code signing and the routes to fixing that, is in [docs/RELEASING.md](docs/RELEASING.md).
 
-**Releases are currently unsigned.** Windows SmartScreen and macOS Gatekeeper will warn on first
-run. [docs/RUNNING.md](docs/RUNNING.md) has the click-through for a user;
+**Releases are not code-signed.** Windows SmartScreen will warn on first run.
+[docs/RUNNING.md](docs/RUNNING.md) has the click-through for a user;
 [docs/RELEASING.md](docs/RELEASING.md) covers what signing would take.
 
-Only the Windows installer has been built and tested so far -- installed, launched and uninstalled
-on a real machine. The macOS and Linux configuration resolves but has produced no artifact yet.
+Windows on ARM runs the x64 build under emulation. There is no arm64 package and there cannot be
+one: no JDK vendor publishes a Windows/AArch64 21 for Conveyor to bundle.
 
 ## Keeping up with the web
 

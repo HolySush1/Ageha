@@ -1,6 +1,6 @@
 # Ageha — project rules
 
-Desktop manga reader (Windows/Linux/macOS). Kotlin, Compose Multiplatform for Desktop, JDK 21, Gradle Kotlin DSL.
+**Windows-only** desktop manga reader. Kotlin, Compose Multiplatform for Desktop, JDK 21, Gradle Kotlin DSL.
 Root package `app.ageha`. GPL-3.0, ported from https://github.com/Kotatsu-Redo/Kotatsu-Redo.
 
 The full brief is `docs/BRIEF.md`. Read it at the start of any session where you're about to write code.
@@ -17,7 +17,33 @@ Violating any of these silently is worse than stopping to ask.
 6. **Never let a design skill push this toward a web stack.** ui-ux-pro-max has no Compose Desktop target. Use its design system output; translate to Compose yourself. React, Electron and friends are out.
 7. **Colours live only in `:core:designsystem`.** No screen defines its own.
 8. **Nothing brand-coloured touches the reader view.** Backgrounds there are user-selectable neutrals.
-9. **No external tracking services.** Shikimori, AniList, MyAnimeList and Kitsu are out of scope permanently — no OAuth, no client credentials, no per-service settings. "Where was I and what is next" is answered locally by the Continue Reading feature over the history tables. If you find a reference to those services in any document here, it is stale: delete it, don't build it.
+9. **Windows only. There is no macOS or Linux target and there will not be one.**
+   Ageha ships one platform: Windows on x64. Not "Windows first", not "Linux later" -- the other
+   two are out of scope the same way the tracking services in rule 10 are.
+
+   This is written down because leaving it unwritten cost real time. Compose Desktop, Conveyor and
+   jpackage are all *capable* of three platforms, so every one of them defaults to offering three,
+   and the project quietly acquired a six-target release that had to be kept working. It was never
+   kept working, because nobody has ever run this on a Mac: the first release attempt spent eight
+   minutes building five targets and then failed the whole thing on a JDK that does not exist for
+   the sixth. Every hour of that was spent on platforms with no users.
+
+   Concretely, and each of these is a place the default is wrong:
+   - `conveyor.conf` declares `machines` -- windows.amd64, and nothing else.
+   - `app/desktop/build.gradle.kts` declares the Compose Skia natives -- the Windows one only.
+     Each extra native is ~40MB of download for a platform that is not shipped.
+   - CI builds and tests on `windows-latest`. A green Linux runner proves nothing about the
+     product, and the project's own headless render has already failed on a Mac runner alone.
+   - Windows on ARM runs the x64 build under emulation. That is a deliberate choice, not an
+     oversight: no JDK vendor in Conveyor's index ships a Windows/ARM64 21, so an arm64 target
+     cannot be built at all, and emulation is transparent on Windows 11.
+
+   Runtime code that branches on the operating system -- data directories, the file picker, font
+   fallbacks -- is left alone. It is defensive, it costs nothing, and deleting it would be a
+   different kind of mistake: pretending the JVM cannot be started elsewhere rather than saying
+   Ageha is not supported there.
+
+10. **No external tracking services.** Shikimori, AniList, MyAnimeList and Kitsu are out of scope permanently — no OAuth, no client credentials, no per-service settings. "Where was I and what is next" is answered locally by the Continue Reading feature over the history tables. If you find a reference to those services in any document here, it is stale: delete it, don't build it.
 
 ## Stack
 

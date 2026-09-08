@@ -49,17 +49,20 @@ about the other one.
 
 | Platform | Package | Architectures |
 |---|---|---|
-| Windows | `.msi` and an online installer `.exe` | x64, arm64 |
-| macOS | `.dmg`, notarizable | x64, Apple Silicon |
-| Linux | `.deb`, `.rpm`, tarball, and an APT/YUM repository | x64, arm64 |
+| Windows | `.msi` and an online installer `.exe` | x64 |
 
-Every one bundles a jlink-trimmed JDK 21, so users install nothing else.
+That is the whole table, and it is the whole product. Ageha is Windows-only; see CLAUDE.md 9. The
+package bundles a jlink-trimmed JDK 21, so users install nothing else.
 
-**arm64 is not optional.** Apple Silicon is the majority of Macs sold, and Windows on ARM is no
-longer a rounding error. Compose Desktop ships a different Skia native per platform *and*
-architecture, which is why `app/desktop/build.gradle.kts` declares all six rather than relying on
-whatever the CI runner happens to be — a Linux build made on Windows would otherwise carry Windows
-Skia and fail at first paint.
+**There is no arm64 package, and Windows on ARM runs the x64 build under emulation.** Not a
+preference — no JDK vendor in Conveyor's index publishes a Windows/AArch64 21, so the target cannot
+be built at all. Conveyor fails the *entire* release when it is declared: "JAR files were imported
+but no JVM inputs were supplied for `windows.aarch64`". Windows 11 emulates x64 transparently, so
+the emulated build is not a degraded option, it is the only one.
+
+This used to declare six machines across three platforms. None of the other five had ever been run
+by anyone, and the first real release attempt spent eight minutes building them before dying on the
+sixth.
 
 ## Building and installing locally on Windows
 
@@ -116,10 +119,7 @@ certificates are a separate paid expense that Conveyor's free open-source licenc
 
 - **Windows** — SmartScreen shows "Windows protected your PC". The workaround is More info → Run
   anyway. This must be in the release notes, or the download simply looks broken.
-- **macOS** — Gatekeeper refuses to open it. The workaround is right-click → Open, or
-  `xattr -d com.apple.quarantine /Applications/Ageha.app`. On Apple Silicon an unsigned app also
-  needs an ad-hoc signature, which Conveyor applies automatically.
-- **Linux** — nothing. Linux does not have this problem.
+macOS and Linux do not appear here because Ageha does not ship to them.
 
 ### Getting a certificate
 
@@ -134,9 +134,6 @@ Three routes, cheapest effort first:
    token. It is a real EV-adjacent certificate on a physical token, which means CI cannot use it
    without a cloud HSM or a self-hosted runner with the token attached.
 3. **A commercial certificate** — a few hundred per year. Only worth it if the project takes money.
-
-macOS is separate from all three: notarization requires an **Apple Developer Program** membership
-(US$99/year) whatever else is done. There is no free route.
 
 ### Once a certificate exists
 
@@ -156,7 +153,7 @@ does; they simply have nothing to verify against yet.
 
 ## Before tagging
 
-- [ ] `./gradlew build` green on all three platforms (CI does this on every push)
+- [ ] `./gradlew build` green on Windows (CI does this on every push)
 - [ ] `./gradlew :app:desktop:renderShell` green — the app composes against the real graph
 - [ ] `cli smoke --sample 25` looks ordinary — some sources dead, in assorted ways
 - [ ] `CHANGELOG.md` updated

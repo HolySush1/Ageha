@@ -72,7 +72,7 @@ cli parsers rollback   # go back to the last known good build
 ## Layer 2 — the application
 
 Ageha's own updates go through **Hydraulic Conveyor**, which builds signed, self-updating packages
-for all three platforms from one machine and hosts the update feed alongside the release.
+the Windows package and hosts the update feed alongside the release.
 
 Cutting a release is a tag:
 
@@ -164,7 +164,8 @@ Covered under Layer 2.
 
 ### `ci.yml` — every push
 
-The ordinary build, on Linux, Windows **and** macOS. All three, because the parts this project
+The ordinary build, on Windows. Only Windows, because that is the only platform Ageha ships to
+(CLAUDE.md 9). It used to run all three, on the reasoning that the parts this project
 leans on are exactly the parts that differ: file locking and renaming on Windows, path handling
 everywhere, and the bundled SQLite and Skia natives. A Linux-only CI would have missed every
 Windows bug found so far — and there have been several, all of them about open file handles.

@@ -13,15 +13,16 @@ permissions:
   contents: read
 
 jobs:
+  # Windows, and only Windows.
+  #
+  # This was a three-runner matrix, on the reasoning that file locking, path handling and the
+  # native SQLite and Skia bits differ per platform. That reasoning is sound for software that
+  # ships to three platforms. Ageha ships to one (CLAUDE.md 9), so two thirds of every CI run was
+  # spent proving things about platforms with no users -- and worse than merely wasted: a red
+  # macOS runner blocks a Windows-only release, which is precisely what happened the first time
+  # this workflow ran against a real push.
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        # All three, because the parts most likely to differ are the ones this project leans on:
-        # file locking and renaming on Windows, path handling everywhere, and the bundled SQLite
-        # and Skia natives. A Linux-only CI would have missed every Windows bug found so far.
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -44,5 +45,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: shell-${{ matrix.os }}
+          name: shell-windows
           path: app/desktop/build/shell/

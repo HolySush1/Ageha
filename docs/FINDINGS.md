@@ -365,6 +365,8 @@ Concretely, for Milestone 8/9:
 `io.webfolder:quickjs` is a JNI binding, so the artifact carries **per-platform native libraries**
 and is not the pure-JVM dependency the rest of the stack is:
 
+- **Superseded: Ageha ships Windows x64 only (CLAUDE.md 9), so only that row still applies.** The
+  original analysis is kept because it is why the JS runtime was chosen at all.
 - Every release platform needs its native present and loadable: Windows x64, macOS x64, macOS
   **aarch64** (Apple Silicon), Linux x64. macOS aarch64 is the one most likely to be missing --
   version 1.1.0 predates Apple Silicon being universal, and the brief's own advice applies: verify

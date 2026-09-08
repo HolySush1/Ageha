@@ -137,6 +137,20 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Changed
 
+- **Ageha is Windows-only, and now says so everywhere.** There is no macOS or Linux build and there
+  will not be one. This was always true in practice — nobody has ever run this on a Mac — but the
+  project was configured for three platforms and six machines, because Compose Desktop, Conveyor
+  and jpackage all default to offering them. The cost was not theoretical: the first real release
+  spent eight minutes building five unverified targets and then failed outright on a sixth that
+  cannot be built at all, and a red macOS CI runner blocked a Windows-only release. `machines` is
+  now `windows.amd64`, CI runs on Windows alone, and only the Windows Skia native is declared
+  (each of the other five was ~40MB per packaging build).
+  - **Windows on ARM runs the x64 build under emulation**, which Windows 11 does transparently.
+    Not a preference: no JDK vendor in Conveyor's index publishes a Windows/AArch64 21, so an
+    arm64 package cannot be produced at all.
+  - Runtime code that branches on the operating system — data directories, the file picker, font
+    fallbacks — is deliberately untouched. It is defensive and costs nothing, and removing it would
+    claim the JVM cannot start elsewhere rather than that Ageha is unsupported there.
 - **Preloading now counts from the bottom edge of the window rather than from the page the reading
   position is recorded against.** In webtoon mode those are different pages — often several apart
   on a tall window or a zoomed-out strip — so "preload 6" was spending part of its budget on

@@ -25,9 +25,8 @@ When it finishes you'll have:
 
 ### macOS and Linux
 
-Not built yet. The configuration for them exists and is validated, but no installer has been
-produced or tested, so nothing here would be honest to write down. See
-[§7](#7-what-isnt-done-yet).
+**There are none, and there will be none.** Ageha is a Windows application. This is a deliberate
+scope decision rather than a gap waiting to be filled — see `CLAUDE.md`.
 
 ---
 
@@ -54,12 +53,6 @@ app afterwards.
 
 If instead you get a browser warning while downloading ("this file isn't commonly downloaded"),
 that's the same situation wearing a different hat — choose Keep.
-
-### macOS — Gatekeeper
-
-For when there is a macOS build: right-click the app, choose **Open**, then **Open** again in the
-dialog. Double-clicking will only offer to move it to the Bin. Once you've done it once, it stops
-asking.
 
 ### When you should actually worry
 
@@ -189,8 +182,8 @@ to start, so you lose a window size and nothing else.)
 
 Being straight about the edges, so you don't go looking for things that aren't there:
 
-- **Only the Windows installer exists.** macOS and Linux packaging is configured and the
-  configuration is validated, but no installer for either has been built or tested.
+- **Windows only, by design.** There is no macOS or Linux build and none is planned. Windows on
+  ARM runs the x64 installer under emulation.
 - **Nothing is signed**, hence [§2](#2-the-scary-warning).
 - **The updater doesn't self-update yet.** Ageha will tell you a new version exists; installing it
   means downloading the new `.msi` and running it.
