@@ -22,13 +22,41 @@ enum class Section(val label: String, val shortcutHint: String) {
 /** A screen within a section. */
 @Immutable
 sealed interface Destination {
-	data object Library : Destination
-	data object Continue : Destination
-	data object Sources : Destination
-	data object Downloads : Destination
-	data object Settings : Destination
-	data class Browse(val sourceName: String) : Destination
-	data class Details(val manga: AgehaManga) : Destination
+
+	/**
+	 * A cheap identity for this destination, for the shell's screen transition.
+	 *
+	 * `AnimatedContent` compares its target state on every recomposition, and two of these carry
+	 * an [AgehaManga] -- a data class whose `equals` walks its whole chapter list. On a nine
+	 * hundred chapter series that is nine hundred comparisons per frame, to answer a question
+	 * ("is this still the same screen?") that a source name and an id answer exactly as well.
+	 *
+	 * Deliberately coarse. Two `Details` for the same manga are the same screen even if one of
+	 * them has since had its chapters filled in, because filling in chapters is not navigation.
+	 */
+	val transitionId: String
+
+	data object Library : Destination {
+		override val transitionId get() = "library"
+	}
+	data object Continue : Destination {
+		override val transitionId get() = "continue"
+	}
+	data object Sources : Destination {
+		override val transitionId get() = "sources"
+	}
+	data object Downloads : Destination {
+		override val transitionId get() = "downloads"
+	}
+	data object Settings : Destination {
+		override val transitionId get() = "settings"
+	}
+	data class Browse(val sourceName: String) : Destination {
+		override val transitionId get() = "browse:$sourceName"
+	}
+	data class Details(val manga: AgehaManga) : Destination {
+		override val transitionId get() = "details:${manga.sourceName}:${manga.id}"
+	}
 
 	/**
 	 * One query against every enabled source.
@@ -36,7 +64,11 @@ sealed interface Destination {
 	 * Carries [subject] as well as the query so the results can say which Continue Reading entry
 	 * sent the user here -- by the time the results arrive, the list they clicked in is gone.
 	 */
-	data class SearchAll(val query: String, val subject: String? = null) : Destination
+	data class SearchAll(val query: String, val subject: String? = null) : Destination {
+		// Not keyed on the query. Typing into the results page is not navigating away from it,
+		// and a screen transition on every keystroke would be unusable.
+		override val transitionId get() = "search"
+	}
 
 	/**
 	 * The reader.
@@ -58,7 +90,9 @@ sealed interface Destination {
 		 * disagreeing.
 		 */
 		val startPage: Int = -1,
-	) : Destination
+	) : Destination {
+		override val transitionId get() = "read:${manga.id}:${chapter.id}"
+	}
 }
 
 /**
@@ -95,6 +129,16 @@ class Navigator {
 	val current: Destination get() = stack.last()
 
 	val canGoBack: Boolean get() = stack.size > 1
+
+	/**
+	 * How deep into the current section's stack we are. One at the root.
+	 *
+	 * Exposed for the shell's screen transition, which is entirely about depth: a screen that
+	 * arrives at a greater depth was pushed and slides in from the right, one that arrives at a
+	 * lesser depth was popped and comes from the left, and one that arrives at the same depth is a
+	 * section switch, which has no direction. Nothing else in Ageha needs the number.
+	 */
+	val depth: Int get() = stack.size
 
 	fun switchTo(target: Section) {
 		section = target

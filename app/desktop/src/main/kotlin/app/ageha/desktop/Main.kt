@@ -248,6 +248,11 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 		AgehaTheme(
 			mode = preferences.theme,
 			systemInDarkTheme = androidx.compose.foundation.isSystemInDarkTheme(),
+			// Resolved here rather than inside the theme for the same reason the dark-mode flag
+			// is: this is the one place that has both halves of the answer -- the user's setting
+			// and the machine's -- and a theme that went looking for either itself would be a
+			// theme no test could pin to a known state.
+			reduceMotion = !preferences.motion.isEnabled(SystemMotion.allowsMotion()),
 		) {
 			Box(Modifier.fillMaxSize()) {
 				Column(Modifier.fillMaxSize()) {

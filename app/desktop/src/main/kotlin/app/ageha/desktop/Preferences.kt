@@ -1,6 +1,7 @@
 package app.ageha.desktop
 
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.core.designsystem.MotionPreference
 import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.ReaderBackground
 import app.ageha.core.model.PageScale
@@ -23,6 +24,15 @@ import java.io.File
 @Serializable
 data class Preferences(
 	val theme: AgehaThemeMode = AgehaThemeMode.SYSTEM,
+	/**
+	 * Whether Ageha animates.
+	 *
+	 * Defaults to following Windows rather than to on, because Windows has already asked -- see
+	 * `SystemMotion`. A user who turned animation off system-wide should not have to find this
+	 * row at all; the row exists for the two cases where they disagree with their own OS about
+	 * this one application.
+	 */
+	val motion: MotionPreference = MotionPreference.SYSTEM,
 	val readerBackground: ReaderBackground = ReaderBackground.BLACK,
 	/**
 	 * Two pages side by side in paged mode.
@@ -71,7 +81,8 @@ data class Preferences(
 	 * Whether Ageha looks for a newer Ageha, and whether it says so.
 	 *
 	 * Defaults to checking quietly. It does *not* control installation -- the installer owns that
-	 * on all three platforms and exposes no runtime switch. See [AppUpdatePolicy].
+	 * and exposes no runtime switch. See [AppUpdatePolicy]. (This used to say "on all three
+	 * platforms". There is one; see CLAUDE.md 9.)
 	 */
 	val appUpdatePolicy: AppUpdatePolicy = AppUpdatePolicy.AUTOMATIC,
 	/**

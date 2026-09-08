@@ -280,8 +280,84 @@ rounding it crops the artwork.
 **Motion** is quiet and quick. 90ms hover and press · 140ms default · **190ms** screen transitions
 (the brief's ceiling, and a ceiling rather than a target) · 260ms reader-chrome fade, deliberately
 slower because that one is a withdrawal the reader should barely notice. Standard easing in,
-accelerating easing out. Nothing bounces, staggers or overshoots: Ageha is opened many times a day
-by someone who wants to resume a chapter, and every animation is a tax paid repeatedly.
+accelerating easing out. The ceiling has never moved: Ageha is opened many times a day by someone
+who wants to resume a chapter, and every animation is a tax paid repeatedly.
+
+### 4.1 Springs and stagger — and what this paragraph used to say
+
+This section used to end **"nothing bounces, staggers or overshoots"**. That was a defensible
+position, it was held for the whole first year, and it produced an application with **nineteen
+animated call sites in a source tree of two and a half thousand files** — fifteen of them inside
+two settings controls.
+
+The result was not restraint. It was an interface where hovering a cover did nothing at all, where
+opening a manga and pressing Escape back out of it were visually identical events, and where a
+shelf that re-sorted itself was indistinguishable from a shelf that had been replaced. Four screens
+answered "loading" with a spinner on a blank window. Hover feedback existed in exactly four places
+in the entire product.
+
+So the vocabulary is wider now, and it is two springs:
+
+| | Damping | Stiffness | For |
+|---|---|---|---|
+| **Snappy** | 0.68 | Medium | Hover, press, the navigation pill's selection indicator |
+| **Settle** | 1.0 (none) | MediumLow | A cover taking its new place, a progress bar growing |
+
+Plus an **18ms stagger** as a list first paints, capped at 16 items.
+
+**Durations or springs** is not a matter of taste. A duration is right for a cross-fade, an
+appearance or a disappearance — those have no physical analogue, and a spring on an alpha reads as
+an unsteady hand. A spring is right when something *moves*, and specifically because these are
+pointer-driven: sweeping across a shelf interrupts a hover animation on every card it crosses, and
+a spring carries velocity across that interruption where a tween restarts from wherever it happened
+to be. That discontinuity is most of what people mean by "janky".
+
+**Snappy is the only thing here that overshoots**, by a couple of percent, on the second approach.
+Settle is critically damped on purpose: a cover that overshot its slot in a grid would briefly
+overlap its neighbour, and a progress bar that overshot would report a percentage that is not true.
+
+**The stagger is timed, not indexed**, and that is a correctness requirement rather than a
+refinement. A lazy grid composes an item when it is *scrolled into view*, so `index * 18ms` would
+hand item four hundred a seven-second delay and the user would meet it as a blank cell filling in
+long after they stopped scrolling. Capping the delay does not fix it either — it just makes every
+item arriving from a scroll wait the same fixed 288ms. What actually distinguishes an entrance from
+a scroll is *when* the item composed, so the gate closes on a clock.
+
+**Where motion is still refused.** The reader gets nothing new — no page fade, no status-bar
+animation, no page-turn crossfade; only its existing 260ms chrome fade, which now honours §4.2. A
+screen transition into or out of the reader is a plain fade with no slide, because sliding a page of
+somebody's artwork in from the window edge is the motion-over-the-reader that §6 exists to prevent,
+one layer further out. The backdrop never animates. Ember and Glass do not cross-fade into each
+other — `AgehaSkin.isFlat` is a Boolean and there is no halfway between opaque and frosted, so the
+content fades up from dim over the new skin instead. And nothing anywhere animates more than two
+properties at once.
+
+### 4.2 Reduced motion
+
+Animation is the one part of an interface that is actively harmful to some of the people using it.
+Every platform with an accessibility story exposes a preference for it; **Compose Desktop exposes
+none**, and neither does the JDK — `Toolkit.getDesktopProperty` carries font smoothing and
+drag-full-windows but not this.
+
+So Ageha carries its own, at **Settings → Appearance → Motion**, defaulting to *Follow Windows*.
+Windows has already asked this question in Settings → Accessibility → Visual effects → Animation
+effects, and an application that ignores the answer makes its user give it twice. It is read once
+per launch through `reg.exe`, from `MinAnimate` under `HKCU\Control Panel\Desktop\WindowMetrics`
+— a proxy, and an honest one, because there is no supported Win32 call reachable from a plain JVM
+without a native binding. **Every failure path returns "keep animating"**: this is a preference
+rather than a permission, and guessing it wrong in that direction leaves a setting one click from
+being fixed instead of taking the interface away from somebody who never asked.
+
+Mechanically it is one composition local. `motionTween`, `snappySpring` and `settleSpring` return a
+zero-length spec when it is off, so **no call site needs a branch** — the state still changes and
+the recomposition still happens, only the interpolation is removed.
+
+The obvious hole is a call site written as `tween(140)`, which keeps animating while the setting
+claims otherwise. That is *worse* than having no setting at all: the one thing an accessibility
+control must never be is partly true, and the difference is six characters that look correct in a
+diff. So `MotionThroughTokensTest` fails the build on a bare `tween`, `spring` or `snap` anywhere
+outside `:core:designsystem` — the same shape of rule, and the same shape of test, as the one that
+keeps colours out of screens. It caught its first offender the day it was written.
 
 ---
 

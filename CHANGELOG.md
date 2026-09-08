@@ -4,6 +4,83 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.0] - 2026-09-09
+
+### Added
+
+- **Ageha moves now.** Motion was a documented vocabulary and almost nothing else: nineteen
+  animated call sites in a source tree of two and a half thousand files, fifteen of them inside two
+  settings controls. The result was an app that was *fast* and read as *inert* -- state changes
+  teleported, so nothing told you whether you had gone deeper or come back, whether a shelf had
+  re-sorted or been replaced, or whether the thing under the pointer was clickable at all.
+  - **Screens arrive from the direction they came from.** Pushing into a manga slides in from the
+    right, pressing Escape brings the previous screen back from the left, and switching section
+    cross-fades with no direction, because sideways is not deeper. This is the change that carries
+    the most information: before it, opening something and backing out of it were the same event.
+  - **Hover and press feedback on roughly forty surfaces that had none.** Chapter rows, source
+    rows, the words in the navigation pill, chips, ghost buttons and library cards all respond to
+    the pointer now. One shared modifier, so they respond identically -- forty separate hover
+    treatments is the same failure as two cover cards with different corner radii.
+  - **The navigation pill's selection slides between words** instead of one highlight going out and
+    another coming on two hundred pixels away. The eye follows movement, and the movement is the
+    message: it says the selection *went* from Library to Explore.
+  - **Covers lift under the pointer** -- four percent, with a shadow that turns a zoom into the
+    card coming forward out of the shelf -- and **move to their new slots when a shelf re-sorts**
+    instead of teleporting. Watching them travel is what says "the same shelf, reordered" rather
+    than "a different shelf". Lists stagger in at 18ms per item as they first appear.
+  - **Loading looks like the thing that is coming.** The four screens that answered "still loading"
+    with a spinner on a blank window now draw a shimmering skeleton at the real content's
+    proportions, so nothing moves when the content lands, and the shape itself previews what is
+    arriving. Held back 120ms, so a cached chapter list does not flash a skeleton on its way to
+    being instant.
+  - **The chapter list scrolls to where you stopped** rather than teleporting there. On a
+    900-chapter series the jump is most of the list, and being moved is the answer to "where in
+    this am I?" that simply *being* somewhere else does not give.
+  - Smaller, and all for the same reason -- a state change nobody sees is a state change nobody
+    trusts: reading progress bars grow rather than jump, adult covers reveal rather than flick,
+    marking forty chapters read dims them together instead of replacing the list, notices slide in
+    from the edge they are anchored to and the stack closes up when one is dismissed, and switching
+    Ember to Glass fades up from dim rather than flashing.
+- **Settings > Appearance > Motion**, with three states, defaulting to **Follow Windows**.
+  - Windows already asks this in Settings > Accessibility > Visual effects > Animation effects, and
+    an application that ignores the answer makes its user give it twice. Ageha reads it once per
+    launch. Compose Desktop exposes no reduced-motion flag and neither does the JDK, so this goes
+    through `reg.exe` to `MinAnimate` -- a proxy, and an honest one, since the supported Win32 call
+    needs a native binding this project is not adding for one boolean.
+  - **Every failure path keeps animating** -- missing key, unexpected value, a JVM started off
+    Windows, the probe hanging. This is a preference rather than a permission: guessing it wrong in
+    that direction leaves a setting one click from being fixed, where guessing it wrong the other
+    way takes the interface away from somebody who never asked.
+  - Reduced turns every animation into an instant state change. The state still changes and the
+    screen still redraws; only the interpolation goes. A bare `tween` anywhere in a screen would be
+    a hole in that, so `MotionThroughTokensTest` fails the build on one -- the same shape of guard
+    as the test that keeps colours out of screens.
+
+### Changed
+
+- **The reader was deliberately left alone.** No page fade, no status-bar animation, no page-turn
+  crossfade. Its chrome fade is unchanged at 260ms -- though it now honours the Motion setting like
+  everything else. A screen transition into or out of the reader is a plain fade with no slide,
+  because sliding a page of somebody's artwork in from the window edge is the
+  motion-over-the-reader that CLAUDE.md 8 exists to prevent, one layer further out.
+- **`docs/DESIGN.md` section 4 said "nothing bounces, staggers or overshoots", and that is now
+  false.** Rewritten rather than quietly violated, with the two springs, the stagger, and the
+  reasoning for the change written down -- plus a new 4.2 on reduced motion. The 190ms ceiling on a
+  screen transition did not move.
+- The headless render now advances a frame clock after the data lands, instead of drawing two
+  frames 2.5 seconds apart. Compose animations move by the frame time they are *handed*, not by
+  wall clock, so two distant renders look like two frames -- which captured the navigation
+  indicator missing entirely and a staggered grid still at zero alpha, on a build where both
+  worked. The reader and Continue-hero captures already stepped their clock for the same reason.
+- A stale "on all three platforms" in `Preferences.kt` is gone. There is one; see CLAUDE.md 9.
+
+### Fixed
+
+- **The Continue Reading row's hover fill no longer flickers.** It was the one row in the app with
+  a hover state and it switched on the frame the pointer crossed the boundary, which strobes when
+  someone runs down the list. It crosses now, and uses the same tint every other row uses rather
+  than a surface colour of its own.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added
@@ -881,7 +958,9 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - The nightly smoke test fails only when failures are numerous **and alike**. A rate-only gate was
   tried first and tripped on an ordinary night: 9 of 12 sources failed, across three unrelated
   causes, which is simply the state of the scanlation web.
-- CI runs on Linux, Windows **and** macOS. Every platform-specific bug found in this project so far
-  has been a Windows file-handle problem, which a Linux-only CI would have missed.
+- CI runs on **Windows only**, which is the platform Ageha ships to (CLAUDE.md 9). It used to run
+  three, on the reasoning that every platform-specific bug found here had been a Windows
+  file-handle problem — but a green Linux runner proves nothing about the product, and a red macOS
+  one had already blocked a Windows-only release.
 - Releases are **unsigned**. Certificates are a separate paid cost; `docs/RELEASING.md` lists the
   routes and the workarounds users need meanwhile.

@@ -1,5 +1,6 @@
 package app.ageha.feature.reader
 
+import app.ageha.core.designsystem.motionTween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -242,8 +243,8 @@ fun ReaderScreen(
 		// movement; a fade at 260ms is noticed only if you look for it, which is the point.
 		AnimatedVisibility(
 			visible = state.isChromeVisible,
-			enter = fadeIn(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
-			exit = fadeOut(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
+			enter = fadeIn(motionTween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
+			exit = fadeOut(motionTween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			modifier = Modifier.align(Alignment.TopCenter),
 		) {
 			ReaderTopBar(state, chrome, background, doublePage, coverOffset, webtoonZoom, onSetMode,
@@ -263,8 +264,8 @@ fun ReaderScreen(
 		// So the bar stays and [ReaderStatusBar] withholds the parts that would be lying.
 		AnimatedVisibility(
 			visible = state.isChromeVisible,
-			enter = fadeIn(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
-			exit = fadeOut(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
+			enter = fadeIn(motionTween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
+			exit = fadeOut(motionTween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			modifier = Modifier.align(Alignment.BottomCenter),
 		) {
 			ReaderStatusBar(

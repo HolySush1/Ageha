@@ -1,16 +1,17 @@
 package app.ageha.core.designsystem
 
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -30,7 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,6 +48,8 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -147,15 +151,32 @@ fun MangaCard(
 	 */
 	actions: List<MangaCardAction> = emptyList(),
 ) {
-	val hover = remember { MutableInteractionSource() }
+	val hover = rememberInteraction()
 	val isHovered by hover.collectIsHoveredAsState()
+	// The card lifts *and* casts a shadow, which is one effect rather than two: scale alone reads
+	// as a zoom, and the shadow is what turns it into the card coming forward out of the shelf.
+	// Applied to the cover box rather than the whole column so the shadow follows the artwork's
+	// corner radius instead of boxing the title underneath it.
+	val lift by animateDpAsState(
+		targetValue = if (isHovered) CARD_HOVER_ELEVATION else 0.dp,
+		animationSpec = snappySpring(Dp.VisibilityThreshold),
+		label = "card-lift",
+	)
+	// Crossed rather than switched on. Un-blurring an adult cover the instant the pointer lands on
+	// it is a hard cut to artwork the user has asked to keep out of the corner of their eye; a
+	// short reveal gives them the fraction of a second to look away that the setting is for.
+	val blur by animateDpAsState(
+		targetValue = if (blurCover && !isHovered) NSFW_BLUR_RADIUS else 0.dp,
+		animationSpec = motionTween(AgehaMotion.QUICK_MS),
+		label = "cover-blur",
+	)
 	WithContextMenu(actions) {
 		Column(
 			modifier = modifier
 				.testTag(MANGA_CARD_TAG)
 				.clip(MaterialTheme.shapes.small)
-				.hoverable(hover)
-				.clickable(onClick = onClick)
+				.interactive(hover, hoverScale = HOVER_SCALE_CARD)
+				.clickable(interactionSource = hover, indication = null, onClick = onClick)
 				.padding(AgehaSpacing.xs),
 			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
 		) {
@@ -163,6 +184,7 @@ fun MangaCard(
 				Modifier
 					.fillMaxWidth()
 					.aspectRatio(COVER_ASPECT_RATIO)
+					.shadow(lift, CoverShape)
 					.clip(CoverShape)
 					.background(MaterialTheme.colorScheme.surfaceContainerHigh)
 					.then(
@@ -180,11 +202,9 @@ fun MangaCard(
 				// primitive wanted here -- and the one place in Ageha where that is true; see
 				// AgehaGlass for why it is useless for the chrome.
 				Box(
-					if (blurCover && !isHovered) {
-						Modifier.fillMaxSize().blur(NSFW_BLUR_RADIUS)
-					} else {
-						Modifier.fillMaxSize()
-					},
+					// `blur` of zero is a no-op rather than a blur of nothing, so an ordinary
+					// cover pays for none of this.
+					Modifier.fillMaxSize().blur(blur),
 				) {
 					CoverImage(manga, imageHeaders)
 				}
@@ -441,6 +461,15 @@ fun Modifier.diagonalStripe(alpha: Float = STRIPE_ALPHA): Modifier {
 	)
 }
 
+/**
+ * How far a cover rises out of the shelf under the pointer.
+ *
+ * Six dp of shadow, not of movement -- the card stays in the plane of the grid and only its
+ * shadow says otherwise, which is what keeps a hovered cover from overlapping the titles of the
+ * two cards beneath it.
+ */
+private val CARD_HOVER_ELEVATION = 6.dp
+
 /** The handoff's 9px band inside an 18px repeat, as one diagonal step. */
 private const val STRIPE_SPAN = 18f
 
@@ -457,6 +486,16 @@ private const val STRIPE_ALPHA = 0.05f
  */
 @Composable
 private fun BoxScope.ReadingProgressBar(progress: Float) {
+	// Grown rather than redrawn. Coming back from the reader to a shelf where the bar under the
+	// cover you were just reading is visibly further along is the one place the library reports
+	// what you did while you were away, and a bar that simply appears at its new length says
+	// nothing at all. Critically damped: a progress bar that overshot would, for a few frames,
+	// report a percentage that is not true.
+	val filled by animateFloatAsState(
+		targetValue = progress.coerceIn(0f, 1f),
+		animationSpec = settleSpring(),
+		label = "reading-progress",
+	)
 	Box(
 		Modifier
 			.align(Alignment.BottomStart)
@@ -466,7 +505,7 @@ private fun BoxScope.ReadingProgressBar(progress: Float) {
 	) {
 		Box(
 			Modifier
-				.fillMaxWidth(progress.coerceIn(0f, 1f))
+				.fillMaxWidth(filled)
 				.height(3.dp)
 				.background(AgehaTheme.skin.accent),
 		)
@@ -508,6 +547,7 @@ fun MangaGrid(
 		MangaList(manga, onClick, modifier, contentPadding, footer, blurAdult)
 		return
 	}
+	val entrance = rememberStaggerGate()
 	LazyVerticalGrid(
 		columns = GridCells.Adaptive(
 			// The style's own reflow width wins over the caller's, unless the caller asked for
@@ -525,7 +565,7 @@ fun MangaGrid(
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.gridGutter),
 		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.gridGutter),
 	) {
-		items(manga, key = { it.key }) { item ->
+		itemsIndexed(manga, key = { _, item -> item.key }) { index, item ->
 			MangaCard(
 				manga = item.manga,
 				imageHeaders = item.imageHeaders,
@@ -538,6 +578,19 @@ fun MangaGrid(
 				isComplete = item.isComplete,
 				blurCover = blurAdult && item.manga.isAdult,
 				actions = item.actions,
+				// Two different animations, doing two different jobs.
+				//
+				// `animateItem` handles a cover that is *already here* and has been given a new
+				// place -- re-sorting the shelf, switching category, a title being marked read and
+				// dropping down the list. Watching the covers travel is what says "the same shelf,
+				// reordered"; without it the grid simply becomes a different grid, and the user has
+				// to re-find the title they were looking at.
+				//
+				// `motionStagger` handles a cover that was *not here before*. See `StaggerGate` for
+				// why it is timed rather than indexed.
+				modifier = Modifier
+					.animateItem(placementSpec = settleSpring(IntOffset.VisibilityThreshold))
+					.motionStagger(index, entrance),
 			)
 		}
 		if (footer != null) {
@@ -569,29 +622,39 @@ private fun MangaList(
 	footer: @Composable (() -> Unit)?,
 	blurAdult: Boolean,
 ) {
+	val entrance = rememberStaggerGate()
 	LazyColumn(
 		modifier = modifier,
 		contentPadding = contentPadding,
 		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 	) {
-		items(manga, key = { it.key }) { item ->
+		itemsIndexed(manga, key = { _, item -> item.key }) { index, item ->
+			val hover = rememberInteraction()
 			WithContextMenu(item.actions) {
 				Row(
 					Modifier
+						.animateItem(placementSpec = settleSpring(IntOffset.VisibilityThreshold))
+						.motionStagger(index, entrance)
 						.fillMaxWidth()
 						.clip(MaterialTheme.shapes.medium)
-						.clickable { onClick(item.manga) }
+						// A tint rather than a scale. A row that grew under the pointer would push
+						// its neighbours' text sideways, and a list of titles that shuffles as you
+						// read down it is harder to use than one with no hover state at all.
+						.interactive(hover, hoverTint = rowHoverTint)
+						.clickable(
+							interactionSource = hover,
+							indication = null,
+						) { onClick(item.manga) }
 						.padding(AgehaSpacing.sm),
 					verticalAlignment = Alignment.CenterVertically,
 					horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 				) {
-					Box(
-						if (blurAdult && item.manga.isAdult) {
-							Modifier.width(LIST_COVER_WIDTH).blur(NSFW_BLUR_RADIUS)
-						} else {
-							Modifier.width(LIST_COVER_WIDTH)
-						},
-					) {
+					val rowBlur by animateDpAsState(
+						targetValue = if (blurAdult && item.manga.isAdult) NSFW_BLUR_RADIUS else 0.dp,
+						animationSpec = motionTween(AgehaMotion.QUICK_MS),
+						label = "row-cover-blur",
+					)
+					Box(Modifier.width(LIST_COVER_WIDTH).blur(rowBlur)) {
 						MangaThumbnail(
 							manga = item.manga,
 							imageHeaders = item.imageHeaders,

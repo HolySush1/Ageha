@@ -44,6 +44,7 @@ import app.ageha.core.designsystem.AgehaSwitch
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaThemeMode
+import app.ageha.core.designsystem.MotionPreference
 import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.FontCoverage
 import app.ageha.core.designsystem.PanelHeading
@@ -100,6 +101,8 @@ enum class SettingsSection(val label: String) {
 @Composable
 fun SettingsScreen(
 	theme: AgehaThemeMode,
+	/** Whether Ageha animates. See `MotionPreference` and the desktop app's `SystemMotion`. */
+	motion: MotionPreference,
 	readerBackground: ReaderBackground,
 	doublePage: Boolean,
 	coverOffset: Boolean,
@@ -107,6 +110,7 @@ fun SettingsScreen(
 	jsRuntime: JsRuntime,
 	parsersDescription: (app.ageha.core.parsers.UpdateOutcome?) -> String,
 	onTheme: (AgehaThemeMode) -> Unit,
+	onMotion: (MotionPreference) -> Unit,
 	onReaderBackground: (ReaderBackground) -> Unit,
 	onDoublePage: (Boolean) -> Unit,
 	onCoverOffset: (Boolean) -> Unit,
@@ -239,7 +243,7 @@ fun SettingsScreen(
 
 				SettingsSection.DOWNLOADS -> DownloadsPanel(parallelDownloads, onParallelDownloads)
 
-				SettingsSection.APPEARANCE -> AppearancePanel(theme, onTheme)
+				SettingsSection.APPEARANCE -> AppearancePanel(theme, onTheme, motion, onMotion)
 
 				SettingsSection.SYNC -> SyncPanel(
 					sync, onSignIn, onSignOut, onSyncNow, onSyncOnStart,
@@ -700,7 +704,12 @@ private fun Explain(text: String) {
 }
 
 @Composable
-private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> Unit) {
+private fun AppearancePanel(
+	theme: AgehaThemeMode,
+	onTheme: (AgehaThemeMode) -> Unit,
+	motion: MotionPreference,
+	onMotion: (MotionPreference) -> Unit,
+) {
 	PanelHeading(
 		"Appearance",
 		"Ember is flat, warm and opaque; Glass is frosted, cool and fully rounded. They are the " +
@@ -716,6 +725,16 @@ private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> 
 						options = AgehaThemeMode.entries,
 						onSelect = onTheme,
 						label = ::themeLabel,
+					)
+				}
+			},
+			{
+				SettingRow("Motion", motionHint(motion)) {
+					AgehaSelect(
+						value = motion,
+						options = MotionPreference.entries,
+						onSelect = onMotion,
+						label = ::motionLabel,
 					)
 				}
 			},
@@ -749,6 +768,26 @@ private fun AppearancePanel(theme: AgehaThemeMode, onTheme: (AgehaThemeMode) -> 
 			color = MaterialTheme.colorScheme.error,
 		)
 	}
+}
+
+private fun motionLabel(preference: MotionPreference): String = when (preference) {
+	MotionPreference.SYSTEM -> "Follow Windows"
+	MotionPreference.FULL -> "Full"
+	MotionPreference.REDUCED -> "Reduced"
+}
+
+/**
+ * What each motion setting actually does, stated rather than implied.
+ *
+ * "Follow Windows" is the one that needs explaining: nothing on this screen tells the user which
+ * Windows setting is being followed, and a row whose current value depends on a switch three
+ * menus deep in another application is a row people distrust. So it names the switch.
+ */
+private fun motionHint(preference: MotionPreference): String = when (preference) {
+	MotionPreference.SYSTEM ->
+		"Follows Settings > Accessibility > Visual effects > Animation effects"
+	MotionPreference.FULL -> "Animate regardless of the Windows setting"
+	MotionPreference.REDUCED -> "No transitions anywhere. Every change is instant"
 }
 
 private fun themeLabel(mode: AgehaThemeMode): String = when (mode) {

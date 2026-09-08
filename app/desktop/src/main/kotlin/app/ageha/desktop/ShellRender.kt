@@ -71,14 +71,9 @@ fun main(args: Array<String>) {
 			try {
 				// Repositories emit asynchronously -- the source list arrives from the parsers
 				// bridge and the library from Room. Rendering immediately captures the empty
-				// first frame, which would make this test pass on an app that never loads
-				// anything. Render, wait, render again.
-				// Two frames on a moving clock: anything that fades in once its data arrives --
-				// the reader's chapter pill, a chip's selection crossfade -- is mid-animation at
-				// frame zero and would be captured half-drawn or not at all.
-				scene.render(0L)
-				runBlocking { delay(RENDER_SETTLE_MS) }
-				val image = scene.render(RENDER_SETTLE_MS * 1_000_000)
+				// first frame, which would make this pass on an app that never loads anything.
+				// Render, wait for the data, then run the clock forward. See `settle`.
+				val image = settle(scene)
 				val data = checkNotNull(image.encodeToData(EncodedImageFormat.PNG))
 				File(outDir, "shell-$skinName-$name.png").writeBytes(data.bytes)
 				println("wrote shell-$skinName-$name.png")
@@ -166,6 +161,46 @@ private const val SAMPLE_ROWS = 8
 /** Long enough for the parsers bridge and the first Room emission. */
 private const val RENDER_SETTLE_MS = 2_500L
 
+/**
+ * Renders a scene until its content has both arrived and stopped moving.
+ *
+ * Two things have to happen before a capture is honest, and they are not the same thing.
+ *
+ * The **data** has to land, which is wall-clock: the parsers bridge and Room both emit from real
+ * coroutines on real threads, so this waits with `delay` and nothing else will do.
+ *
+ * The **animations** then have to finish, and those do not advance with wall-clock time at all --
+ * a Compose animation moves by the frame time it is *handed*. Two renders 2.5 seconds apart look
+ * to Compose like two frames, and an animation whose target changed during the first of them
+ * simply begins on the second and emits its starting value. That is not hypothetical: it is what
+ * produced a capture with the navigation pill's selection indicator missing entirely, and a
+ * staggered grid of covers still at zero alpha, on a build where both worked perfectly.
+ *
+ * So the clock is stepped by hand afterwards, which is the same thing `renderContinueHero` and
+ * `renderReader` already do for their own asynchronous decodes.
+ */
+private fun settle(scene: ImageComposeScene): org.jetbrains.skia.Image {
+	scene.render(0L)
+	runBlocking { delay(RENDER_SETTLE_MS) }
+	var nanos = RENDER_SETTLE_MS * 1_000_000
+	var image = scene.render(nanos)
+	repeat(SETTLE_FRAMES) {
+		nanos += SETTLE_FRAME_STEP_MS * 1_000_000
+		image = scene.render(nanos)
+	}
+	return image
+}
+
+/**
+ * Frames to advance after the data has landed.
+ *
+ * Twenty at 50ms is a second of animation time, comfortably past the longest thing on screen --
+ * the 190ms screen transition plus a 16-item stagger. No `delay` between them: these advance a
+ * clock rather than wait for work, so running them back to back costs nothing.
+ */
+private const val SETTLE_FRAMES = 20
+private const val SETTLE_FRAME_STEP_MS = 50L
+
 /** Frames to draw while waiting for asynchronous image loads to land. */
 private const val RENDER_FRAMES = 30
 private const val RENDER_FRAME_GAP_MS = 100L
@@ -193,9 +228,7 @@ private fun renderSettingsPanels(app: AgehaApplication, outDir: File) {
 			}
 		}
 		try {
-			scene.render()
-			runBlocking { delay(RENDER_FRAME_GAP_MS) }
-			val image = scene.render()
+			val image = settle(scene)
 			val name = "shell-settings-" + section.name.lowercase() + ".png"
 			File(outDir, name).writeBytes(checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes)
 			println("wrote " + name)
@@ -418,9 +451,7 @@ private fun renderDetails(app: AgehaApplication, outDir: File) {
 		try {
 			// The chapter list arrives from the repository asynchronously, so the first frame is
 			// an empty list. Same two-frame treatment as every other render here.
-			scene.render(0L)
-			runBlocking { delay(RENDER_SETTLE_MS) }
-			val image = scene.render(RENDER_SETTLE_MS * 1_000_000)
+			val image = settle(scene)
 			val file = "shell-details-$name.png"
 			File(outDir, file).writeBytes(checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes)
 			println("wrote $file")

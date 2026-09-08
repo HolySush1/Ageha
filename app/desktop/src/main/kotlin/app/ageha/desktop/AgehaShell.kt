@@ -1,5 +1,18 @@
 package app.ageha.desktop
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import app.ageha.core.designsystem.glassSurface
 import app.ageha.core.designsystem.GlassTone
@@ -18,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,7 +57,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.ageha.core.data.CatalogRepository
 import app.ageha.core.data.HistoryRepository
@@ -51,8 +73,17 @@ import app.ageha.core.data.SourceRepository
 import app.ageha.core.model.AgehaVersion
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.mutableStateMapOf
+import app.ageha.core.designsystem.AgehaMotion
+import app.ageha.core.designsystem.AgehaThemeMode
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaSpacing
+import app.ageha.core.designsystem.interactive
+import app.ageha.core.designsystem.isMotionEnabled
+import app.ageha.core.designsystem.motionTween
+import app.ageha.core.designsystem.rememberInteraction
+import app.ageha.core.designsystem.rowHoverTint
+import app.ageha.core.designsystem.snappySpring
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.BrandAssets
 import app.ageha.feature.explore.BrowseScreen
@@ -123,6 +154,9 @@ fun AgehaShell(
 	 */
 ) {
 	val scope = application.scope
+	// Read once rather than at each call site, because two of the uses below are inside
+	// `LaunchedEffect` keys and a composition local cannot be read from a coroutine.
+	val isMotion = isMotionEnabled
 	val libraryViewModel = remember {
 		LibraryViewModel(application.library, application.catalog, application.history, scope)
 	}
@@ -260,6 +294,35 @@ fun AgehaShell(
 		}
 	}
 
+	// Ember and Glass are two *materials*, and swapping one for the other instantly reads as a
+	// glitch rather than as a change of setting -- the whole window changes colour, translucency
+	// and corner radius between one frame and the next.
+	//
+	// So the content fades up from dim over the new skin. Not a cross-fade of the two: the
+	// difference between them includes `AgehaSkin.isFlat`, a Boolean, and no amount of
+	// interpolation will get you halfway between opaque and frosted. Half the surfaces would cross
+	// and the other half would snap, which looks worse than either.
+	//
+	// The backdrop is deliberately left out of the fade. It is the ground the window is painted
+	// on; dimming it would show whatever is behind the window rather than a darker Ageha.
+	val skinFade = remember { Animatable(1f) }
+	// Built in composition rather than inside the effect below, and not only for tidiness:
+	// `motionTween` reads the reduced-motion local, a coroutine has no composition to read it
+	// from, and a bare `tween` there would be an animation the Motion setting cannot switch off.
+	// `MotionThroughTokensTest` fails the build over exactly this, and did.
+	val skinFadeSpec = motionTween<Float>(AgehaMotion.TRANSITION_MS)
+	var lastSkin by remember { mutableStateOf<AgehaThemeMode?>(null) }
+	LaunchedEffect(preferences.theme, isMotion) {
+		val previous = lastSkin
+		lastSkin = preferences.theme
+		// Never on the first composition. A window that faded in every launch would put this
+		// animation on the path to resuming a chapter, which is the one path that must not grow --
+		// and it would make the headless render capture a half-dim frame.
+		if (previous == null || previous == preferences.theme || !isMotion) return@LaunchedEffect
+		skinFade.snapTo(SKIN_FADE_FLOOR)
+		skinFade.animateTo(1f, skinFadeSpec)
+	}
+
 	// Boxed so notices can float over whatever screen is current. They are application-level --
 	// a backup import's report outlives the screen that started it -- so they are anchored to the
 	// window rather than owned by a screen.
@@ -276,15 +339,58 @@ fun AgehaShell(
 		if (!navigator.isImmersive) {
 			AgehaBackdrop(modifier = Modifier.fillMaxSize()) {}
 		}
-		Column(
-			Modifier
+		// Screens arrive from the direction they came from.
+		//
+		// This is the animation in Ageha that carries the most information, and its absence was
+		// the most expensive: before it, opening a manga and pressing Escape back out of it were
+		// visually identical events. Both were a hard cut, so the only way to know which had
+		// happened was to read the screen that appeared. Depth is the thing being reported --
+		// forward slides in from the right, back from the left -- and *sideways* is neither, so
+		// switching section is a straight cross-fade with no direction at all.
+		//
+		// The specs are hoisted out of `transitionSpec` because that lambda is not a composable
+		// scope, and `motionTween` has to be one: it reads the reduced-motion local.
+		val fadeUp = motionTween<Float>(AgehaMotion.TRANSITION_MS)
+		val fadeAway = motionTween<Float>(AgehaMotion.TRANSITION_MS, easing = AgehaMotion.exit)
+		val travel = motionTween<IntOffset>(AgehaMotion.TRANSITION_MS)
+		val slidePx = with(LocalDensity.current) { AgehaMotion.slide.roundToPx() }
+		AnimatedContent(
+			targetState = ScreenKey(navigator.current, navigator.depth, navigator.section),
+			transitionSpec = {
+				val toReader = targetState.destination is Destination.Read ||
+					initialState.destination is Destination.Read
+				val deeper = targetState.depth > initialState.depth
+				val sameDepth = targetState.depth == initialState.depth
+				when {
+					// The reader gets a fade and nothing else. Sliding a page of somebody's manga
+					// in from the edge of the window is motion over the artwork, which is the
+					// thing CLAUDE.md 8 exists to prevent -- one layer further out than usual.
+					toReader || sameDepth ->
+						fadeIn(fadeUp) togetherWith fadeOut(fadeAway)
+
+					deeper ->
+						(fadeIn(fadeUp) + slideInHorizontally(travel) { slidePx }) togetherWith
+							(fadeOut(fadeAway) + slideOutHorizontally(travel) { -slidePx / 2 })
+
+					else ->
+						(fadeIn(fadeUp) + slideInHorizontally(travel) { -slidePx }) togetherWith
+							(fadeOut(fadeAway) + slideOutHorizontally(travel) { slidePx / 2 })
+				}
+					// Both screens are full-window and the same size, so there is nothing for a
+					// size transform to animate -- and its clipping would cut the slide off at the
+					// window edge instead of letting the outgoing screen leave.
+					.using(SizeTransform(clip = false))
+			},
+			modifier = Modifier
 				.fillMaxSize()
 				// The navigation floats over the content rather than beside it, so the content has
 				// to be told to start below it. Without this the first row of every screen sits
 				// under the pill, which looks like a layout bug rather than like a layer.
-				.padding(top = if (navigator.isImmersive) 0.dp else NAV_CLEARANCE),
-		) {
-			when (val destination = navigator.current) {
+				.padding(top = if (navigator.isImmersive) 0.dp else NAV_CLEARANCE)
+				.graphicsLayer { alpha = skinFade.value },
+			label = "screen",
+		) { screen ->
+			when (val destination = screen.destination) {
 				Destination.Library -> {
 					val state by libraryViewModel.state.collectAsState()
 					val headers by libraryViewModel.imageHeaders.collectAsState()
@@ -457,6 +563,8 @@ fun AgehaShell(
 					val continueState by continueViewModel.state.collectAsState()
 					SettingsScreen(
 						theme = preferences.theme,
+						motion = preferences.motion,
+						onMotion = { onPreferencesChange(preferences.copy(motion = it)) },
 						readerBackground = preferences.readerBackground,
 						doublePage = preferences.doublePage,
 						coverOffset = preferences.coverOffset,
@@ -764,42 +872,141 @@ private fun FloatingNav(
 	onSearchAllSources: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
-	Row(
+	// Where each word sits inside the pill, measured rather than assumed.
+	//
+	// The alternative -- deriving the indicator's position from the item widths -- would mean the
+	// pill knowing the width of "Downloads" set in `labelLarge` at the current density, which is a
+	// number only layout has. Measuring is four lines and stays correct when somebody renames a
+	// section or the type scale changes.
+	val slots = remember { mutableStateMapOf<Section, PillSlot>() }
+	var pillOrigin by remember { mutableStateOf(0f) }
+	val density = LocalDensity.current
+
+	// Section.CONTINUE is reachable but has no word in the pill, so there is genuinely nothing to
+	// point at while you are on it. The indicator retreats rather than parking under an unrelated
+	// word and claiming you are somewhere you are not.
+	val lit = slots[navigator.section]
+	val indicatorAlpha by animateFloatAsState(
+		targetValue = if (lit == null) 0f else 1f,
+		animationSpec = motionTween(AgehaMotion.QUICK_MS),
+		label = "nav-indicator-alpha",
+	)
+	// Held at the last known slot while fading out, so it dissolves in place instead of sliding
+	// back to the origin on its way to invisible.
+	var resting by remember { mutableStateOf(PillSlot(0.dp, 0.dp)) }
+	if (lit != null) resting = lit
+
+	// The *first* placement is not a movement, and must not be animated.
+	//
+	// Nothing knows where the words are until layout has run, so the first measurement always
+	// arrives as a change from (0, 0) -- and a spring would faithfully animate the indicator
+	// growing out of the pill's left edge on every launch, reporting a navigation that did not
+	// happen. Snapping until the first slot is known also makes the pill correct in a single
+	// rendered frame, which is what the headless capture in `ShellRender` sees.
+	var placed by remember { mutableStateOf(false) }
+	val travelSpec = if (placed) snappySpring(Dp.VisibilityThreshold) else snap()
+	LaunchedEffect(resting) { if (resting.width > 0.dp) placed = true }
+
+	val indicatorX by animateDpAsState(
+		targetValue = resting.x,
+		animationSpec = travelSpec,
+		label = "nav-indicator-x",
+	)
+	val indicatorWidth by animateDpAsState(
+		targetValue = resting.width,
+		animationSpec = travelSpec,
+		label = "nav-indicator-width",
+	)
+
+	Box(
 		modifier
 			.padding(top = AgehaSpacing.md)
 			.glassSurface(AgehaGlass.PillShape, GlassTone.CHROME)
-			.padding(AgehaSpacing.xs),
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xxs),
-		verticalAlignment = Alignment.CenterVertically,
+			.padding(AgehaSpacing.xs)
+			.onGloballyPositioned { pillOrigin = it.positionInWindow().x },
 	) {
-		for (section in NAV_PILL_LEADING) {
-			TooltipArea(tooltip = { ShortcutTooltip(section) }) {
-				NavPillItem(
-					label = section.label,
-					isSelected = navigator.section == section,
-					onClick = { navigator.switchTo(section) },
-				)
-			}
+		// One indicator that travels, rather than four backgrounds that switch.
+		//
+		// The eye follows movement, and the movement is the message: it says the selection *went*
+		// from Library to Explore. Extinguishing one highlight and lighting another two hundred
+		// pixels away says only that something changed, and leaves the user to work out what.
+		//
+		// Drawn behind the words, sized and placed from the measured slot, so it fits "Downloads"
+		// and "Library" without either being padded to match the other.
+		if (indicatorWidth > 0.dp) {
+			Box(
+				Modifier
+					.offset(x = indicatorX)
+					.width(indicatorWidth)
+					.height(NAV_ITEM_HEIGHT)
+					.graphicsLayer { alpha = indicatorAlpha }
+					.clip(AgehaGlass.PillShape)
+					.background(MaterialTheme.colorScheme.primaryContainer)
+					.border(1.dp, AgehaTheme.skin.accentLine, AgehaGlass.PillShape),
+			)
 		}
-		SearchAllButton(
-			isSelected = navigator.current is Destination.SearchAll,
-			onClick = onSearchAllSources,
-		)
-		for (section in NAV_PILL_TRAILING) {
-			TooltipArea(tooltip = { ShortcutTooltip(section) }) {
-				NavPillItem(
-					label = section.label,
-					isSelected = navigator.section == section,
-					onClick = { navigator.switchTo(section) },
-				)
+		Row(
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xxs),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			for (section in NAV_PILL_LEADING) {
+				TooltipArea(tooltip = { ShortcutTooltip(section) }) {
+					NavPillItem(
+						label = section.label,
+						isSelected = navigator.section == section,
+						onClick = { navigator.switchTo(section) },
+						onMeasured = { slots[section] = it },
+						pillOrigin = pillOrigin,
+						density = density,
+					)
+				}
 			}
+			SearchAllButton(
+				isSelected = navigator.current is Destination.SearchAll,
+				onClick = onSearchAllSources,
+			)
+			for (section in NAV_PILL_TRAILING) {
+				TooltipArea(tooltip = { ShortcutTooltip(section) }) {
+					NavPillItem(
+						label = section.label,
+						isSelected = navigator.section == section,
+						onClick = { navigator.switchTo(section) },
+						onMeasured = { slots[section] = it },
+						pillOrigin = pillOrigin,
+						density = density,
+					)
+				}
+			}
+			HomeButton(
+				isSelected = navigator.section == Section.LIBRARY && !navigator.canGoBack,
+				onClick = navigator::openHome,
+			)
 		}
-		HomeButton(
-			isSelected = navigator.section == Section.LIBRARY && !navigator.canGoBack,
-			onClick = navigator::openHome,
-		)
 	}
 }
+
+/**
+ * Where one word sits in the pill, in the pill's own coordinates.
+ *
+ * Measured in window space and then subtracted, rather than read from `positionInParent`, because
+ * the indicator and the `Row` are siblings inside the pill's `Box` and only window space is common
+ * to both. A parent-relative reading would be relative to the `Row`, and the two agree only for as
+ * long as nobody adds a second child.
+ */
+@Immutable
+private data class PillSlot(val x: Dp, val width: Dp)
+
+/**
+ * The pill items' height, which the sliding indicator has to match.
+ *
+ * A constant rather than a measurement, and this one is worth being honest about: the indicator
+ * could measure its height the same way it measures its width, but every item in the pill is the
+ * same height by construction -- 9dp of vertical padding around one line of `labelLarge` -- and a
+ * per-item height would be three more state writes per frame to reproduce a number that is the
+ * same for all of them. It changes when somebody changes [NavPillItem]'s padding, which is the
+ * same moment [NAV_CLEARANCE] changes, and they sit ten lines apart for that reason.
+ */
+private val NAV_ITEM_HEIGHT = 38.dp
 
 /**
  * Back to the screen Ageha opens on, from anywhere.
@@ -843,18 +1050,31 @@ private fun HomeButton(isSelected: Boolean, onClick: () -> Unit) {
 			}
 		},
 	) {
+		val hover = rememberInteraction()
+		// Home keeps its own highlight rather than joining the sliding indicator, because it is
+		// not one of the four sections -- at the root of the library *both* are lit, and one
+		// indicator cannot be in two places. Its fill is crossed instead, so it still arrives
+		// rather than appearing.
+		val fill by animateColorAsState(
+			targetValue = if (isSelected) {
+				MaterialTheme.colorScheme.primaryContainer
+			} else {
+				Color.Transparent
+			},
+			animationSpec = motionTween(AgehaMotion.QUICK_MS),
+			label = "home-fill",
+		)
 		Box(
 			Modifier
 				.clip(shape)
-				.background(
-					if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-				)
+				.background(fill)
+				.interactive(hover, hoverTint = rowHoverTint, shape = shape)
 				.border(
 					1.dp,
 					if (isSelected) AgehaTheme.skin.accentLine else AgehaTheme.skin.line,
 					shape,
 				)
-				.clickable(onClick = onClick)
+				.clickable(interactionSource = hover, indication = null, onClick = onClick)
 				.padding(horizontal = 14.dp, vertical = 9.dp)
 				.testTag(NAV_HOME_TAG),
 			contentAlignment = Alignment.Center,
@@ -920,6 +1140,7 @@ private val NAV_PILL_TRAILING = listOf(Section.DOWNLOADS, Section.SETTINGS)
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
+	val searchHover = rememberInteraction()
 	TooltipArea(
 		tooltip = {
 			Box(
@@ -955,7 +1176,12 @@ private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
 						Modifier
 					},
 				)
-				.clickable(onClick = onClick)
+				// The one control in the pill that *does* scale. It is a button rather than a
+				// label, it has room around it on both sides, and it is the pill's fixed
+				// landmark -- so it is the one place a bit of weight under the pointer reads as
+				// affordance rather than as the bar shuffling.
+				.interactive(searchHover, hoverScale = HOVER_SCALE_PILL_BUTTON)
+				.clickable(interactionSource = searchHover, indication = null, onClick = onClick)
 				.testTag(SEARCH_ALL_TAG),
 			contentAlignment = Alignment.Center,
 		) {
@@ -980,6 +1206,15 @@ private fun SearchAllButton(isSelected: Boolean, onClick: () -> Unit) {
  */
 const val SEARCH_ALL_TAG = "nav-search-all"
 
+/**
+ * How much the search circle grows under the pointer.
+ *
+ * Larger than a cover's four percent, which is not an inconsistency. A 40dp circle at 1.04 gains
+ * under two pixels and reads as nothing; a 132dp card at the same ratio gains five and reads as a
+ * lift. The scale that feels like "the same amount" is a bigger number on a smaller control.
+ */
+private const val HOVER_SCALE_PILL_BUTTON = 1.08f
+
 /** The shortcut hint the rail used to print under every label. */
 @Composable
 private fun ShortcutTooltip(section: Section) {
@@ -995,42 +1230,105 @@ private fun ShortcutTooltip(section: Section) {
 /**
  * One word in the pill.
  *
- * Active is the handoff's three-part treatment, and it needs all three: `--accent-soft` fill,
+ * Active is the handoff's three-part treatment and it needs all three: `--accent-soft` fill,
  * `--accent-line` border, full-strength ink. The fill alone is too quiet against a translucent
  * container in Glass, and the border alone reads as a focus ring rather than as a selection.
  *
- * Inactive still draws a border -- `--line` -- rather than none. Without it the items have no
- * edges until you select one, and the pill reads as a strip of text that happens to be clickable
- * instead of as a row of controls.
+ * **The first two of those three now live on the indicator rather than here**, because there is
+ * only one selection and it travels. What stays on the item is the ink, which does have to be
+ * per-item -- it crosses from the muted variant to full strength as the indicator arrives, so the
+ * word lights up as the highlight reaches it rather than a beat before or after.
+ *
+ * Inactive still draws its own `--line` border. Without it the items have no edges until one is
+ * selected, and the pill reads as a strip of text that happens to be clickable instead of as a row
+ * of controls.
  */
 @Composable
-private fun NavPillItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+private fun NavPillItem(
+	label: String,
+	isSelected: Boolean,
+	onClick: () -> Unit,
+	/** Reports this word's place in the pill, so the indicator can slide to it. */
+	onMeasured: (PillSlot) -> Unit,
+	/** The pill's own left edge, in window space. See [PillSlot]. */
+	pillOrigin: Float,
+	density: Density,
+) {
 	val shape = AgehaGlass.PillShape
+	val hover = rememberInteraction()
+	// Crossed rather than switched, and at the same duration the indicator takes to arrive.
+	val ink by animateColorAsState(
+		targetValue = if (isSelected) {
+			MaterialTheme.colorScheme.onSurface
+		} else {
+			MaterialTheme.colorScheme.onSurfaceVariant
+		},
+		animationSpec = motionTween(AgehaMotion.QUICK_MS),
+		label = "nav-ink",
+	)
 	Box(
 		Modifier
+			.onGloballyPositioned { coordinates ->
+				with(density) {
+					onMeasured(
+						PillSlot(
+							x = (coordinates.positionInWindow().x - pillOrigin).toDp(),
+							width = coordinates.size.width.toDp(),
+						),
+					)
+				}
+			}
 			.clip(shape)
-			.background(
-				if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-			)
+			// No scale. These sit shoulder to shoulder with 2dp between them, and a word that grew
+			// under the pointer would collide with its neighbours -- and drag the measured slot
+			// the indicator is chasing along with it.
+			.interactive(hover, hoverTint = rowHoverTint, shape = shape)
 			.border(
 				1.dp,
-				if (isSelected) AgehaTheme.skin.accentLine else AgehaTheme.skin.line,
+				if (isSelected) Color.Transparent else AgehaTheme.skin.line,
 				shape,
 			)
-			.clickable(onClick = onClick)
+			.clickable(interactionSource = hover, indication = null, onClick = onClick)
 			.padding(horizontal = 19.dp, vertical = 9.dp),
 	) {
-		Text(
-			label,
-			style = MaterialTheme.typography.labelLarge,
-			color = if (isSelected) {
-				MaterialTheme.colorScheme.onSurface
-			} else {
-				MaterialTheme.colorScheme.onSurfaceVariant
-			},
-		)
+		Text(label, style = MaterialTheme.typography.labelLarge, color = ink)
 	}
 }
+
+/**
+ * What the shell's screen transition is actually comparing.
+ *
+ * Three fields, and only one of them is the screen: the transition is decided by [depth] and
+ * [section], and [destination] is carried along so the outgoing screen can still be drawn while it
+ * leaves. `AnimatedContent` keeps the previous state composed for the length of the transition, so
+ * it cannot simply read `navigator.current` -- by then that is the screen it is transitioning *to*.
+ *
+ * Equality is hand-written against [Destination.transitionId] rather than generated, and that is
+ * the point of the class. A generated `equals` would compare the [Destination], and two of those
+ * carry an `AgehaManga` whose own generated `equals` walks its entire chapter list -- on every
+ * recomposition, to answer a question a short string answers exactly as well.
+ */
+@Immutable
+private class ScreenKey(
+	val destination: Destination,
+	val depth: Int,
+	val section: Section,
+) {
+	private val id = "${section.name}/$depth/${destination.transitionId}"
+
+	override fun equals(other: Any?): Boolean = other is ScreenKey && other.id == id
+
+	override fun hashCode(): Int = id.hashCode()
+}
+
+/**
+ * How dim the window goes at the moment the skin changes, before fading back up.
+ *
+ * Far enough to read as a deliberate swap of material rather than a repaint glitch; not so far
+ * that the window looks like it blacked out. See the fade in [AgehaShell] for why this is a fade
+ * *up* rather than a cross-fade between the two skins.
+ */
+private const val SKIN_FADE_FLOOR = 0.45f
 
 /**
  * How much room the floating navigation needs above the content.

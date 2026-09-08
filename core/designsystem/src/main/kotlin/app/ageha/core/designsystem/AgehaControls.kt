@@ -106,12 +106,12 @@ fun AgehaChip(
 	// is where a colour crossfade on text actually costs something.
 	val fill by animateColorAsState(
 		if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-		tween(CHIP_FADE_MS),
+		motionTween(CHIP_FADE_MS),
 		label = "chipFill",
 	)
 	val edge by animateColorAsState(
 		if (isSelected) skin.accentLine else skin.line,
-		tween(CHIP_FADE_MS),
+		motionTween(CHIP_FADE_MS),
 		label = "chipEdge",
 	)
 	val ink = if (isSelected) {
@@ -119,12 +119,22 @@ fun AgehaChip(
 	} else {
 		MaterialTheme.colorScheme.onSurfaceVariant
 	}
+	val hover = rememberInteraction()
 	Row(
 		modifier
 			.clip(shape)
 			.background(fill)
+			// A chip is a small, isolated target with air around it, so it gets the press sink
+			// but no hover growth -- chips sit in rows and a growing one nudges its neighbours.
+			.interactive(hover, hoverTint = rowHoverTint, shape = shape, enabled = enabled)
 			.border(1.dp, edge, shape)
-			.clickable(enabled = enabled, role = Role.Tab, onClick = onClick)
+			.clickable(
+				enabled = enabled,
+				role = Role.Tab,
+				interactionSource = hover,
+				indication = null,
+				onClick = onClick,
+			)
 			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
@@ -158,12 +168,12 @@ fun AgehaSwitch(
 	val skin = AgehaTheme.skin
 	val track by animateColorAsState(
 		if (checked) skin.accent else skin.inset,
-		tween(AgehaMotion.QUICK_MS),
+		motionTween(AgehaMotion.QUICK_MS),
 		label = "switchTrack",
 	)
 	val edge by animateColorAsState(
 		if (checked) skin.accent else skin.lineStrong,
-		tween(AgehaMotion.QUICK_MS),
+		motionTween(AgehaMotion.QUICK_MS),
 		label = "switchEdge",
 	)
 	// The knob slides rather than jumping. This is the one control whose *motion* carries the
@@ -171,7 +181,7 @@ fun AgehaSwitch(
 	// its 140ms even under a motion budget this tight.
 	val offset by animateFloatAsState(
 		if (checked) 1f else 0f,
-		tween(AgehaMotion.QUICK_MS),
+		motionTween(AgehaMotion.QUICK_MS),
 		label = "switchKnob",
 	)
 	Box(
@@ -264,11 +274,19 @@ fun GhostButton(
 	content: @Composable RowScope.() -> Unit,
 ) {
 	val shape = MaterialTheme.shapes.medium
+	val hover = rememberInteraction()
 	Row(
 		modifier
 			.clip(shape)
+			.interactive(hover, hoverTint = rowHoverTint, shape = shape, enabled = enabled)
 			.border(1.dp, AgehaTheme.skin.lineStrong, shape)
-			.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+			.clickable(
+				enabled = enabled,
+				role = Role.Button,
+				interactionSource = hover,
+				indication = null,
+				onClick = onClick,
+			)
 			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.md),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),

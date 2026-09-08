@@ -1,5 +1,12 @@
 package app.ageha.desktop
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,13 +21,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.ageha.core.designsystem.AgehaMotion
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.motionTween
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,12 +89,34 @@ fun NoticeOverlay(
 ) {
 	if (notices.isEmpty()) return
 	Column(
-		modifier = modifier.padding(AgehaSpacing.lg),
+		modifier = modifier
+			.padding(AgehaSpacing.lg)
+			// The stack closes up rather than jumping when one of three notices is dismissed.
+			// These are stacked bottom-right, so dismissing the top one moves the two below it --
+			// and a user who has just clicked "Dismiss" is looking straight at the buttons that
+			// are about to teleport under their pointer.
+			.animateContentSize(animationSpec = motionTween(AgehaMotion.QUICK_MS)),
 		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 		horizontalAlignment = Alignment.End,
 	) {
 		for (notice in notices) {
-			NoticeCard(notice, onDismiss = { onDismiss(notice.id) })
+			key(notice.id) {
+				// Slides in from the right edge it is anchored to, so it reads as arriving from
+				// off-screen rather than materialising over the library. Started false and flipped
+				// on the first composition, which is what makes `AnimatedVisibility` animate an
+				// item that is present from the moment it exists.
+				val entrance = remember { MutableTransitionState(false) }
+				entrance.targetState = true
+				AnimatedVisibility(
+					visibleState = entrance,
+					enter = fadeIn(motionTween(AgehaMotion.QUICK_MS)) +
+						slideInHorizontally(motionTween(AgehaMotion.QUICK_MS)) { it / 2 },
+					exit = fadeOut(motionTween(AgehaMotion.INSTANT_MS, easing = AgehaMotion.exit)) +
+						slideOutHorizontally(motionTween(AgehaMotion.INSTANT_MS)) { it / 2 },
+				) {
+					NoticeCard(notice, onDismiss = { onDismiss(notice.id) })
+				}
+			}
 		}
 	}
 }

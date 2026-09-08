@@ -1,5 +1,9 @@
 package app.ageha.feature.library
 
+import app.ageha.core.designsystem.interactive
+import app.ageha.core.designsystem.rememberInteraction
+import app.ageha.core.designsystem.rowHoverTint
+import app.ageha.core.designsystem.motionTween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -172,20 +176,26 @@ private fun ContinueRow(
 	onRemove: () -> Unit,
 	onFindElsewhere: () -> Unit,
 ) {
-	val interaction = remember { MutableInteractionSource() }
+	val interaction = rememberInteraction()
 	val isHovered by interaction.collectIsHoveredAsState()
 	Row(
 		Modifier
 			.fillMaxWidth()
 			.testTag(CONTINUE_ROW_TAG)
-			.hoverable(interaction)
-			.background(
-				if (isHovered) MaterialTheme.colorScheme.surfaceContainerLow else Color.Transparent,
-			)
+			// This row already had a hover fill and it was the only one in the application that
+			// did. What it did not have was a *transition* -- the background switched on the frame
+			// the pointer crossed the boundary, which flickers when someone runs down the list.
+			// Now it crosses, and it uses the same tint every other row in Ageha uses rather than
+			// its own surface colour.
+			.interactive(interaction, hoverTint = rowHoverTint)
 			// An unavailable entry still opens -- into a cross-source search rather than a reader,
 			// but clicking it must never be a no-op. A row that does nothing when clicked reads as
 			// broken, which is exactly the impression this whole state exists to avoid.
-			.clickable(onClick = if (entry.isSourceAvailable) onOpen else onFindElsewhere)
+			.clickable(
+				interactionSource = interaction,
+				indication = null,
+				onClick = if (entry.isSourceAvailable) onOpen else onFindElsewhere,
+			)
 			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
@@ -334,7 +344,7 @@ fun ContinueHero(
 	// rather than swapped: a panel that changes colour instantly reads as a flash.
 	val container by animateColorAsState(
 		targetValue = accent.container,
-		animationSpec = tween(AgehaMotion.TRANSITION_MS),
+		animationSpec = motionTween(AgehaMotion.TRANSITION_MS),
 		label = "continue-hero-fill",
 	)
 	Row(

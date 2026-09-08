@@ -227,17 +227,28 @@ internal val LocalAgehaExtras = staticCompositionLocalOf {
  * @param systemInDarkTheme the OS preference. Passed in rather than read here so the gallery can
  *   show every scheme side by side in one process, and so a screenshot test is not at the mercy
  *   of whatever the CI machine's desktop is set to.
+ * @param reduceMotion turns every animation in the application into an instant state change.
+ *   Passed in for the same reason [systemInDarkTheme] is -- it is resolved from a user preference
+ *   and a Windows setting up in the desktop app, and a theme that read either of those itself
+ *   would be a theme no test could pin. Defaulted, so the sixty-odd existing call sites in tests,
+ *   the gallery and the headless render keep animating exactly as they did. See [LocalMotionEnabled].
  */
 @Composable
 fun AgehaTheme(
 	mode: AgehaThemeMode = AgehaThemeMode.SYSTEM,
 	systemInDarkTheme: Boolean = false,
+	reduceMotion: Boolean = false,
 	content: @Composable () -> Unit,
 ) {
 	val resolved = mode.resolve(systemInDarkTheme)
 	val extras = AgehaExtras(AgehaSpacing, AgehaMotion, resolved.skin())
 	CompositionLocalProvider(
 		LocalAgehaExtras provides extras,
+		// Provided here rather than at the window, because *everything* that animates is inside a
+		// theme and nothing that animates is outside one. A local provided anywhere else would
+		// have a hole in it, and a reduced-motion setting with a hole in it is worse than none:
+		// the user turns it on, one thing keeps moving, and they conclude the switch is broken.
+		LocalMotionEnabled provides !reduceMotion,
 		// The default ink for anything that does not name its own.
 		//
 		// This is not a nicety. `Text` with no `color` resolves `LocalContentColor`, and the

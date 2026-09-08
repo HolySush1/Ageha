@@ -86,17 +86,17 @@ fun <T> AgehaSelect(
 	val shape = MaterialTheme.shapes.medium
 	val fill by animateColorAsState(
 		if (open) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-		tween(AgehaMotion.INSTANT_MS),
+		motionTween(AgehaMotion.INSTANT_MS),
 		label = "selectFill",
 	)
 	val edge by animateColorAsState(
 		if (open) skin.accentLine else skin.lineStrong,
-		tween(AgehaMotion.INSTANT_MS),
+		motionTween(AgehaMotion.INSTANT_MS),
 		label = "selectEdge",
 	)
 	val caret by animateFloatAsState(
 		if (open) CARET_OPEN_DEGREES else 0f,
-		tween(AgehaMotion.QUICK_MS),
+		motionTween(AgehaMotion.QUICK_MS),
 		label = "selectCaret",
 	)
 	Box(modifier) {
@@ -322,7 +322,7 @@ fun <T> AgehaSegmented(
 			val isSelected = option == value
 			val fill by animateColorAsState(
 				if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-				tween(AgehaMotion.INSTANT_MS),
+				motionTween(AgehaMotion.INSTANT_MS),
 				label = "segmentFill",
 			)
 			Box(

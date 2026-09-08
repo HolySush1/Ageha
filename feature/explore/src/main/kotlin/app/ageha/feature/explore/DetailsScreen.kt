@@ -1,5 +1,18 @@
 package app.ageha.feature.explore
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.layout.height
+import app.ageha.core.designsystem.AgehaMotion
+import app.ageha.core.designsystem.COVER_ASPECT_RATIO
+import app.ageha.core.designsystem.DelayedAppearance
+import app.ageha.core.designsystem.RowSkeleton
+import app.ageha.core.designsystem.SkeletonBlock
+import app.ageha.core.designsystem.coverPlaceholder
+import app.ageha.core.designsystem.interactive
+import app.ageha.core.designsystem.motionTween
+import app.ageha.core.designsystem.rememberInteraction
+import app.ageha.core.designsystem.rowHoverTint
+import app.ageha.core.designsystem.shimmer
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
@@ -24,7 +37,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -89,13 +101,37 @@ fun DetailsScreen(
 ) {
 	val manga = state.manga
 	if (manga == null) {
-		Box(modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
+		// A skeleton in the shape of the screen that is coming, rather than a spinner in the
+		// middle of an empty one. The details screen is a 360dp panel of metadata beside a list
+		// of chapters, and drawing that shape while it loads means nothing moves when it arrives.
+		Row(modifier.fillMaxSize()) {
+			Column(
+				Modifier
+					.width(DETAILS_PANEL_WIDTH)
+					.fillMaxSize()
+					.background(MaterialTheme.colorScheme.surfaceContainerLow)
+					.padding(AgehaSpacing.lg),
+				verticalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+			) {
+				Box(
+					Modifier
+						.fillMaxWidth()
+						.aspectRatio(COVER_ASPECT_RATIO)
+						.clip(CoverShape)
+						.coverPlaceholder()
+						.shimmer(),
+				)
+				SkeletonBlock(Modifier.fillMaxWidth().height(DETAILS_TITLE_BAR))
+				SkeletonBlock(Modifier.fillMaxWidth(DETAILS_SHORT_BAR).height(DETAILS_META_BAR))
+			}
+			RowSkeleton(Modifier.fillMaxSize())
+		}
 		return
 	}
 	Row(modifier.fillMaxSize()) {
 		Column(
 			Modifier
-				.width(360.dp)
+				.width(DETAILS_PANEL_WIDTH)
 				.fillMaxSize()
 				.background(MaterialTheme.colorScheme.surfaceContainerLow)
 				.verticalScroll(rememberScrollState())
@@ -183,13 +219,25 @@ fun DetailsScreen(
 				if (target >= 0 && scrolledFor != scrollKey) {
 					// A couple of rows of lead-in, so the chapter lands *in* the list rather than
 					// flush against its top edge with nothing above it to say where you are.
-					chapterList.scrollToItem((target - CHAPTER_SCROLL_LEAD).coerceAtLeast(0))
+					//
+					// Animated rather than snapped, which is the difference between arriving
+					// somewhere and being teleported. On a nine hundred chapter series the jump is
+					// most of the list, and a list that simply *is* somewhere else gives no clue
+					// whether it moved down or up -- so the scroll itself is the answer to "where
+					// in this am I?". Compose snaps close and animates the last stretch, so the
+					// distance costs nothing.
+					chapterList.animateScrollToItem(
+						(target - CHAPTER_SCROLL_LEAD).coerceAtLeast(0),
+					)
 					scrolledFor = scrollKey
 				}
 			}
 			when {
-				state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-					CircularProgressIndicator()
+				// Delayed, so a chapter list that is already cached does not flash a skeleton on
+				// its way to being instant -- which is the case every time you come back from the
+				// reader. See `DelayedAppearance`.
+				state.isLoading -> DelayedAppearance(visible = true) {
+					RowSkeleton(Modifier.fillMaxSize())
 				}
 
 				state.chapters.isEmpty() -> Box(
@@ -365,11 +413,27 @@ private fun ChapterRow(
 			)
 		},
 	) {
+		val hover = rememberInteraction()
+		// Crossed rather than switched, and that is the whole feedback for "mark read up to here":
+		// forty rows dimming together is what shows how far the action reached. Snapping them
+		// would be indistinguishable from the list having been replaced by a different one.
+		val readInk by animateColorAsState(
+			targetValue = if (readState == ChapterReadState.READ) {
+				MaterialTheme.colorScheme.onSurfaceVariant
+			} else {
+				MaterialTheme.colorScheme.onSurface
+			},
+			animationSpec = motionTween(AgehaMotion.QUICK_MS),
+			label = "chapter-read-ink",
+		)
 		Row(
 			Modifier
 				.fillMaxWidth()
 				.testTag(CHAPTER_ROW_TAG)
-				.clickable(onClick = onClick)
+				// A tint and no scale. These rows are 900 deep and butted against each other; one
+				// that grew under the pointer would overlap the two either side of it.
+				.interactive(hover, hoverTint = rowHoverTint)
+				.clickable(interactionSource = hover, indication = null, onClick = onClick)
 				.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
@@ -382,11 +446,7 @@ private fun ChapterRow(
 					// the boundary between read and unread, and the fastest way to find it is a
 					// change in weight of the text itself -- no marker to look for, no legend to
 					// learn.
-					color = if (readState == ChapterReadState.READ) {
-						MaterialTheme.colorScheme.onSurfaceVariant
-					} else {
-						MaterialTheme.colorScheme.onSurface
-					},
+					color = readInk,
 					maxLines = 1,
 					overflow = TextOverflow.Ellipsis,
 				)
@@ -422,6 +482,18 @@ private fun ChapterState(label: String, color: Color) {
 
 /** How many rows of lead-in to leave above the chapter the list opens on. */
 private const val CHAPTER_SCROLL_LEAD = 2
+
+/** The metadata panel's width, shared by the screen and by the skeleton drawn in its place. */
+private val DETAILS_PANEL_WIDTH = 360.dp
+
+/** The title, as a bar. Taller than the metadata line because the title is set larger. */
+private val DETAILS_TITLE_BAR = 18.dp
+
+/** A metadata line, as a bar. */
+private val DETAILS_META_BAR = 10.dp
+
+/** How far the second skeleton bar runs, as a fraction of the first. */
+private const val DETAILS_SHORT_BAR = 0.55f
 
 /**
  * What to call a chapter.

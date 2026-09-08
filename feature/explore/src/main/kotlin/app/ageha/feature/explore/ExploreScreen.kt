@@ -1,5 +1,11 @@
 package app.ageha.feature.explore
 
+import app.ageha.core.designsystem.CoverGridSkeleton
+import app.ageha.core.designsystem.DelayedAppearance
+import app.ageha.core.designsystem.RowSkeleton
+import app.ageha.core.designsystem.interactive
+import app.ageha.core.designsystem.rememberInteraction
+import app.ageha.core.designsystem.rowHoverTint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -376,8 +382,11 @@ private fun SourceList(
 	onFilter: (SourceFilter) -> Unit,
 ) {
 	when {
-		state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-			CircularProgressIndicator()
+		// The source registry is 1360 entries read off disk and sorted, which on a cold start is
+		// long enough to see. A list-shaped skeleton says what is coming; a spinner in the middle
+		// of a blank panel said only that something was happening somewhere.
+		state.isLoading -> DelayedAppearance(visible = true) {
+			RowSkeleton(Modifier.fillMaxSize())
 		}
 
 		state.sources.isEmpty() &&
@@ -627,11 +636,20 @@ private fun SourceRow(
 	onSetEnabled: (String, Boolean) -> Unit,
 ) {
 	val skin = AgehaTheme.skin
+	val hover = rememberInteraction()
 	Row(
 		Modifier
 			.fillMaxWidth()
 			.testTag(SOURCE_ROW_TAG)
-			.clickable(enabled = listing.isEnabled) { onOpen(listing.name) }
+			// Disabled sources are still listed -- that is how you turn one on -- but they do not
+			// open, so they must not light up as though they would. `enabled` is threaded through
+			// rather than assumed, which is the one case the shared modifier takes a flag for.
+			.interactive(hover, hoverTint = rowHoverTint, enabled = listing.isEnabled)
+			.clickable(
+				enabled = listing.isEnabled,
+				interactionSource = hover,
+				indication = null,
+			) { onOpen(listing.name) }
 			.padding(horizontal = 18.dp, vertical = 15.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(15.dp),
@@ -809,8 +827,12 @@ fun BrowseScreen(
 		HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
 		when {
-			state.isLoadingFirstPage -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-				CircularProgressIndicator()
+			// A grid of cover-shaped blocks, at the same reflow width the real grid uses, so the
+			// columns do not move when the covers land. This is the longest wait in Ageha -- one
+			// HTTP round trip to a source that may be slow -- and the one most worth making feel
+			// like something is arriving rather than like nothing is.
+			state.isLoadingFirstPage -> DelayedAppearance(visible = true) {
+				CoverGridSkeleton(Modifier.fillMaxSize())
 			}
 
 			state.manga.isEmpty() && state.failure != null -> Box(Modifier.padding(AgehaSpacing.lg)) {
