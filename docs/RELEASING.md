@@ -14,6 +14,34 @@ The version comes from the tag, not from `build.gradle.kts`. A release therefore
 a version that disagrees with what it is tagged — which is the failure mode of every scheme where
 the two are maintained separately.
 
+## The root key, and why 0.2.0 cannot be updated from
+
+Conveyor signs every build with a root key, `app.signing-key`. Nothing sets one here, so it mints a
+throwaway per run and **each release has a different app identity**. The installers work. Updating
+between releases does not: an installed 0.2.0 polls the feed, finds a 0.3.0 signed by a key it has
+never seen, and declines it — which looks to a user exactly like no update ever being published.
+
+This is the one piece of release setup still outstanding. To fix it, once:
+
+```
+conveyor keys generate
+```
+
+Take the `app.signing-key` line it prints and store it as the repository secret
+`CONVEYOR_SIGNING_KEY` (Settings → Secrets and variables → Actions → New repository secret), then
+pass it in `release.yml`:
+
+```yaml
+run: conveyor -Kapp.signing-key="$CONVEYOR_SIGNING_KEY" -Kapp.version="$version" make copied-site
+```
+
+with `CONVEYOR_SIGNING_KEY: ${{ secrets.CONVEYOR_SIGNING_KEY }}` beside the other `env` entries.
+
+**Keep that key.** It is not recoverable, and losing it means every existing installation is
+stranded on whatever version it has — the same failure as never having set one, arriving later.
+It is a *root* key and not a code-signing certificate; the two are unrelated, and the section
+below is about the other one.
+
 ## What gets built
 
 | Platform | Package | Architectures |

@@ -32,16 +32,29 @@ jobs:
       - name: Test
         run: ./gradlew build --no-daemon
 
+      # Pinned, because there is no "latest" download.
+      #
+      # This step used to fetch `conveyor-latest-linux-amd64.deb`, which 404s -- Hydraulic
+      # publishes per-version tarballs and no floating alias, so the URL was wrong from the day it
+      # was written and only failed the first time a tag was actually pushed. A pinned version is
+      # also the honest thing for a release job: the tool that builds an installer should not
+      # change underneath it without somebody deciding to change it.
       - name: Install Conveyor
+        env:
+          CONVEYOR_VERSION: "22.2"
         run: |
-          wget -q https://downloads.hydraulic.dev/conveyor/conveyor-latest-linux-amd64.deb
-          sudo apt-get install -y ./conveyor-latest-linux-amd64.deb
+          wget -q "https://downloads.hydraulic.dev/conveyor/conveyor-$CONVEYOR_VERSION-linux-amd64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/conveyor"
+          tar xzf "conveyor-$CONVEYOR_VERSION-linux-amd64.tar.gz" -C "$RUNNER_TEMP/conveyor"
+          echo "$RUNNER_TEMP/conveyor/conveyor-$CONVEYOR_VERSION/bin" >> "$GITHUB_PATH"
 
       - name: Build and publish the site
         env:
           # Conveyor pushes the packages and the update feed to the release the tag created, so
           # the URL a user downloads from is the URL the updater polls.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Conveyor refuses to run without this. Version 1 is the current EULA.
+          CONVEYOR_AGREE_TO_LICENSE: 1
         run: |
           # The version comes from the tag, not from the build file, so a release cannot be cut
           # with a version that disagrees with what it is tagged.
@@ -53,10 +66,20 @@ jobs:
           name: installers
           path: output/
 
-      # Unsigned, and the release notes have to say so or users meet SmartScreen with no warning.
-      # Code-signing certificates are a separate paid cost that Conveyor's free open-source
-      # licence does not cover; docs/RELEASING.md lists the routes to getting one.
+      # Two separate things are unsigned here and they are worth not confusing.
+      #
+      # No *code-signing certificate*: Windows SmartScreen and macOS Gatekeeper warn on first run.
+      # That is a paid cost Conveyor's free open-source licence does not cover, and
+      # docs/RELEASING.md lists the routes to one.
+      #
+      # No stable *root key* either: `app.signing-key` is unset, so Conveyor mints a throwaway one
+      # per run and every release therefore has a different app identity. Installers work; updates
+      # between releases do not. Setting `CONVEYOR_SIGNING_KEY` fixes it, and until somebody does,
+      # this says so on every run rather than leaving it to be discovered by a user whose update
+      # check silently never finds anything. See docs/RELEASING.md.
       - name: Note the signing status
         run: |
           echo "::notice::These installers are unsigned. Windows SmartScreen and macOS Gatekeeper"
           echo "::notice::will warn on first run. See docs/RELEASING.md."
+          echo "::warning::Built with a throwaway root key: this release cannot be auto-updated"
+          echo "::warning::from or to. Set a stable app.signing-key. See docs/RELEASING.md."
