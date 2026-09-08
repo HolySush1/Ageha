@@ -13,6 +13,50 @@ clients registered per service, which is explained in
 
 ![The design system](docs/design-gallery.png)
 
+## Screenshots
+
+Every image below is a real render of the running application, produced by
+`./gradlew :app:desktop:renderShell` -- the same headless pass CI runs on every push, driving the
+real screens against the real source registry. They are regenerated rather than curated, so a
+screenshot here cannot quietly drift from what the app does.
+
+### The library
+
+The banner answers the question the app is opened to settle -- what was I reading -- and the shelf
+sits underneath it. Shown on a fresh profile, so the grid is empty.
+
+![The library](docs/screenshots/library.png)
+
+### Two skins, one layout
+
+Ember is flat, warm and opaque; Glass is frosted, cool and fully rounded. Same screen, same
+information, switched from the title bar.
+
+![Explore, Ember skin](docs/screenshots/explore-ember.png)
+
+![Explore, Glass skin](docs/screenshots/explore-glass.png)
+
+### Searching every source at once
+
+One query, fanned out across every enabled source and grouped by where each result came from.
+
+![Cross-source search](docs/screenshots/search-all.png)
+
+### The reader
+
+Two floating pills -- position, fit, background and page mode above; chapter navigation and page
+ticks below -- over a background that is always a user-chosen neutral. No brand colour touches a
+page.
+
+![The reader](docs/screenshots/reader.png)
+
+### Downloads
+
+Chapters are saved as ordinary CBZ files, readable in any comic reader. The card reports what is
+actually on disk rather than what was queued.
+
+![Downloads](docs/screenshots/downloads.png)
+
 ## Disclaimer
 
 **The manga sources are nothing to do with this project or its author.**
