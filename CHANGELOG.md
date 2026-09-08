@@ -187,6 +187,13 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Fixed
 
+- **A source repeating itself no longer takes down the screen showing it.** A page of results is
+  somebody else's output and nothing upstream promises each manga appears once; a lazy list treats
+  a repeated key as a programming error and throws rather than rendering. So one source returning
+  the same title twice killed an entire cross-source results page, including the twenty sources
+  that had answered correctly. Listings are deduplicated by id where they enter the app, so browse,
+  search and every future caller inherit it — and paging still advances by what the source sent,
+  because the arithmetic is the source's, not ours.
 - **The chapter list no longer forgets a reading position it was shown a moment ago.** It
   subscribes to the history row rather than reading it once, so marking a chapter read redraws the
   markers from what was actually written instead of from an optimistic guess that could disagree

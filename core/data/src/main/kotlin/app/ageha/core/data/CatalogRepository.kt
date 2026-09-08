@@ -67,9 +67,24 @@ class CatalogRepository(private val registry: MangaSourceRegistry) {
 		filter: AgehaFilter = AgehaFilter.EMPTY,
 	): CatalogResult<CatalogPage> = attempt(sourceName) {
 		val client = registry.clientFor(sourceName)
+		// Deduplicated by id, because a page of results is somebody else's output and nothing
+		// upstream promises it holds each manga once.
+		//
+		// It is not a theoretical worry. A search of every enabled source brought back the same
+		// title twice from one of them, and the screen showing it died with "Key
+		// MANHWA210:-8743221314638016557 was already used" -- a lazy list treats a duplicate key
+		// as a programming error and throws rather than rendering. One source repeating itself
+		// took down the whole results page, including the twenty sources that had answered
+		// correctly.
+		//
+		// Fixed here rather than in each list, so that browse, search and every future caller
+		// inherit it, and so the count a screen reports is the count it can actually draw.
+		// `nextOffset` deliberately advances by what the source *sent*, not by what survives:
+		// paging is the source's own arithmetic, and skipping the duplicate's slot would walk
+		// past a real result on the next page.
 		val page = client.list(offset = offset, order = order, filter = filter)
 		CatalogPage(
-			manga = page,
+			manga = page.distinctBy { it.id },
 			nextOffset = offset + page.size,
 			hasMore = page.isNotEmpty(),
 		)

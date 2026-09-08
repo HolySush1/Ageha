@@ -496,6 +496,14 @@ fun MangaGrid(
 	/** Blur the covers of adult-rated titles until pointed at. See `MangaCard.blurCover`. */
 	blurAdult: Boolean = false,
 ) {
+	// Belt and braces over the deduplication `CatalogRepository` already does.
+	//
+	// A lazy list throws on a repeated key rather than rendering, so one duplicate anywhere in a
+	// list takes the whole screen down -- and every list here is built from source output or from
+	// a join over it. The repository is where a duplicate is *understood*; this is where it stops
+	// being fatal, for callers that assemble a list some other way.
+	@Suppress("NAME_SHADOWING")
+	val manga = remember(manga) { manga.distinctBy { it.key } }
 	if (style == CardStyle.LIST) {
 		MangaList(manga, onClick, modifier, contentPadding, footer, blurAdult)
 		return
