@@ -54,6 +54,7 @@ import app.ageha.core.designsystem.glassSurface
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.designsystem.SourceFailureNotice
+import app.ageha.core.designsystem.rememberSearchFieldState
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.AgehaSortOrder
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -106,6 +107,7 @@ fun SourcePickerScreen(
 	onHideBroken: (Boolean) -> Unit,
 	onShowAdult: (Boolean) -> Unit,
 	onSetEnabled: (String, Boolean) -> Unit,
+	onEnableDefaults: () -> Unit,
 	modifier: Modifier = Modifier,
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
@@ -126,6 +128,7 @@ fun SourcePickerScreen(
 					filtersOpen = filtersOpen,
 					activeFilters = activeFilters,
 					onToggleFilters = { filtersOpen = !filtersOpen },
+					onEnableDefaults = onEnableDefaults,
 				)
 				TabRow(state, onFilter)
 			}
@@ -145,7 +148,60 @@ fun SourcePickerScreen(
 }
 
 /**
- * The handoff's 50dp field, and the button that opens the rail.
+ * The filled button that turns the default English sources on.
+ *
+ * ## Why it is the one filled control on this screen
+ *
+ * Everything else here is a ghost: outlined chips, a glass field, an outlined Filters button.
+ * That is deliberate for controls that *narrow* a list you are looking at. This one changes what
+ * you have -- it switches sources on -- and a control with a different kind of consequence should
+ * not look like the ones around it. The fill is what says "this does something", before the label
+ * has been read.
+ *
+ * `colorScheme.primary`, not `skin.accent`. The accent is the handoff's colour for dots, rules and
+ * borders, held to the 3:1 that non-text elements need; neither skin's accent clears 4.5:1 as a
+ * fill behind a label, and this fill carries one. `primary` is the same hue a few tones deeper and
+ * is the token that is contrast-checked for exactly this. See `AgehaSkin.accent`.
+ *
+ * ## Why it carries a count, and why it goes away
+ *
+ * "+37" is the difference between a button whose effect you can predict and one you have to press
+ * to find out. At zero it is not drawn at all: every default is already on, so a button offering
+ * to turn them on would be a control that does nothing -- and one that teaches, once, that this
+ * button does nothing.
+ */
+@Composable
+private fun DefaultSourcesButton(count: Int, onClick: () -> Unit) {
+	val shape = MaterialTheme.shapes.large
+	Row(
+		Modifier
+			.height(FIELD_HEIGHT)
+			.clip(shape)
+			.background(MaterialTheme.colorScheme.primary)
+			.clickable(role = Role.Button, onClick = onClick)
+			.testTag(DEFAULTS_BUTTON_TAG)
+			.padding(horizontal = AgehaSpacing.lg),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+	) {
+		Text(
+			"Default English sources",
+			style = MaterialTheme.typography.labelMedium,
+			color = MaterialTheme.colorScheme.onPrimary,
+		)
+		// How many sources the press would switch on. Reads as "+37", not "37", because the sign
+		// is the part that says this adds rather than replaces.
+		Text(
+			"+" + count,
+			style = AgehaTextStyles.monoEyebrow,
+			color = MaterialTheme.colorScheme.onPrimary,
+		)
+	}
+}
+
+/**
+ * The handoff's 50dp field, the button that turns on the default sources, and the one that opens
+ * the rail.
  *
  * The CTRL K cap is a promise the application has to keep, so it is drawn only because the
  * shortcut exists. A key cap printed beside a field that does not answer to that key is worse than
@@ -159,6 +215,7 @@ private fun SearchRow(
 	filtersOpen: Boolean,
 	activeFilters: Int,
 	onToggleFilters: () -> Unit,
+	onEnableDefaults: () -> Unit,
 ) {
 	val skin = AgehaTheme.skin
 	Row(
@@ -181,8 +238,16 @@ private fun SearchRow(
 				tint = skin.inkFaint,
 				modifier = Modifier.size(17.dp),
 			)
+			// Not `BasicTextField(value = state.query, ...)`. The query is hoisted into a view
+			// model and echoed back a frame later, which the `String` overload answers by
+			// clamping the caret to zero on every keystroke -- typing "abc" leaves "cba".
+			// Drawing this field's chrome here rather than using [AgehaSearchField] changes what
+			// it looks like, not what it is; the state has to come from the same place either way.
+			val field = rememberSearchFieldState(state.query, onSearch)
 			Box(Modifier.weight(1f)) {
-				if (state.query.isEmpty()) {
+				// Driven by what the field holds rather than by the query upstream has got to, so
+				// the placeholder does not flash back over the first character typed.
+				if (field.value.text.isEmpty()) {
 					Text(
 						"Search " + state.totalCount + " sources",
 						style = AgehaTextStyles.monoControl,
@@ -190,17 +255,23 @@ private fun SearchRow(
 					)
 				}
 				BasicTextField(
-					value = state.query,
-					onValueChange = onSearch,
+					value = field.value,
+					onValueChange = field::onValueChange,
 					singleLine = true,
 					textStyle = AgehaTextStyles.monoControl.copy(
 						color = MaterialTheme.colorScheme.onSurface,
 					),
 					cursorBrush = SolidColor(skin.accent),
-					modifier = Modifier.fillMaxWidth().focusRequester(searchFocus),
+					modifier = Modifier
+						.fillMaxWidth()
+						.focusRequester(searchFocus)
+						.testTag(SOURCE_SEARCH_TAG),
 				)
 			}
 			KeyCap("CTRL K")
+		}
+		if (state.defaultsOff > 0) {
+			DefaultSourcesButton(state.defaultsOff, onEnableDefaults)
 		}
 		FiltersButton(filtersOpen, activeFilters, onToggleFilters)
 	}
@@ -313,8 +384,9 @@ private fun SourceList(
 			state.filter == SourceFilter.ENABLED &&
 			state.query.isEmpty() -> EmptyState(
 			title = "No sources enabled",
-			detail = "Ageha ships " + state.totalCount + " sources and starts with all of them " +
-				"off, so it only ever talks to sites you chose. Turn some on to begin.",
+			detail = "Ageha ships " + state.totalCount + " sources and you have turned all of " +
+				"them off. Enable some to begin -- \"Default English sources\" above turns on " +
+				"the English ones that are not 18+ and are not known to be broken.",
 			action = {
 				TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") }
 			},
@@ -330,8 +402,7 @@ private fun SourceList(
 			} else {
 				state.matchesInAllSources.toString() + " sources match, but none are enabled"
 			},
-			detail = "Ageha starts with every source off, so it only ever talks to sites you " +
-				"chose. Show the full list to turn this one on.",
+			detail = "It is in the catalogue but switched off. Show the full list to turn it on.",
 			action = {
 				TextButton(onClick = { onFilter(SourceFilter.ALL) }) { Text("Show all sources") }
 			},
@@ -659,6 +730,8 @@ const val SOURCE_TOGGLE_TAG = "source-toggle"
 const val FILTER_MENU_TAG = "source-filter-menu"
 const val ADULT_TOGGLE_TAG = "source-adult-toggle"
 const val HIDDEN_COUNT_TAG = "source-hidden-count"
+const val SOURCE_SEARCH_TAG = "source-search"
+const val DEFAULTS_BUTTON_TAG = "source-defaults-button"
 
 /**
  * Browsing one source.
