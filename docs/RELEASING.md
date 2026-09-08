@@ -14,33 +14,36 @@ The version comes from the tag, not from `build.gradle.kts`. A release therefore
 a version that disagrees with what it is tagged — which is the failure mode of every scheme where
 the two are maintained separately.
 
-## The root key, and why 0.2.0 cannot be updated from
+## The root key
 
-Conveyor signs every build with a root key, `app.signing-key`. Nothing sets one here, so it mints a
-throwaway per run and **each release has a different app identity**. The installers work. Updating
-between releases does not: an installed 0.2.0 polls the feed, finds a 0.3.0 signed by a key it has
-never seen, and declines it — which looks to a user exactly like no update ever being published.
+Conveyor signs every build with a root key, `app.signing-key`, and an installed copy will only
+accept an update signed by the key it already trusts. Get this wrong and the symptom is not an
+error: it is an update check that silently never finds anything, forever.
 
-This is the one piece of release setup still outstanding. To fix it, once:
+It is **already set up**. The key lives in two places and needs to stay in both:
+
+| Where | What it is for | Recoverable? |
+|---|---|---|
+| Repository secret `CONVEYOR_SIGNING_KEY` | Every release CI builds | No — GitHub secrets are write-only |
+| `%USERPROFILE%\.conveyor\defaults.conf` | Local `conveyor make` runs | Only from a backup you made |
+
+**Back that file up somewhere durable, now.** It is not recoverable from GitHub and not derivable
+from a published release. Losing it strands every existing installation on whatever version it has
+— the same failure as never having had a key, arriving later and with more users. Everything else
+Conveyor needs, including the Apple CSR, is derived from it.
+
+It was generated with:
 
 ```
-conveyor keys generate
+conveyor keys generate --no-keyring --no-passphrase -o <dir>
 ```
 
-Take the `app.signing-key` line it prints and store it as the repository secret
-`CONVEYOR_SIGNING_KEY` (Settings → Secrets and variables → Actions → New repository secret), then
-pass it in `release.yml`:
+Note that Conveyor will **not** invent a key non-interactively. Without one it tries to prompt for
+a passphrase, finds no console on a CI runner, and exits 2 — so a release cannot be cut by simply
+omitting it.
 
-```yaml
-run: conveyor -Kapp.signing-key="$CONVEYOR_SIGNING_KEY" -Kapp.version="$version" make copied-site
-```
-
-with `CONVEYOR_SIGNING_KEY: ${{ secrets.CONVEYOR_SIGNING_KEY }}` beside the other `env` entries.
-
-**Keep that key.** It is not recoverable, and losing it means every existing installation is
-stranded on whatever version it has — the same failure as never having set one, arriving later.
-It is a *root* key and not a code-signing certificate; the two are unrelated, and the section
-below is about the other one.
+This is a *root* key, not a code-signing certificate. They are unrelated, and the section below is
+about the other one.
 
 ## What gets built
 

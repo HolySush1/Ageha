@@ -55,31 +55,34 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Conveyor refuses to run without this. Version 1 is the current EULA.
           CONVEYOR_AGREE_TO_LICENSE: 1
+          # The root key every build is signed with, and the reason updates work *between*
+          # releases: an installed copy only accepts an update signed by the key it already
+          # trusts. Conveyor will not invent one non-interactively -- it asks for a passphrase,
+          # finds no console, and exits 2 -- so this is not optional for a release that runs
+          # unattended. See docs/RELEASING.md for how it was generated and what happens if it is
+          # ever lost.
+          CONVEYOR_SIGNING_KEY: ${{ secrets.CONVEYOR_SIGNING_KEY }}
         run: |
           # The version comes from the tag, not from the build file, so a release cannot be cut
           # with a version that disagrees with what it is tagged.
           version="${GITHUB_REF_NAME#v}"
-          conveyor -Kapp.version="$version" make copied-site
+          conveyor -Kapp.signing-key="$CONVEYOR_SIGNING_KEY" -Kapp.version="$version" make copied-site
 
       - uses: actions/upload-artifact@v4
         with:
           name: installers
           path: output/
 
-      # Two separate things are unsigned here and they are worth not confusing.
+      # Two different kinds of signing, and they are worth not confusing.
       #
-      # No *code-signing certificate*: Windows SmartScreen and macOS Gatekeeper warn on first run.
-      # That is a paid cost Conveyor's free open-source licence does not cover, and
-      # docs/RELEASING.md lists the routes to one.
+      # The *root key* is set, so every release shares one app identity and an installed copy will
+      # accept the next release as an update. That is the one that had to be right.
       #
-      # No stable *root key* either: `app.signing-key` is unset, so Conveyor mints a throwaway one
-      # per run and every release therefore has a different app identity. Installers work; updates
-      # between releases do not. Setting `CONVEYOR_SIGNING_KEY` fixes it, and until somebody does,
-      # this says so on every run rather than leaving it to be discovered by a user whose update
-      # check silently never finds anything. See docs/RELEASING.md.
+      # There is still no *code-signing certificate*: Windows SmartScreen and macOS Gatekeeper warn
+      # on first run. That is a paid cost Conveyor's free open-source licence does not cover, and
+      # docs/RELEASING.md lists the routes to one. Said out loud on every run, because a user who
+      # meets SmartScreen with no warning concludes the download is malware.
       - name: Note the signing status
         run: |
-          echo "::notice::These installers are unsigned. Windows SmartScreen and macOS Gatekeeper"
-          echo "::notice::will warn on first run. See docs/RELEASING.md."
-          echo "::warning::Built with a throwaway root key: this release cannot be auto-updated"
-          echo "::warning::from or to. Set a stable app.signing-key. See docs/RELEASING.md."
+          echo "::notice::These installers are not code-signed. Windows SmartScreen and macOS"
+          echo "::notice::Gatekeeper will warn on first run. See docs/RELEASING.md."
