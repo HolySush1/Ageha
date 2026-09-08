@@ -262,6 +262,16 @@ interface SourcesDao {
 	@Upsert
 	suspend fun upsert(source: MangaSourceEntity)
 
+	/**
+	 * Write many rows in one transaction.
+	 *
+	 * For seeding the default sources, which is a couple of hundred rows written at once on a
+	 * first run. Row by row that is a couple of hundred transactions, each with its own fsync,
+	 * and it happens while the window is waiting to open.
+	 */
+	@Upsert
+	suspend fun upsertAll(sources: List<MangaSourceEntity>)
+
 	@Query("SELECT * FROM sources WHERE source = :name")
 	suspend fun find(name: String): MangaSourceEntity?
 

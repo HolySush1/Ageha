@@ -94,6 +94,73 @@ class SourceRepository(
 		}
 	}
 
+	/**
+	 * The default sources that are not currently on.
+	 *
+	 * What the Explore button counts, so the button can say how many it would turn on and go quiet
+	 * once there are none. Observed rather than fetched, so pressing the button empties it without
+	 * anything having to remember to refresh.
+	 */
+	fun observeDefaultsOff(): Flow<List<SourceDescriptor>> = sources.observeAll().map { rows ->
+		val on = rows.filter { it.isEnabled }.mapTo(mutableSetOf()) { it.source }
+		DefaultSources.from(registry.availableSources()).filterNot { it.name in on }
+	}
+
+	/**
+	 * Turn on every default source that is currently off.
+	 *
+	 * Explicitly an *action*, not a policy: something pressed a button or typed a command asking
+	 * for the default set, so a default that was switched off earlier is switched back on. That is
+	 * what "default English sources" means to the person pressing it, and the alternative -- a
+	 * button that silently skips the sources you once turned off -- is a button whose result
+	 * nobody can predict.
+	 *
+	 * It never turns anything **off**. A source outside the default set keeps whatever it has,
+	 * whether that is a language you added or an 18+ source you chose; this only ever adds. So the
+	 * worst it can do is give you back sources you can turn off again, one switch each.
+	 *
+	 * Returns the names newly enabled, for the caller to report. Empty means everything in the
+	 * default set was already on.
+	 *
+	 * @see DefaultSources for what qualifies, and why it is computed rather than listed.
+	 */
+	suspend fun enableDefaults(): List<String> {
+		val rows = sources.all().associateBy { it.source }
+		val off = DefaultSources.from(registry.availableSources())
+			.filterNot { rows[it.name]?.isEnabled == true }
+		if (off.isEmpty()) return emptyList()
+
+		var sortKey = sources.nextSortKey()
+		sources.upsertAll(
+			off.map { descriptor ->
+				// An existing row is updated in place rather than replaced, so a source that was
+				// pinned, or last opened last Tuesday, does not lose that by being re-enabled.
+				rows[descriptor.name]?.copy(isEnabled = true) ?: MangaSourceEntity(
+					source = descriptor.name,
+					isEnabled = true,
+					sortKey = sortKey++,
+					addedIn = AgehaVersion.CODE,
+					lastUsedAt = 0,
+					isPinned = false,
+					cfState = 0,
+				)
+			},
+		)
+		return off.map { it.name }
+	}
+
+	/**
+	 * Seed the defaults, but only on a first run.
+	 *
+	 * Guarded on the table being *completely* empty, which is the difference between this and
+	 * [enableDefaults]. Nobody asked for this one -- it happens during startup, before any window
+	 * is on screen -- so it may only act where there is no decision to overrule. Running it at
+	 * every launch would switch on each new English source a parsers update introduced, quietly
+	 * rearranging a list under the person who curated it.
+	 */
+	suspend fun seedDefaultsOnFirstRun(): List<String> =
+		if (sources.all().isEmpty()) enableDefaults() else emptyList()
+
 	/** Records that the user actually browsed this source, so it can float up the list. */
 	suspend fun markUsed(name: String, now: Long = System.currentTimeMillis()) {
 		if (sources.find(name) == null) setEnabled(name, enabled = true)

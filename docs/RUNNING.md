@@ -73,20 +73,25 @@ somewhere unexpected.
 
 Ageha opens on the **Library**, which is empty. This is the part that surprises people, so:
 
-**Ageha ships with about 1,360 manga sources and every single one turned off.** That's on purpose —
-the app should only ever contact websites you chose. Nothing is downloaded, checked, or contacted
-until you turn a source on.
+**Ageha ships with about 1,360 manga sources and starts with roughly 210 of them on.** Those 210
+are the ones in English or serving many languages at once, minus anything 18+ and anything the
+parser library itself flags as currently broken. The other ~1,150 stay off: other languages, adult
+sources, and the known-broken ones.
 
-So the first run is:
+Nothing is contacted until you open a source. A source being switched on means it appears in
+Explore and is included when you search everything at once — not that Ageha is talking to it in
+the background.
 
-1. **Explore** in the left rail (or `Ctrl+3`).
-2. The list will look empty, because it opens on *your enabled sources* and you have none.
-   Type a name into the search box — `MangaDex` is a reasonable first choice — and it'll tell you
-   the source exists but isn't enabled, with a **Show all sources** button. Click that.
-3. Flip the **toggle** on the right of the row to turn the source on.
-4. Click the **row itself** to browse it.
+**You can change all of it**, and the first run is a reasonable moment to:
 
-From then on Explore opens on just the sources you enabled, which is the point.
+1. **Explore** in the left rail (or `Ctrl+3`), which opens on your enabled sources.
+2. Flip the **toggle** on the right of any row to turn that source off, or on.
+3. Click the **row itself** to browse it.
+4. **Filters** → **All sources** lists the whole 1,360, including everything that is off. That's
+   where you turn on another language, or an 18+ source, if you want one.
+
+Once you have made a choice about a source it is yours: Ageha never revisits one you have switched
+on or off, including after an update that adds new sources.
 
 Two other things you'll notice on first launch:
 

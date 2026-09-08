@@ -9,6 +9,8 @@ dependencies {
 	implementation(project(":core:backup"))
 	implementation(project(":core:sync"))
 	implementation(project(":core:database"))
+	// For the default source set and the repository that applies it -- see the `defaults` command.
+	implementation(project(":core:data"))
 	implementation(libs.kotlinx.coroutines.core)
 }
 

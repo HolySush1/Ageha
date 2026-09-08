@@ -244,6 +244,17 @@ class AgehaApplication private constructor(
 			// bug silently.
 			installImageLoader(koinApplication.koin)
 
+			/*
+			 * Turn on the default sources, if this installation has never chosen any.
+			 *
+			 * Blocking rather than launched into the application scope, and that is the point: the
+			 * Explore screen opens on *enabled* sources, so a seed landing after the first
+			 * composition shows an empty catalogue that fills in a moment later. On every run
+			 * after the first this is one `SELECT` against a table the app is about to read
+			 * anyway.
+			 */
+			runBlocking { koinApplication.koin.get<SourceRepository>().seedDefaultsOnFirstRun() }
+
 			// SupervisorJob so one screen's failed coroutine does not cancel every other screen's.
 			// A source blowing up while browsing must not take the library's database subscription
 			// down with it.

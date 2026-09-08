@@ -283,6 +283,11 @@ class BrowseViewModelTest {
 			rows.value = rows.value.filterNot { it.source == source.source } + source
 		}
 
+		override suspend fun upsertAll(sources: List<MangaSourceEntity>) {
+			val names = sources.mapTo(mutableSetOf()) { it.source }
+			rows.value = rows.value.filterNot { it.source in names } + sources
+		}
+
 		override suspend fun setEnabled(name: String, enabled: Boolean) {
 			rows.value = rows.value.map { if (it.source == name) it.copy(isEnabled = enabled) else it }
 		}

@@ -14,6 +14,8 @@ import app.ageha.core.sync.SyncAccountStore
 import app.ageha.core.sync.SyncApi
 import app.ageha.core.sync.SyncApiException
 import app.ageha.core.sync.SyncEngine
+import app.ageha.core.data.DefaultSources
+import app.ageha.core.data.SourceRepository
 import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
@@ -52,6 +54,7 @@ fun main(args: Array<String>) {
 		runBlocking {
 			when (val command = args[0]) {
 				"sources" -> listSources(stack, args.getOrNull(1))
+				"defaults" -> defaults(stack, apply = args.contains("--apply"))
 				"parsers" -> parsers(stack, args.getOrNull(1))
 				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
 				"export" -> exportBackup(args.getOrNull(1))
@@ -125,6 +128,60 @@ private fun listSources(stack: SourceStack, filter: String?) {
 			if (source.isBroken) add("BROKEN")
 		}.joinToString(", ")
 		println("  " + source.name.padEnd(28) + " " + source.title.padEnd(30) + " [" + flags + "]")
+	}
+}
+
+/**
+ * The default source set, and a way to apply it to an existing installation.
+ *
+ * The first-run seed only fires on an empty table, which is right -- see
+ * `SourceRepository.seedDefaultsOnFirstRun` -- and leaves anyone who installed Ageha earlier
+ * without the defaults and with no way to ask for them. This is that way. It is deliberately not
+ * a button in Settings: it adds sources the user has never ruled on and touches nothing they have,
+ * so it wants to be an explicit, occasional act rather than something sitting next to a switch.
+ *
+ * Without `--apply` it reports what it would do and writes nothing.
+ */
+private suspend fun defaults(stack: SourceStack, apply: Boolean) {
+	val catalogue = stack.registry.availableSources()
+	val defaults = DefaultSources.from(catalogue)
+	println("Parsers build: " + stack.registry.parsersVersion)
+	println(
+		"" + defaults.size + " of " + catalogue.size +
+			" sources are English or multi-language, not adult, and not flagged broken.",
+	)
+
+	val database = AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db"))
+	try {
+		val repository = SourceRepository(database.sourcesDao(), stack.registry)
+		if (!apply) {
+			// Read-only preview, computed the same way the write is, so the two cannot disagree.
+			val decided = database.sourcesDao().all().mapTo(mutableSetOf()) { it.source }
+			val missing = defaults.filterNot { it.name in decided }
+			println("" + (defaults.size - missing.size) + " already have a setting of their own.")
+			println()
+			if (missing.isEmpty()) {
+				println("Nothing to add. Run with --apply to write anyway; it would be a no-op.")
+			} else {
+				println("Would enable " + missing.size + ":")
+				missing.forEach { println("  " + it.name.padEnd(28) + " " + it.title) }
+				println()
+				println("Run 'defaults --apply' to enable them.")
+			}
+			return
+		}
+
+		val added = repository.enableDefaults()
+		if (added.isEmpty()) {
+			println()
+			println("Nothing to add -- every default source already has a setting of its own.")
+		} else {
+			println()
+			println("Enabled " + added.size + ":")
+			added.forEach { println("  " + it) }
+		}
+	} finally {
+		database.close()
 	}
 }
 
@@ -539,6 +596,7 @@ private fun printUsage() {
 		  library                       what is in the local database
 		  parsers [check|rollback]      show the loaded parsers build, or update it
 		  sources [filter]              list sources in the loaded parsers build
+		  defaults [--apply]            the default source set; --apply enables the missing ones
 		  search  <SOURCE> <query>      search one source
 		  details <SOURCE> <query> [n]  details and chapters for search result n (default 0)
 		  pages   <SOURCE> <query> [n]  page image urls for the first chapter of result n
