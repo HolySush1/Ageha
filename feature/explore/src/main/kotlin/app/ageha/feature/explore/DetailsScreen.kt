@@ -1,10 +1,14 @@
 package app.ageha.feature.explore
 
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -13,7 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -26,15 +31,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import app.ageha.core.data.ChapterReadState
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.CoverShape
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.image.AgehaImages
@@ -60,6 +73,19 @@ fun DetailsScreen(
 	onSelectBranch: (String?) -> Unit,
 	onRetry: () -> Unit,
 	modifier: Modifier = Modifier,
+	/**
+	 * Resume reading, from the button beside the library one.
+	 *
+	 * Routed out to the shell rather than answered here, because "where does this resume" is a
+	 * database question with three possible answers -- open the reader, fetch a chapter list
+	 * first, or offer a cross-source search for a source that has gone away -- and all three are
+	 * navigation. See `HistoryRepository.resume`.
+	 */
+	onContinueReading: () -> Unit = {},
+	/** Mark this chapter and everything before it read. */
+	onMarkReadThrough: (AgehaChapter) -> Unit = {},
+	/** Mark this chapter and everything after it unread. */
+	onMarkUnreadFrom: (AgehaChapter) -> Unit = {},
 ) {
 	val manga = state.manga
 	if (manga == null) {
@@ -110,7 +136,7 @@ fun DetailsScreen(
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 
-			LibraryActions(state, onAddToLibrary, onRemoveFromLibrary, onToggleCategory)
+			LibraryActions(state, onAddToLibrary, onRemoveFromLibrary, onContinueReading, onToggleCategory)
 
 			if (manga.tags.isNotEmpty()) {
 				androidx.compose.foundation.layout.FlowRow(
@@ -142,6 +168,25 @@ fun DetailsScreen(
 		Column(Modifier.fillMaxSize()) {
 			ChapterHeader(state, onSelectBranch, onDownloadAll)
 			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+			val chapterList = rememberLazyListState()
+			// Open on the chapter you were last reading, not on chapter one.
+			//
+			// The guard is the whole subtlety. The position arrives a moment after the chapter
+			// list does -- two different queries -- so the effect has to be allowed to re-run
+			// until it has something to scroll to, and then must never run again for this
+			// manga and branch. Without the second half, marking a chapter read would yank the
+			// list back under the pointer that had just right-clicked something else.
+			val scrollKey = manga.id to state.selectedBranch
+			var scrolledFor by remember { mutableStateOf<Pair<Long, String?>?>(null) }
+			val target = state.marker?.index ?: -1
+			LaunchedEffect(scrollKey, target) {
+				if (target >= 0 && scrolledFor != scrollKey) {
+					// A couple of rows of lead-in, so the chapter lands *in* the list rather than
+					// flush against its top edge with nothing above it to say where you are.
+					chapterList.scrollToItem((target - CHAPTER_SCROLL_LEAD).coerceAtLeast(0))
+					scrolledFor = scrollKey
+				}
+			}
 			when {
 				state.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
 					CircularProgressIndicator()
@@ -160,13 +205,17 @@ fun DetailsScreen(
 
 				else -> LazyColumn(
 					Modifier.fillMaxSize(),
+					state = chapterList,
 					contentPadding = PaddingValues(vertical = AgehaSpacing.xs),
 				) {
-					items(state.chapters, key = { it.id }) { chapter ->
+					itemsIndexed(state.chapters, key = { _, chapter -> chapter.id }) { index, chapter ->
 						ChapterRow(
 							chapter = chapter,
+							readState = state.marker?.stateOf(index) ?: ChapterReadState.UNREAD,
 							onClick = { onOpenChapter(chapter) },
 							onDownload = { onDownloadChapter(chapter) },
+							onMarkRead = { onMarkReadThrough(chapter) },
+							onMarkUnread = { onMarkUnreadFrom(chapter) },
 						)
 					}
 				}
@@ -175,15 +224,31 @@ fun DetailsScreen(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LibraryActions(
 	state: DetailsUiState,
 	onAdd: () -> Unit,
 	onRemove: () -> Unit,
+	onContinueReading: () -> Unit,
 	onToggleCategory: (Int) -> Unit,
 ) {
 	Column(verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
-		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
+		// Wrapping, because this pane is 360dp wide and now holds two buttons rather than one.
+		// A Row would push "Continue reading" off the edge at the first long localisation of
+		// "Remove from library"; here it drops to a second line instead.
+		FlowRow(
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			// The filled button is whichever one is the point of the visit.
+			//
+			// For something already saved and already started, that is resuming it -- so the
+			// emphasis goes here and "Remove from library" stays the outlined afterthought it was.
+			// For anything else the primary action is still saving it.
+			if (state.marker != null) {
+				Button(onClick = onContinueReading) { Text("Continue reading") }
+			}
 			if (state.isInLibrary) {
 				// Not the destructive vermillion, on purpose. docs/DESIGN.md 5 reserves the filled
 				// accent for irreversible actions, and this is not one: the removal is a soft
@@ -191,6 +256,8 @@ private fun LibraryActions(
 				// restores the entry. Dressing a reversible action as destructive is how people
 				// learn to ignore the colour when it does matter.
 				OutlinedButton(onClick = onRemove) { Text("Remove from library") }
+			} else if (state.marker != null) {
+				OutlinedButton(onClick = onAdd) { Text("Add to library") }
 			} else {
 				Button(onClick = onAdd) { Text("Add to library") }
 			}
@@ -226,6 +293,19 @@ private fun ChapterHeader(
 			"${state.chapters.size} chapters",
 			style = MaterialTheme.typography.titleMedium,
 		)
+		// "Chapter 214 · 45%", when there is a position to report.
+		//
+		// The chapter number is the half that was missing. A percentage on its own says how much
+		// is left and nothing about where you are, which for a 900-chapter series is the less
+		// useful of the two numbers; together they answer both without needing a total the source
+		// has not necessarily published.
+		state.positionLabel?.let { position ->
+			Text(
+				position,
+				style = AgehaTextStyles.monoMeta,
+				color = AgehaTheme.skin.inkFaint,
+			)
+		}
 		if (state.chapters.isNotEmpty()) {
 			androidx.compose.material3.TextButton(onClick = onDownloadAll) { Text("Download all") }
 		}
@@ -247,39 +327,101 @@ private fun ChapterHeader(
 	}
 }
 
+/**
+ * One chapter, and whether it has been read.
+ *
+ * ## Why the read state is a colour and a word rather than a checkbox
+ *
+ * There is nothing to check. Ageha stores one reading *position* per manga rather than a flag per
+ * chapter -- the Android schema it stays importable from has no per-chapter table -- so what this
+ * row can honestly show is where a chapter sits relative to that position. A checkbox would invite
+ * ticking chapter 40 and leaving 39 unticked, which this model cannot represent and which the
+ * menu below therefore does not offer.
+ *
+ * ## Why the menu is right-click rather than a third button
+ *
+ * The row already carries a click and a Download button, and marking read is a rare action next
+ * to both. On a desktop the secondary click is where rare per-item actions live, and putting it
+ * there costs the row no width -- which matters, because a chapter title is the longest thing on
+ * this screen and every pixel spent on chrome is a pixel of somebody's chapter name ellipsised.
+ */
 @Composable
-private fun ChapterRow(chapter: AgehaChapter, onClick: () -> Unit, onDownload: () -> Unit) {
-	Row(
-		Modifier
-			.fillMaxWidth()
-			.testTag(CHAPTER_ROW_TAG)
-			.clickable(onClick = onClick)
-			.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
-	) {
-		Column(Modifier.weight(1f)) {
-			Text(
-				text = chapter.displayName(),
-				style = MaterialTheme.typography.bodyMedium,
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
+private fun ChapterRow(
+	chapter: AgehaChapter,
+	readState: ChapterReadState,
+	onClick: () -> Unit,
+	onDownload: () -> Unit,
+	onMarkRead: () -> Unit,
+	onMarkUnread: () -> Unit,
+) {
+	ContextMenuArea(
+		items = {
+			listOf(
+				// Both labels say how far the action reaches, because both reach past the row
+				// that was clicked and a menu that did not say so would look like it had marked
+				// the wrong forty chapters.
+				ContextMenuItem("Mark read up to here", onMarkRead),
+				ContextMenuItem("Mark unread from here", onMarkUnread),
 			)
-			val meta = listOfNotNull(
-				chapter.scanlator,
-				chapter.uploadDate?.let { formatDate(it) },
-			).joinToString(" - ")
-			if (meta.isNotEmpty()) {
+		},
+	) {
+		Row(
+			Modifier
+				.fillMaxWidth()
+				.testTag(CHAPTER_ROW_TAG)
+				.clickable(onClick = onClick)
+				.padding(horizontal = AgehaSpacing.lg, vertical = AgehaSpacing.sm),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
+		) {
+			Column(Modifier.weight(1f)) {
 				Text(
-					meta,
-					style = AgehaTextStyles.metadata,
-					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					text = chapter.displayName(),
+					style = MaterialTheme.typography.bodyMedium,
+					// A read chapter recedes rather than disappearing. The list is scanned for
+					// the boundary between read and unread, and the fastest way to find it is a
+					// change in weight of the text itself -- no marker to look for, no legend to
+					// learn.
+					color = if (readState == ChapterReadState.READ) {
+						MaterialTheme.colorScheme.onSurfaceVariant
+					} else {
+						MaterialTheme.colorScheme.onSurface
+					},
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
 				)
+				val meta = listOfNotNull(
+					chapter.scanlator,
+					chapter.uploadDate?.let { formatDate(it) },
+				).joinToString(" - ")
+				if (meta.isNotEmpty()) {
+					Text(
+						meta,
+						style = AgehaTextStyles.metadata,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+					)
+				}
 			}
+			// Only the two states worth a word get one. Labelling every other row "unread" would
+			// put a mono cap on most of a 900-row list to say nothing, which is the same reasoning
+			// the library card uses for its own state word.
+			when (readState) {
+				ChapterReadState.READING -> ChapterState("reading", AgehaTheme.skin.accent)
+				ChapterReadState.READ -> ChapterState("read", AgehaTheme.skin.inkFaint)
+				ChapterReadState.UNREAD -> Unit
+			}
+			androidx.compose.material3.TextButton(onClick = onDownload) { Text("Download") }
 		}
-		androidx.compose.material3.TextButton(onClick = onDownload) { Text("Download") }
 	}
 }
+
+@Composable
+private fun ChapterState(label: String, color: Color) {
+	Text(label, style = AgehaTextStyles.monoMeta, color = color)
+}
+
+/** How many rows of lead-in to leave above the chapter the list opens on. */
+private const val CHAPTER_SCROLL_LEAD = 2
 
 /**
  * What to call a chapter.

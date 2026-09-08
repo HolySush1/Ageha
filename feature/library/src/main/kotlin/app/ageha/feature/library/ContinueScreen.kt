@@ -76,6 +76,13 @@ import kotlin.math.roundToInt
 fun ContinueScreen(
 	state: ContinueUiState,
 	imageHeaders: Map<String, Map<String, String>>,
+	/**
+	 * Open an entry.
+	 *
+	 * The shell sends this to the manga's chapter list, scrolled to the chapter the row names,
+	 * rather than straight into the reader. See the note on the call site: a row is a place to
+	 * decide from, and deciding needs the chapters either side of the one you stopped on.
+	 */
 	onOpen: (ContinueEntry) -> Unit,
 	onSearch: (String) -> Unit,
 	onRemove: (Long) -> Unit,
@@ -95,7 +102,7 @@ fun ContinueScreen(
 			state.isEmpty -> EmptyState(
 				title = "Nothing read yet",
 				detail = "Open something and it will appear here, with the chapter you stopped on " +
-					"and a way straight back to it.",
+					"and a way back to it.",
 				action = { TextButton(onClick = onBrowseSources) { Text("Browse sources") } },
 			)
 

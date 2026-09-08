@@ -284,7 +284,7 @@ internal object AgehaSkinTokens {
 	val Light = AgehaSkinScheme(
 		accent = Color(0xFFAF301D),
 		accentLine = Color(0xFFC77364),
-		inkFaint = Color(0xFFA2A097),
+		inkFaint = Color(0xFF626059),
 		line = Color(0xFFCAC7B1),
 		lineStrong = Color(0xFF7A7865),
 		inset = Color(0xFFEAE6DD),
@@ -298,7 +298,7 @@ internal object AgehaSkinTokens {
 	val Ember = AgehaSkinScheme(
 		accent = Color(0xFFD9432F),
 		accentLine = Color(0xFF922F22),
-		inkFaint = Color(0xFF6E6663),
+		inkFaint = Color(0xFF908783),
 		line = Color(0xFF241F1D),
 		lineStrong = Color(0xFF302A28),
 		inset = Color(0xFF1B1614),
@@ -312,7 +312,7 @@ internal object AgehaSkinTokens {
 	val Glass = AgehaSkinScheme(
 		accent = Color(0xFF8B7FF2),
 		accentLine = Color(0xFF6762A3),
-		inkFaint = Color(0xFF75777C),
+		inkFaint = Color(0xFF919398),
 		line = Color(0xFF292B30),
 		lineStrong = Color(0xFF3C3E43),
 		inset = Color(0xFF202227),
@@ -326,7 +326,7 @@ internal object AgehaSkinTokens {
 	val Amoled = AgehaSkinScheme(
 		accent = Color(0xFFFFB4A6),
 		accentLine = Color(0xFFA5756B),
-		inkFaint = Color(0xFF565557),
+		inkFaint = Color(0xFFB6B3B5),
 		line = Color(0xFF45464F),
 		lineStrong = Color(0xFF8F909A),
 		inset = Color(0xFF0B0B0B),

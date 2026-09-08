@@ -1,6 +1,7 @@
 package app.ageha.core.designsystem
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
@@ -235,7 +236,27 @@ fun AgehaTheme(
 ) {
 	val resolved = mode.resolve(systemInDarkTheme)
 	val extras = AgehaExtras(AgehaSpacing, AgehaMotion, resolved.skin())
-	CompositionLocalProvider(LocalAgehaExtras provides extras) {
+	CompositionLocalProvider(
+		LocalAgehaExtras provides extras,
+		// The default ink for anything that does not name its own.
+		//
+		// This is not a nicety. `Text` with no `color` resolves `LocalContentColor`, and the
+		// default value of that composition local is **`Color.Black`** -- Material only ever
+		// overrides it from inside a `Surface`, which is a container Ageha does not use anywhere.
+		// `MaterialTheme` does not provide it; supplying a `colorScheme` does nothing for it.
+		//
+		// So every unstyled `Text` in the app was drawing black on a near-black window. That was
+		// 69 of 187 call sites, including every chapter title in the chapter list, most of
+		// Settings, and half of the details screen -- and it is why those rows looked *emptier*
+		// than the dimmed metadata underneath them, which was legible only because it happened to
+		// name a colour.
+		//
+		// Fixed here rather than by adding `color =` to 69 call sites, because the 70th would be
+		// written black too. `onSurface` is the right default: it is the ink for text on the
+		// window, it is contrast-tested against every surface in the ramp, and any component that
+		// needs a different one still sets it.
+		LocalContentColor provides resolved.tokens().onSurface,
+	) {
 		MaterialTheme(
 			colorScheme = with(resolved.tokens()) {
 				if (resolved == ResolvedTheme.LIGHT) lightScheme(this) else darkScheme(this)

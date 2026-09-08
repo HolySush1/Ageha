@@ -3,6 +3,7 @@ package app.ageha.core.data
 import app.ageha.core.database.dao.HistoryDao
 import app.ageha.core.database.dao.MangaDao
 import app.ageha.core.database.dao.MangaWithHistory
+import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaManga
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +40,16 @@ data class ContinueEntry(
 	val mangaId: Long get() = manga.id
 
 	/**
+	 * This entry is a file on disk rather than something from a source.
+	 *
+	 * The distinction matters to the *list*, not just to the plumbing: an archive has exactly one
+	 * chapter and no source to ask about it, so there is no chapter list to send anybody to. The
+	 * Continue screen sends an ordinary entry to its chapter list and a local one straight back
+	 * into the reader, which is the only place a CBZ can go.
+	 */
+	val isLocalFile: Boolean get() = manga.sourceName == LocalArchive.LOCAL_SOURCE
+
+	/**
 	 * Whether this entry has reached the end of everything the source had published.
 	 *
 	 * Free, and exact. `percent` is `(chapterIndex + pageWithinChapter) / chapterCount`, so it
@@ -68,6 +79,61 @@ data class ContinueEntry(
 				else -> number ?: name
 			}
 		}
+}
+
+/**
+ * Where one chapter stands relative to the reader's saved position.
+ *
+ * Derived, never stored. The Android schema Ageha stays compatible with has no per-chapter read
+ * table -- it keeps *one* position per manga -- so read state is a comparison against that
+ * position rather than a flag, and marking chapters read moves the position rather than setting
+ * forty flags. That is also what upstream does, and it is why marking chapter 50 read and then
+ * resuming lands on chapter 51 instead of somewhere the two disagree about.
+ *
+ * The cost is stated rather than hidden: read state is a prefix. There is no way to express
+ * "read 1-10 and 30-40 but not 11-29", and a schema with room to say it would be a schema a
+ * backup could not cross.
+ */
+enum class ChapterReadState {
+	/** Behind the position. */
+	READ,
+
+	/** The position itself, stopped part-way through. */
+	READING,
+
+	/** Ahead of the position. */
+	UNREAD,
+}
+
+/**
+ * The saved position, resolved against the branch currently on screen.
+ *
+ * [index] is -1 when the position points at a chapter this branch does not contain, which is
+ * normal rather than broken: a manga read on one scanlation branch and then viewed on another
+ * has no position *here*, and every chapter shown is honestly unread.
+ */
+data class ReadingMarker(
+	val chapterId: Long,
+	val index: Int,
+	val page: Int,
+	/**
+	 * The reader reached the end of that chapter.
+	 *
+	 * Unknowable for a row with no page count -- imported Android history is all of these -- and
+	 * false is the safe answer there: it renders the chapter as in progress rather than claiming
+	 * a completion nothing recorded.
+	 */
+	val isFinished: Boolean,
+	val percent: Float?,
+) {
+
+	/** Where [index] sits, for a chapter at [chapterIndex] in the same list. */
+	fun stateOf(chapterIndex: Int): ChapterReadState = when {
+		index < 0 || chapterIndex > index -> ChapterReadState.UNREAD
+		chapterIndex < index -> ChapterReadState.READ
+		isFinished -> ChapterReadState.READ
+		else -> ChapterReadState.READING
+	}
 }
 
 /**
@@ -213,6 +279,142 @@ class HistoryRepository(
 		}
 	}
 
+	/**
+	 * The saved position for one manga, resolved against [chapters], as a subscription.
+	 *
+	 * Live rather than fetched once, because marking a chapter read writes the row this reads: a
+	 * chapter list that had looked it up at open time would keep drawing yesterday's markers until
+	 * it was navigated away from and back.
+	 *
+	 * [chapters] is the branch currently on screen, so switching branch re-resolves the index
+	 * without another query -- the position has not changed, only what it is being compared with.
+	 */
+	fun observeMarker(mangaId: Long, chapters: List<AgehaChapter>): Flow<ReadingMarker?> =
+		history.observe(mangaId).map { row -> row?.let { toMarker(it, chapters) } }
+
+	private fun toMarker(row: HistoryEntity, chapters: List<AgehaChapter>) = ReadingMarker(
+		chapterId = row.chapterId,
+		index = chapters.indexOfFirst { it.id == row.chapterId },
+		page = row.page,
+		// The same test `resume` uses, and it has to stay the same test: these two disagreeing
+		// would mean a chapter drawn as read that reopens at page one.
+		isFinished = row.pageCount > 0 && row.page >= row.pageCount - 1,
+		percent = row.percent.takeIf { it > 0f },
+	)
+
+	/**
+	 * Mark [chapter] and everything before it in its branch as read.
+	 *
+	 * Moving the position rather than setting flags -- see [ChapterReadState] for why there are no
+	 * flags to set. The row is written as *finished*, which is what makes Continue Reading offer
+	 * the chapter after this one rather than reopening the one just marked.
+	 */
+	suspend fun markReadThrough(
+		manga: AgehaManga,
+		chapter: AgehaChapter,
+		now: Long = System.currentTimeMillis(),
+	) {
+		val branch = manga.chaptersByBranch()[chapter.branch].orEmpty()
+		val index = branch.indexOfFirst { it.id == chapter.id }
+		if (index < 0) return
+		write(manga, chapter, percent = (index + 1).toFloat() / branch.size, now = now)
+	}
+
+	/**
+	 * Mark [chapter] and everything after it in its branch as unread.
+	 *
+	 * The mirror of [markReadThrough]: the position moves back to the chapter *before* this one,
+	 * marked finished, so this chapter becomes the next thing to read. Un-reading the first
+	 * chapter has no earlier chapter to point at and means "none of this has been read", which is
+	 * a removal -- soft, exactly like [remove], so a sync cannot resurrect it.
+	 */
+	suspend fun markUnreadFrom(
+		manga: AgehaManga,
+		chapter: AgehaChapter,
+		now: Long = System.currentTimeMillis(),
+	) {
+		val branch = manga.chaptersByBranch()[chapter.branch].orEmpty()
+		val index = branch.indexOfFirst { it.id == chapter.id }
+		if (index < 0) return
+		if (index == 0) {
+			remove(manga.id, now)
+			return
+		}
+		write(manga, branch[index - 1], percent = index.toFloat() / branch.size, now = now)
+	}
+
+	/**
+	 * Write a position that stands for "this chapter is finished".
+	 *
+	 * `page = 0` of `pageCount = 1` is the smallest true statement of that in a schema which
+	 * stores a position rather than a completion flag: the last page of a chapter Ageha has never
+	 * opened and therefore cannot measure. Opening it later replaces the 1 with the real count.
+	 *
+	 * Scroll is zeroed. It belongs to a webtoon strip inside a chapter, and marking a chapter read
+	 * from a list is not a statement about where in it anybody was.
+	 */
+	private suspend fun write(manga: AgehaManga, chapter: AgehaChapter, percent: Float, now: Long) {
+		HistoryWriter.write(
+			mangaDao = this.manga,
+			historyDao = history,
+			manga = manga,
+			chapter = chapter,
+			page = 0,
+			scroll = 0f,
+			percent = percent,
+			pageCount = FINISHED_PAGE_COUNT,
+			now = now,
+		)
+	}
+
+	/**
+	 * Mark a whole manga read, from a grid where no chapter list is in hand.
+	 *
+	 * The library grid holds manga rows, not chapters -- the model it renders comes straight out
+	 * of the `manga` table and its `chapters` field is null by design, because storing every
+	 * chapter of every shelved title to draw a cover would be the wrong trade. So this reads the
+	 * chapter rows the reader has already stored rather than asking the caller for a list it does
+	 * not have.
+	 *
+	 * Returns false when there is nothing to point the position at: never opened, and no chapters
+	 * ever stored. That is a real state for a freshly imported library, and the caller says so
+	 * rather than leaving a right-click that silently did nothing.
+	 */
+	suspend fun markAllRead(mangaId: Long, now: Long = System.currentTimeMillis()): Boolean {
+		manga.find(mangaId) ?: return false
+		val stored = manga.chaptersOf(mangaId)
+		val existing = history.find(mangaId)
+		// The largest branch, for the reason `resume` picks branch-locally: chapter order is only
+		// meaningful within one, and the biggest is the one the reader was almost certainly on.
+		val last = stored.groupBy { it.branch }.maxByOrNull { it.value.size }?.value?.lastOrNull()
+		val chapterId = last?.chapterId ?: existing?.chapterId ?: return false
+		history.upsert(
+			HistoryEntity(
+				mangaId = mangaId,
+				createdAt = existing?.createdAt ?: now,
+				updatedAt = now,
+				chapterId = chapterId,
+				page = 0,
+				pageCount = FINISHED_PAGE_COUNT,
+				scroll = 0f,
+				percent = 1f,
+				deletedAt = 0,
+				chaptersCount = stored.size.takeIf { it > 0 } ?: existing?.chaptersCount ?: 0,
+			),
+		)
+		return true
+	}
+
+	/**
+	 * Mark a whole manga unread.
+	 *
+	 * The same soft delete [remove] performs, under the name the menu uses. They are genuinely the
+	 * same operation -- "none of this has been read" and "forget that I read this" leave the
+	 * database in one state -- and having two implementations of it would be two chances for them
+	 * to drift.
+	 */
+	suspend fun markAllUnread(mangaId: Long, now: Long = System.currentTimeMillis()) = remove(mangaId, now)
+
 	/** Forget one manga. Soft, so a sync cannot resurrect it. */
 	suspend fun remove(mangaId: Long, now: Long = System.currentTimeMillis()) {
 		history.markDeleted(mangaId, now)
@@ -250,6 +452,9 @@ class HistoryRepository(
 	}
 
 	private companion object {
+		/** See [write]. A one-page chapter you are on the last page of. */
+		const val FINISHED_PAGE_COUNT = 1
+
 		/** See [observeAll]. Large enough to be "everything" for any real reader. */
 		const val HISTORY_LIMIT = 2_000
 

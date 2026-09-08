@@ -44,6 +44,20 @@ data class ReaderUiState(
 	val failure: SourceFailure? = null,
 	/** Chrome is visible. Auto-hides while reading; any input brings it back. */
 	val isChromeVisible: Boolean = true,
+	/**
+	 * Bumped every time something *asks* to move to a page, and never by scrolling.
+	 *
+	 * The webtoon strip needs to tell those two apart. It reports its own position as the user
+	 * scrolls, so [currentPage] changes constantly under it -- a strip that scrolled to
+	 * [currentPage] whenever that number moved would fight the hand that was moving it. But it
+	 * also has to obey a seek from outside: before this, clicking a page tick in the bottom bar
+	 * updated [currentPage], the strip ignored it, and the scroll listener promptly overwrote it
+	 * with where the strip still was. The ticks did nothing at all in webtoon mode.
+	 *
+	 * A counter rather than a flag, because two seeks to the same page must both be honoured, and
+	 * a boolean would need clearing afterwards -- which is a second state change racing the first.
+	 */
+	val seekId: Int = 0,
 ) {
 	val pageCount: Int get() = pages.size
 	val hasNextChapter: Boolean get() = chapterIndex < chapterCount - 1
@@ -164,7 +178,7 @@ class ReaderViewModel(
 		if (pages.isEmpty()) return
 		val target = index.coerceIn(0, pages.lastIndex)
 		if (target == _state.value.currentPage) return
-		_state.update { it.copy(currentPage = target) }
+		_state.update { it.copy(currentPage = target, seekId = it.seekId + 1) }
 		resolveAround(target)
 		schedulePositionSave()
 	}
@@ -321,6 +335,22 @@ class ReaderViewModel(
 			// the next one. The reader is the only place that knows this number.
 			pageCount = state.pageCount,
 		)
+	}
+
+	/**
+	 * The furthest page the viewport reaches, reported by whichever reader is drawn.
+	 *
+	 * Url resolution follows the *bottom* edge of the window, not the top. In webtoon mode those
+	 * are different pages -- often several apart on a tall window or a zoomed-out strip -- and
+	 * resolving from the top edge meant the preload depth was partly spent on pages already on
+	 * screen. The image cache is warmed from the same edge; see `ReaderScreen.PreloadPages`.
+	 *
+	 * Safe to call on every frame of a scroll: [resolveAround] skips anything already resolved or
+	 * already failed, so this is a no-op except at the moving edge.
+	 */
+	fun recordVisible(through: Int) {
+		if (_state.value.pages.isEmpty()) return
+		resolveAround(through)
 	}
 
 	/**

@@ -1,6 +1,8 @@
 package app.ageha.core.designsystem
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -136,94 +138,124 @@ fun MangaCard(
 	 * text as well would make it a shelf nobody can use, including the person who turned it on.
 	 */
 	blurCover: Boolean = false,
+	/**
+	 * The right-click menu.
+	 *
+	 * Empty installs no menu at all rather than an empty one. A secondary click that opens a
+	 * blank popup is worse than one that does nothing, because it looks like the actions failed
+	 * to load rather than like there are none.
+	 */
+	actions: List<MangaCardAction> = emptyList(),
 ) {
 	val hover = remember { MutableInteractionSource() }
 	val isHovered by hover.collectIsHoveredAsState()
-	Column(
-		modifier = modifier
-			.testTag(MANGA_CARD_TAG)
-			.clip(MaterialTheme.shapes.small)
-			.hoverable(hover)
-			.clickable(onClick = onClick)
-			.padding(AgehaSpacing.xs),
-		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
-	) {
-		Box(
-			Modifier
-				.fillMaxWidth()
-				.aspectRatio(COVER_ASPECT_RATIO)
-				.clip(CoverShape)
-				.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-				.then(
-					// Selection is a border rather than a tint. A tint over cover art is the same
-					// mistake the reader rule exists to prevent, one screen earlier.
-					if (isSelected) {
-						Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CoverShape)
-					} else {
-						Modifier
-					},
-				),
+	WithContextMenu(actions) {
+		Column(
+			modifier = modifier
+				.testTag(MANGA_CARD_TAG)
+				.clip(MaterialTheme.shapes.small)
+				.hoverable(hover)
+				.clickable(onClick = onClick)
+				.padding(AgehaSpacing.xs),
+			verticalArrangement = Arrangement.spacedBy(AgehaSpacing.xs),
 		) {
-			// The blur wraps only the image, so the badge, the tick and the progress bar drawn
-			// after it stay legible. `Modifier.blur` blurs its own content, which is exactly the
-			// primitive wanted here -- and the one place in Ageha where that is true; see
-			// AgehaGlass for why it is useless for the chrome.
 			Box(
-				if (blurCover && !isHovered) {
-					Modifier.fillMaxSize().blur(NSFW_BLUR_RADIUS)
-				} else {
-					Modifier.fillMaxSize()
-				},
+				Modifier
+					.fillMaxWidth()
+					.aspectRatio(COVER_ASPECT_RATIO)
+					.clip(CoverShape)
+					.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+					.then(
+						// Selection is a border rather than a tint. A tint over cover art is the same
+						// mistake the reader rule exists to prevent, one screen earlier.
+						if (isSelected) {
+							Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CoverShape)
+						} else {
+							Modifier
+						},
+					),
 			) {
-				CoverImage(manga, imageHeaders)
+				// The blur wraps only the image, so the badge, the tick and the progress bar drawn
+				// after it stay legible. `Modifier.blur` blurs its own content, which is exactly the
+				// primitive wanted here -- and the one place in Ageha where that is true; see
+				// AgehaGlass for why it is useless for the chrome.
+				Box(
+					if (blurCover && !isHovered) {
+						Modifier.fillMaxSize().blur(NSFW_BLUR_RADIUS)
+					} else {
+						Modifier.fillMaxSize()
+					},
+				) {
+					CoverImage(manga, imageHeaders)
+				}
+				if (progress != null && progress > 0f) ReadingProgressBar(progress)
+				if (badgeCount > 0) {
+					CoverBadge(
+						if (badgeCount == 1) "NEW" else "NEW $badgeCount",
+						Modifier.align(Alignment.TopStart).padding(AgehaSpacing.xs),
+					)
+				}
+				// Top *right*, opposite the badge, and only when finished. The two never compete for
+				// the same corner: a title with unread chapters is by definition not complete.
+				if (isComplete) {
+					CompletionTick(Modifier.align(Alignment.TopEnd).padding(AgehaSpacing.xs))
+				}
 			}
-			if (progress != null && progress > 0f) ReadingProgressBar(progress)
-			if (badgeCount > 0) {
-				CoverBadge(
-					if (badgeCount == 1) "NEW" else "NEW $badgeCount",
-					Modifier.align(Alignment.TopStart).padding(AgehaSpacing.xs),
-				)
+			Text(
+				text = manga.title,
+				style = AgehaTextStyles.mangaTitle,
+				color = MaterialTheme.colorScheme.onSurface,
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+				minLines = 2,
+			)
+			// Drawn only when there is something to say. A row of empty mono baselines under every
+			// never-opened cover would add a line of height to each card in the grid to report
+			// nothing, which on a shelf of new titles is most of them.
+			if (positionLabel != null || stateLabel != null) {
+				Row(
+					Modifier.fillMaxWidth(),
+					horizontalArrangement = Arrangement.SpaceBetween,
+				) {
+					Text(
+						positionLabel.orEmpty(),
+						style = AgehaTextStyles.monoMeta,
+						color = AgehaTheme.skin.inkFaint,
+						maxLines = 1,
+					)
+					Text(
+						stateLabel.orEmpty(),
+						style = AgehaTextStyles.monoMeta,
+						// The one word on the card that earns the accent. "read" is the end state a
+						// shelf is scanned for, and colouring it is what lets someone find the
+						// finished titles without reading a single title.
+						color = if (isComplete) AgehaTheme.skin.accent else AgehaTheme.skin.inkFaint,
+						maxLines = 1,
+					)
+				}
 			}
-			// Top *right*, opposite the badge, and only when finished. The two never compete for
-			// the same corner: a title with unread chapters is by definition not complete.
-			if (isComplete) {
-				CompletionTick(Modifier.align(Alignment.TopEnd).padding(AgehaSpacing.xs))
-			}
-		}
-		Text(
-			text = manga.title,
-			style = AgehaTextStyles.mangaTitle,
-			color = MaterialTheme.colorScheme.onSurface,
-			maxLines = 2,
-			overflow = TextOverflow.Ellipsis,
-			minLines = 2,
-		)
-		// Drawn only when there is something to say. A row of empty mono baselines under every
-		// never-opened cover would add a line of height to each card in the grid to report
-		// nothing, which on a shelf of new titles is most of them.
-		if (positionLabel != null || stateLabel != null) {
-			Row(
-				Modifier.fillMaxWidth(),
-				horizontalArrangement = Arrangement.SpaceBetween,
-			) {
-				Text(
-					positionLabel.orEmpty(),
-					style = AgehaTextStyles.monoMeta,
-					color = AgehaTheme.skin.inkFaint,
-					maxLines = 1,
-				)
-				Text(
-					stateLabel.orEmpty(),
-					style = AgehaTextStyles.monoMeta,
-					// The one word on the card that earns the accent. "read" is the end state a
-					// shelf is scanned for, and colouring it is what lets someone find the
-					// finished titles without reading a single title.
-					color = if (isComplete) AgehaTheme.skin.accent else AgehaTheme.skin.inkFaint,
-					maxLines = 1,
-				)
-			}
-		}
 	}
+	}
+}
+
+/**
+ * [content], with a secondary-click menu over it when there is one to show.
+ *
+ * `ContextMenuArea` is Compose Desktop's own, so the popup is the same one text selection uses
+ * and it dismisses, keyboard-navigates and positions itself the way the platform's do. Writing a
+ * `DropdownMenu` on a right-click `pointerInput` would have been a menu that only looked like the
+ * others.
+ */
+@Composable
+private fun WithContextMenu(actions: List<MangaCardAction>, content: @Composable () -> Unit) {
+	if (actions.isEmpty()) {
+		content()
+		return
+	}
+	ContextMenuArea(
+		items = { actions.map { ContextMenuItem(it.label, it.onSelect) } },
+		content = content,
+	)
 }
 
 /**
@@ -497,6 +529,7 @@ fun MangaGrid(
 				stateLabel = item.stateLabel,
 				isComplete = item.isComplete,
 				blurCover = blurAdult && item.manga.isAdult,
+				actions = item.actions,
 			)
 		}
 		if (footer != null) {
@@ -534,50 +567,52 @@ private fun MangaList(
 		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
 	) {
 		items(manga, key = { it.key }) { item ->
-			Row(
-				Modifier
-					.fillMaxWidth()
-					.clip(MaterialTheme.shapes.medium)
-					.clickable { onClick(item.manga) }
-					.padding(AgehaSpacing.sm),
-				verticalAlignment = Alignment.CenterVertically,
-				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
-			) {
-				Box(
-					if (blurAdult && item.manga.isAdult) {
-						Modifier.width(LIST_COVER_WIDTH).blur(NSFW_BLUR_RADIUS)
-					} else {
-						Modifier.width(LIST_COVER_WIDTH)
-					},
+			WithContextMenu(item.actions) {
+				Row(
+					Modifier
+						.fillMaxWidth()
+						.clip(MaterialTheme.shapes.medium)
+						.clickable { onClick(item.manga) }
+						.padding(AgehaSpacing.sm),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.md),
 				) {
-					MangaThumbnail(
-						manga = item.manga,
-						imageHeaders = item.imageHeaders,
-						progress = item.progress,
-					)
-				}
-				Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-					Text(
-						item.manga.title,
-						style = AgehaTextStyles.mangaTitle,
-						color = MaterialTheme.colorScheme.onSurface,
-						maxLines = 1,
-						overflow = TextOverflow.Ellipsis,
-					)
-					Text(
-						listOfNotNull(item.positionLabel, item.stateLabel, item.manga.sourceName)
-							.joinToString(" · "),
-						style = AgehaTextStyles.monoMeta,
-						color = AgehaTheme.skin.inkFaint,
-						maxLines = 1,
-						overflow = TextOverflow.Ellipsis,
-					)
-				}
-				if (item.badgeCount > 0) {
-					CoverBadge(
-						if (item.badgeCount == 1) "NEW" else "NEW ${item.badgeCount}",
-					)
-				}
+					Box(
+						if (blurAdult && item.manga.isAdult) {
+							Modifier.width(LIST_COVER_WIDTH).blur(NSFW_BLUR_RADIUS)
+						} else {
+							Modifier.width(LIST_COVER_WIDTH)
+						},
+					) {
+						MangaThumbnail(
+							manga = item.manga,
+							imageHeaders = item.imageHeaders,
+							progress = item.progress,
+						)
+					}
+					Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+						Text(
+							item.manga.title,
+							style = AgehaTextStyles.mangaTitle,
+							color = MaterialTheme.colorScheme.onSurface,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+						Text(
+							listOfNotNull(item.positionLabel, item.stateLabel, item.manga.sourceName)
+								.joinToString(" · "),
+							style = AgehaTextStyles.monoMeta,
+							color = AgehaTheme.skin.inkFaint,
+							maxLines = 1,
+							overflow = TextOverflow.Ellipsis,
+						)
+					}
+					if (item.badgeCount > 0) {
+						CoverBadge(
+							if (item.badgeCount == 1) "NEW" else "NEW ${item.badgeCount}",
+						)
+					}
+			}
 			}
 		}
 		if (footer != null) item { footer() }
@@ -604,9 +639,20 @@ data class MangaGridItem(
 	val positionLabel: String? = null,
 	val stateLabel: String? = null,
 	val isComplete: Boolean = false,
+	/** The card's right-click menu. Empty means the card has no secondary click at all. */
+	val actions: List<MangaCardAction> = emptyList(),
 ) {
 	val key: String get() = "${manga.sourceName}:${manga.id}"
 }
+
+/**
+ * One entry in a card's right-click menu.
+ *
+ * A label and a lambda, deliberately: the design system draws cards and has no business knowing
+ * what a library does with one. Every screen that shows a grid passes its own set, and Explore
+ * passes none -- a catalogue result has nothing to mark read.
+ */
+data class MangaCardAction(val label: String, val onSelect: () -> Unit)
 
 /**
  * The empty state.

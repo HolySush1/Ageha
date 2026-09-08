@@ -222,6 +222,13 @@ class AgehaJourneyTest {
 			navigator.switchTo(Section.CONTINUE)
 			awaitTag(CONTINUE_ROW_TAG, "a Continue Reading entry for what phase one read")
 
+			// Straight into the reader, because what phase one read is an *archive*.
+			//
+			// A Continue Reading row normally opens the manga's chapter list now, and the
+			// "Continue reading" button there is what resumes. An opened CBZ is the one entry that
+			// cannot take that route -- one chapter, no source to ask for a list -- so it keeps the
+			// direct path, and this asserts that the exception actually holds rather than leaving
+			// local files opening an empty chapter list. See the branch on `ContinueScreen.onOpen`.
 			onAllNodesWithTag(CONTINUE_ROW_TAG).onFirst().performClick()
 			assertEquals(
 				stoppedOnPage,

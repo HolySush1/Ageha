@@ -391,7 +391,10 @@ private fun ReadingPanel(
 				}
 			}
 			add {
-				SettingRow("Preload next pages", "fetched ahead so a page turn does not wait") {
+				SettingRow(
+					"Preload next pages",
+					"fetched ahead of what is on screen, so a page turn does not wait",
+				) {
 					AgehaSelect(
 						value = preload,
 						options = PRELOAD_OPTIONS,

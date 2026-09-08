@@ -83,6 +83,47 @@ class SearchFieldTest {
 	}
 
 	/**
+	 * Upstream running a beat behind must not eat what was typed.
+	 *
+	 * This is the defect that reached a user as *"every time I type a letter the cursor goes behind
+	 * the letter"*, and unlike the caret-clamping bug in the class comment above, it **is**
+	 * reproducible here -- because it is not about the platform text session at all. It is about
+	 * how the component reacts to a `value` that is one step stale, which is an ordinary parameter
+	 * this test can supply directly.
+	 *
+	 * The harness echoes each emission back *one behind*, which is exactly what a view model does
+	 * when a recomposition lands between the keystroke and the state update. Against the previous
+	 * implementation the field adopted that stale string, wiped the character and reset the caret;
+	 * this asserts it no longer does.
+	 */
+	@Test
+	fun `a stale echo from upstream does not wipe what was typed`() = runComposeUiTest {
+		val seen = mutableListOf("")
+		// What the field is handed: always the *previous* thing it emitted.
+		val lagging = MutableStateFlow("")
+		setContent {
+			AgehaTheme(mode = AgehaThemeMode.EMBER) {
+				val value by lagging.collectAsState()
+				AgehaSearchField(
+					value = value,
+					onValueChange = { emitted ->
+						// Publish the previous value, then remember the new one -- a one-step lag.
+						lagging.value = seen.last()
+						seen += emitted
+					},
+					placeholder = "Search",
+					modifier = Modifier.testTag(FIELD),
+				)
+			}
+		}
+
+		onNodeWithTag(FIELD).performTextInput("overlord")
+		waitForIdle()
+
+		onNodeWithTag(FIELD).assertTextEquals("overlord")
+	}
+
+	/**
 	 * A search field wired the way every screen in Ageha wires one: the query is hoisted out to a
 	 * `StateFlow` and read back through `collectAsState`, rather than held in a local `remember`.
 	 */

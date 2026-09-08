@@ -4,11 +4,15 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -17,19 +21,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,32 +54,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.text.style.TextOverflow
-import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
+import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.ReaderBackground
 import app.ageha.core.designsystem.ReaderChrome
 import app.ageha.core.designsystem.SourceFailureNotice
@@ -79,10 +85,10 @@ import app.ageha.core.model.PageScale
 import app.ageha.core.model.ReaderMode
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * The reader.
@@ -102,6 +108,16 @@ fun ReaderScreen(
 	onScroll: (page: Int, fraction: Float) -> Unit,
 	onNextPage: () -> Unit,
 	onPreviousPage: () -> Unit,
+	onNextChapter: () -> Unit,
+	onPreviousChapter: () -> Unit,
+	/**
+	 * Leave the reader for this manga's chapter list.
+	 *
+	 * Distinct from [onClose], and the distinction is the point: closing goes back to wherever the
+	 * reader was opened from, which is the Continue Reading shelf as often as it is a chapter list.
+	 * Someone who wants to pick a different chapter should not have to guess which.
+	 */
+	onOpenChapterList: () -> Unit,
 	onSetMode: (ReaderMode) -> Unit,
 	onSetScale: (PageScale) -> Unit,
 	onSetBackground: (ReaderBackground) -> Unit,
@@ -114,6 +130,14 @@ fun ReaderScreen(
 	webtoonZoom: Float = 1f,
 	onSetWebtoonZoom: (Float) -> Unit = {},
 	onHideChrome: () -> Unit = {},
+	/**
+	 * The furthest page index currently on screen.
+	 *
+	 * Reported so the view model can resolve page *urls* ahead of the bottom edge of the viewport
+	 * rather than ahead of its top. See [PreloadPages] for why the difference is the whole feature
+	 * in webtoon mode.
+	 */
+	onVisibleThrough: (Int) -> Unit = {},
 	/** Settings' "Preload next pages". Zero means the whole chapter. */
 	preloadPages: Int = DEFAULT_PRELOAD_PAGES,
 	/**
@@ -131,7 +155,14 @@ fun ReaderScreen(
 	imageLoader: ImageLoader? = null,
 ) {
 	val chrome = remember(background) { ReaderChrome.forBackground(background) }
-	PreloadPages(state, preloadPages, imageLoader)
+	// How far down the chapter the viewport actually reaches.
+	//
+	// Reset with the chapter, because page 14 of the chapter just left says nothing about the one
+	// just opened, and a stale anchor would warm the wrong end of it.
+	var visibleThrough by remember(state.chapter?.id) { mutableIntStateOf(state.currentPage) }
+	val preloadAnchor = maxOf(visibleThrough, state.currentPage)
+	LaunchedEffect(preloadAnchor) { onVisibleThrough(preloadAnchor) }
+	PreloadPages(state, preloadPages, imageLoader, preloadAnchor)
 
 	// Chrome auto-hide, and the two signals it needs.
 	//
@@ -189,6 +220,7 @@ fun ReaderScreen(
 				background = background,
 				zoom = webtoonZoom,
 				onScroll = onScroll,
+				onVisibleThrough = { visibleThrough = it },
 				onZoom = onSetWebtoonZoom,
 				onToggleChrome = onToggleChrome,
 			)
@@ -199,6 +231,7 @@ fun ReaderScreen(
 				doublePage = doublePage,
 				coverOffset = coverOffset,
 				onPageChange = onPageChange,
+				onVisibleThrough = { visibleThrough = it },
 				onNextPage = onNextPage,
 				onPreviousPage = onPreviousPage,
 				onToggleChrome = onToggleChrome,
@@ -217,19 +250,32 @@ fun ReaderScreen(
 				onSetScale, onSetBackground, onToggleDoublePage, onToggleCoverOffset,
 				onSetWebtoonZoom, onClose, Modifier.hoverable(chromeHover))
 		}
-		// The status bar waits for pages; the top bar above does not.
+		// The bar is up whenever the chrome is; its *readouts* wait for pages.
 		//
-		// Everything it says is derived from a page list, so before that list arrives it reads
-		// "1 / 0" and "Chapter 1 of 0" -- confidently, and wrongly, for however long a source
-		// takes to answer. The top bar stays up because Close and the mode controls are exactly
-		// what someone wants while a slow chapter is still loading.
+		// The distinction used to be drawn one level higher, and hid the whole bar until a page
+		// list arrived. That was right about the readouts and wrong about the bar: everything it
+		// *said* -- "1 / 0", "Chapter 1 of 0" -- was derived from a page list and was confidently
+		// false until one turned up, but the chapter buttons it now carries are needed most
+		// precisely when there are no pages. A chapter that is loading slowly, or has failed
+		// outright, is exactly when someone wants to skip it or go back to the list, and a bar
+		// that hides itself then hides the way out along with the numbers.
+		//
+		// So the bar stays and [ReaderStatusBar] withholds the parts that would be lying.
 		AnimatedVisibility(
-			visible = state.isChromeVisible && state.pages.isNotEmpty(),
+			visible = state.isChromeVisible,
 			enter = fadeIn(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			exit = fadeOut(tween(app.ageha.core.designsystem.AgehaMotion.CHROME_FADE_MS)),
 			modifier = Modifier.align(Alignment.BottomCenter),
 		) {
-			ReaderStatusBar(state, chrome, onPageChange, Modifier.hoverable(chromeHover))
+			ReaderStatusBar(
+				state = state,
+				chrome = chrome,
+				onSeek = onPageChange,
+				onNextChapter = onNextChapter,
+				onPreviousChapter = onPreviousChapter,
+				onOpenChapterList = onOpenChapterList,
+				modifier = Modifier.hoverable(chromeHover),
+			)
 		}
 	}
 }
@@ -249,6 +295,7 @@ private fun PagedReader(
 	doublePage: Boolean,
 	coverOffset: Boolean,
 	onPageChange: (Int) -> Unit,
+	onVisibleThrough: (Int) -> Unit,
 	onNextPage: () -> Unit,
 	onPreviousPage: () -> Unit,
 	onToggleChrome: () -> Unit,
@@ -293,6 +340,10 @@ private fun PagedReader(
 	// turn advances by two and the saved position is the page actually being read.
 	LaunchedEffect(spreadIndex) {
 		if (spread.first != state.currentPage) onPageChange(spread.first)
+		// The *right-hand* page of a double spread, which is one past the page the position is
+		// recorded against. Preloading from the left one would spend the first page of its budget
+		// on a page already on screen.
+		onVisibleThrough(spread.last)
 	}
 }
 
@@ -336,6 +387,7 @@ private fun WebtoonReader(
 	background: ReaderBackground,
 	zoom: Float,
 	onScroll: (page: Int, fraction: Float) -> Unit,
+	onVisibleThrough: (Int) -> Unit,
 	onZoom: (Float) -> Unit,
 	onToggleChrome: () -> Unit,
 ) {
@@ -359,6 +411,21 @@ private fun WebtoonReader(
 		}
 	}
 
+	// Obey a seek, and only a seek.
+	//
+	// Keyed on `seekId` rather than on `currentPage`, because the strip is what *sets*
+	// `currentPage` as it scrolls -- reacting to that number would make every scroll trigger a
+	// scroll. `seekId` moves only when something asked to go somewhere: a page tick, a scrub of
+	// the bottom bar, an arrow key. See ReaderUiState.seekId.
+	//
+	// Animated rather than jumped. A strip that teleports gives no sense of how far it went, which
+	// is most of what someone dragging along the tick row is trying to feel out.
+	LaunchedEffect(state.seekId) {
+		if (state.seekId > 0 && state.pageCount > 0) {
+			listState.animateScrollToItem(state.currentPage.coerceIn(0, state.pageCount - 1))
+		}
+	}
+
 	LaunchedEffect(listState) {
 		snapshotFlow {
 			val info = listState.layoutInfo.visibleItemsInfo.firstOrNull()
@@ -371,6 +438,19 @@ private fun WebtoonReader(
 		}
 			.distinctUntilChanged()
 			.collect { (page, fraction) -> onScroll(page, fraction) }
+	}
+
+	// The bottom edge of the viewport, separately from the top.
+	//
+	// A separate flow rather than a third component of the one above, because the two change at
+	// different rates: the position is written to the database on a debounce and only needs the
+	// page the reader is *on*, while this drives prefetching and wants to move the instant another
+	// page comes into view. Folding them together would either write the database more often or
+	// prefetch less often, and neither is a trade worth making.
+	LaunchedEffect(listState) {
+		snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+			.distinctUntilChanged()
+			.collect(onVisibleThrough)
 	}
 
 	// Read through `rememberUpdatedState` because the wheel handler below is installed once and
@@ -523,19 +603,37 @@ private fun ReaderPageImage(
  * downloading at the moment it is asked for, and the depth setting would only shorten the time
  * spent waiting for a redirect rather than for the image.
  *
- * Three things keep it from being a download-the-internet button:
+ * ## Why it counts from [anchor] rather than from the current page
  *
- *  - **Only pages whose url is already resolved.** Resolution is bounded by the same setting, so
- *    this can never run ahead of it and start guessing.
+ * The current page is the page the *position* is recorded against, which in webtoon mode is the
+ * one at the top edge of the window. Counting six pages forward from there is not six pages of
+ * warning -- on a tall window several of those six are already on screen, and on a strip zoomed
+ * out far enough the whole budget can be spent on pages the reader is looking at. The effect was a
+ * setting that appeared to do nothing: pages still arrived blank and filled in a beat later,
+ * exactly as if nothing were being preloaded, because in practice nothing past the viewport was.
+ *
+ * [anchor] is the far edge of the viewport instead, so the depth is measured from where the
+ * artwork runs out. Six means six pages *beyond what you can see*, in both modes, at any zoom and
+ * any window height.
+ *
+ * Three things still keep it from being a download-the-internet button:
+ *
+ *  - **Only pages whose url is already resolved.** Resolution is bounded by the same setting and
+ *    keyed off the same anchor, so this can never run ahead of it and start guessing.
  *  - **Forward only.** Going back a page is served by the memory cache, which still holds what was
  *    just read; spending a request to re-warm it would be work done to avoid work already done.
  *  - **Enqueued, not awaited.** `enqueue` hands the request to Coil's own dispatcher and returns,
  *    so a slow source cannot stall the page the reader is looking at.
  */
 @Composable
-private fun PreloadPages(state: ReaderUiState, preloadPages: Int, loader: ImageLoader?) {
+private fun PreloadPages(
+	state: ReaderUiState,
+	preloadPages: Int,
+	loader: ImageLoader?,
+	anchor: Int,
+) {
 	if (loader == null) return
-	LaunchedEffect(state.currentPage, state.pages, preloadPages, state.imageHeaders, loader) {
+	LaunchedEffect(anchor, state.pages, preloadPages, state.imageHeaders, loader) {
 		val depth = if (preloadPages <= 0) state.pages.size else preloadPages
 		// Best-effort, and swallowing the failure is the point rather than a shortcut. Warming a
 		// cache is not something the reader depends on: if a prefetch cannot be enqueued the page
@@ -543,7 +641,7 @@ private fun PreloadPages(state: ReaderUiState, preloadPages: Int, loader: ImageL
 		// screen someone is reading to save them a wait they would not have noticed.
 		runCatching {
 			for (offset in 1..depth) {
-				val page = state.pages.getOrNull(state.currentPage + offset) ?: break
+				val page = state.pages.getOrNull(anchor + offset) ?: break
 				val url = page.resolvedUrl ?: continue
 				loader.enqueue(AgehaImages.readerRequest(url, state.imageHeaders))
 			}
@@ -801,11 +899,24 @@ private fun <T> EnumMenu(
 	}
 }
 
+/**
+ * The bottom bar: where you are in the manga, and how to move around it.
+ *
+ * Chapter navigation lives here rather than in the top pill, and the reason is space that actually
+ * exists. The top pill already carries the title, the progress block, four option chips and Close,
+ * and at the 880px minimum window those overflow it before three more buttons are added. This bar
+ * carries two short labels and a row of ticks, and -- more to the point -- it is the bar that is
+ * *about* the chapter. "Ch 3 of 40" and the buttons that change which chapter that is belong
+ * together; splitting them across the two ends of the screen would be filing by convenience.
+ */
 @Composable
 private fun ReaderStatusBar(
 	state: ReaderUiState,
 	chrome: ReaderChrome,
 	onSeek: (Int) -> Unit,
+	onNextChapter: () -> Unit,
+	onPreviousChapter: () -> Unit,
+	onOpenChapterList: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
 	Row(
@@ -819,17 +930,136 @@ private fun ReaderStatusBar(
 		horizontalArrangement = Arrangement.spacedBy(14.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
+		// Disabled rather than hidden at the ends of a manga. A control that vanishes takes the
+		// other two with it as it reflows, and the first chapter is exactly where someone is still
+		// learning where these buttons are.
+		ChapterButton(
+			label = "Prev",
+			chrome = chrome,
+			enabled = state.hasPreviousChapter,
+			accessibleName = "Previous chapter",
+			tag = PREV_CHAPTER_TAG,
+			leading = true,
+			onClick = onPreviousChapter,
+		)
+		ChapterButton(
+			label = "Chapters",
+			chrome = chrome,
+			enabled = state.manga != null,
+			accessibleName = "All chapters of this manga",
+			tag = CHAPTER_LIST_TAG,
+			glyph = ChapterGlyph.LIST,
+			onClick = onOpenChapterList,
+		)
+		ChapterButton(
+			label = "Next",
+			chrome = chrome,
+			enabled = state.hasNextChapter,
+			accessibleName = "Next chapter",
+			tag = NEXT_CHAPTER_TAG,
+			leading = false,
+			onClick = onNextChapter,
+		)
+		StatusDivider(chrome)
 		Text(
-			"Ch ${state.chapterIndex + 1} of ${state.chapterCount}",
+			"Ch ${state.chapterIndex + 1} of ${state.chapterCount.coerceAtLeast(1)}",
 			style = AgehaTextStyles.monoMeta,
 			color = chrome.subdued,
 		)
-		PageTicks(state, chrome, onSeek)
-		Text(
-			"${state.pageCount} pages",
-			style = AgehaTextStyles.monoMeta,
-			color = chrome.subdued,
-		)
+		// The two readouts that are derived from a page list, and so are drawn only once there is
+		// one. See the visibility comment in [ReaderScreen].
+		if (state.pages.isNotEmpty()) {
+			PageTicks(state, chrome, onSeek)
+			Text(
+				"${state.pageCount} pages",
+				style = AgehaTextStyles.monoMeta,
+				color = chrome.subdued,
+			)
+		}
+	}
+}
+
+/** The 1x22 rule between the chapter buttons and the chapter readout. */
+@Composable
+private fun StatusDivider(chrome: ReaderChrome) {
+	Box(Modifier.width(1.dp).height(22.dp).background(chrome.subdued.copy(alpha = 0.35f)))
+}
+
+/** Which mark a [ChapterButton] draws beside its label. */
+private enum class ChapterGlyph { CARET, LIST }
+
+/**
+ * One chapter-navigation button.
+ *
+ * Neutral throughout, like everything else in the reader: the fill, the border and the mark are all
+ * alphas of `chrome.content`, which is derived from the user's chosen reader background rather than
+ * from the app theme. Nothing brand-coloured reaches this screen -- CLAUDE.md rule 8, and
+ * `ReaderNeutralityTest` measures it.
+ *
+ * The caret sits on the side the button travels: before "Prev", after "Next". It is the only thing
+ * distinguishing two buttons that are otherwise the same shape, and putting both carets on the same
+ * side would make the pair read as a list rather than as a direction.
+ */
+@Composable
+private fun ChapterButton(
+	label: String,
+	chrome: ReaderChrome,
+	enabled: Boolean,
+	accessibleName: String,
+	tag: String,
+	onClick: () -> Unit,
+	leading: Boolean = false,
+	glyph: ChapterGlyph = ChapterGlyph.CARET,
+) {
+	val shape = MaterialTheme.shapes.medium
+	// A disabled button still has to be legible as a button, or the row develops holes. It loses
+	// its border and most of its fill, and keeps enough ink to read.
+	val ink = if (enabled) chrome.content else chrome.subdued.copy(alpha = 0.55f)
+	Row(
+		Modifier
+			.clip(shape)
+			.background(chrome.content.copy(alpha = if (enabled) 0.07f else 0.03f))
+			.border(1.dp, chrome.content.copy(alpha = if (enabled) 0.16f else 0.06f), shape)
+			.clickable(enabled = enabled, onClick = onClick)
+			.padding(horizontal = AgehaSpacing.md, vertical = AgehaSpacing.sm)
+			.testTag(tag)
+			.semantics { contentDescription = accessibleName },
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(6.dp),
+	) {
+		if (glyph == ChapterGlyph.LIST) {
+			ChapterListGlyph(ink)
+		} else if (leading) {
+			ChapterCaret(ink, pointsLeft = true)
+		}
+		Text(label, style = MaterialTheme.typography.labelMedium, color = ink)
+		if (glyph == ChapterGlyph.CARET && !leading) {
+			ChapterCaret(ink, pointsLeft = false)
+		}
+	}
+}
+
+/** A single chevron. Drawn rather than typed, for the reason [ReaderChip]'s caret is. */
+@Composable
+private fun ChapterCaret(color: Color, pointsLeft: Boolean) {
+	Canvas(Modifier.size(7.dp)) {
+		val w = 1.4.dp.toPx()
+		val tip = if (pointsLeft) 0f else size.width
+		val tail = if (pointsLeft) size.width else 0f
+		drawLine(color, Offset(tail, 0f), Offset(tip, size.height / 2f), w, StrokeCap.Round)
+		drawLine(color, Offset(tail, size.height), Offset(tip, size.height / 2f), w, StrokeCap.Round)
+	}
+}
+
+/** Three stacked rules: the universal "here is a list" mark, at the icon weight of everything else. */
+@Composable
+private fun ChapterListGlyph(color: Color) {
+	Canvas(Modifier.size(9.dp)) {
+		val w = 1.4.dp.toPx()
+		for (row in 0..2) {
+			val y = size.height * row / 2f
+			drawLine(color, Offset(0f, y), Offset(size.width, y), w, StrokeCap.Round)
+		}
 	}
 }
 
@@ -858,7 +1088,55 @@ private fun PageTicks(state: ReaderUiState, chrome: ReaderChrome, onSeek: (Int) 
 	val total = state.pageCount
 	if (total <= 1) return
 	val shown = minOf(total, MAX_TICKS)
-	Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+	// Measured rather than assumed, because the mapping from a pointer position to a page has to
+	// agree with where the ticks were actually laid out -- and the row's width is whatever the
+	// ticks and their gaps came to.
+	var rowWidth by remember { mutableIntStateOf(0) }
+	val seek = rememberUpdatedState(onSeek)
+
+	/** Which page the pointer is over. Clamped, so a drag past either end pins to that end. */
+	fun pageAt(x: Float): Int {
+		if (rowWidth <= 0) return 0
+		val fraction = (x / rowWidth).coerceIn(0f, 1f)
+		return (fraction * (total - 1)).roundToInt().coerceIn(0, total - 1)
+	}
+
+	Row(
+		Modifier
+			.onSizeChanged { rowWidth = it.width }
+			// A scrubber, not a row of buttons.
+			//
+			// Each tick used to carry its own `clickable`, which meant the only way to move was to
+			// hit one 6dp target, and above the 40-tick cap most pages had no target at all. This
+			// takes the whole row: press anywhere to jump there, then keep dragging to travel
+			// through the chapter continuously -- which is what a progress bar is *for*, and what
+			// was asked for.
+			//
+			// `awaitEachGesture` rather than `detectHorizontalDragGestures` plus a tap detector:
+			// two detectors on one modifier race for the same down event, and the loser never sees
+			// the gesture. This handles press and drag as the one gesture they are.
+			.pointerInput(total, rowWidth) {
+				awaitEachGesture {
+					val down = awaitFirstDown()
+					down.consume()
+					seek.value(pageAt(down.position.x))
+					// Every subsequent position in the same gesture, until the pointer lifts.
+					// Consumed so a drag along the bar is never also read as a page turn by the
+					// reader underneath it.
+					while (true) {
+						val event = awaitPointerEvent()
+						val change = event.changes.firstOrNull { it.id == down.id } ?: break
+						if (!change.pressed) break
+						if (change.position != change.previousPosition) {
+							seek.value(pageAt(change.position.x))
+						}
+						change.consume()
+					}
+				}
+			},
+		horizontalArrangement = Arrangement.spacedBy(3.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
 		for (slot in 0 until shown) {
 			// Which real page this tick stands for. Identity while under the cap; an even sample
 			// above it.
@@ -876,8 +1154,7 @@ private fun PageTicks(state: ReaderUiState, chrome: ReaderChrome, onSeek: (Int) 
 							isRead -> chrome.content.copy(alpha = 0.45f)
 							else -> chrome.subdued.copy(alpha = 0.30f)
 						},
-					)
-					.clickable { onSeek(page) },
+					),
 			)
 		}
 	}
@@ -990,3 +1267,14 @@ private val WHEEL_NOTCH = 165.dp
  * needs a tag rather than a text finder.
  */
 const val PAGE_COUNTER_TAG = "page-counter"
+
+/**
+ * Test tags for the chapter controls.
+ *
+ * Public for the same reason [PAGE_COUNTER_TAG] is: these are the controls a journey test drives to
+ * get from one chapter to the next, and "the first button in the bottom bar" is a locator that
+ * breaks the next time the bar gains a control.
+ */
+const val PREV_CHAPTER_TAG = "reader-prev-chapter"
+const val NEXT_CHAPTER_TAG = "reader-next-chapter"
+const val CHAPTER_LIST_TAG = "reader-chapter-list"

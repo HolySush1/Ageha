@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -28,11 +31,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -61,6 +68,8 @@ val TITLE_BAR_HEIGHT = 38.dp
 const val SKIN_EMBER_TAG = "titlebar-skin-ember"
 const val SKIN_GLASS_TAG = "titlebar-skin-glass"
 const val WINDOW_CLOSE_TAG = "titlebar-close"
+const val WINDOW_MINIMIZE_TAG = "titlebar-minimize"
+const val WINDOW_MAXIMIZE_TAG = "titlebar-maximize"
 
 /**
  * Ageha's own title bar, replacing the operating system's.
@@ -72,9 +81,13 @@ const val WINDOW_CLOSE_TAG = "titlebar-close"
  * app's own mark at a size the OS would have downscaled from a 256px icon. The handoff builds its
  * whole top edge around those, and half of it cannot exist inside a Windows caption.
  *
- * The cost is that everything a native caption did for free now has to be written: dragging,
- * double-click to maximise, the three window buttons, and eight resize edges. Those live in
- * `WindowResize.kt`; this file is the strip itself.
+ * The cost is that everything a native caption did for free now has to be written, and *all* of it
+ * has to be written -- a caption that is nine tenths of the way there is a window that feels
+ * broken in one specific way its owner cannot name. What that means concretely: the buttons run to
+ * the frame's own edge in Windows' order, they light under the pointer, the middle one turns into
+ * a restore mark once the window is maximised, double-clicking the bar maximises, dragging a
+ * maximised window restores it under the cursor, and eight edges resize. The drag and the resize
+ * edges live in `WindowResize.kt`; this file is the strip itself.
  *
  * **One thing does not come back.** Dragging this window to a screen edge will not trigger
  * Windows' Aero Snap, because snap is driven by the non-client hit-testing an undecorated window
@@ -99,6 +112,15 @@ fun AgehaTitleBar(
 	onToggleMaximize: () -> Unit,
 	onClose: () -> Unit,
 	modifier: Modifier = Modifier,
+	/**
+	 * Whether the window is maximised right now.
+	 *
+	 * Drives the middle button's glyph and its accessible name, because on Windows that button is
+	 * two buttons wearing one slot: a square that maximises, and a pair of offset squares that
+	 * restores. A button that keeps saying "maximise" while the window already fills the screen
+	 * is the single most obvious tell that a caption was drawn rather than provided.
+	 */
+	isMaximized: Boolean = false,
 ) {
 	val skin = AgehaTheme.skin
 	Row(
@@ -111,7 +133,11 @@ fun AgehaTitleBar(
 			// feature. On the bar itself rather than on the drag area, because the drag detector
 			// consumes the events it handles and would never see a second tap.
 			.pointerInput(Unit) { detectTapGestures(onDoubleTap = { onToggleMaximize() }) }
-			.padding(start = AgehaSpacing.md, end = AgehaSpacing.xs),
+			// No padding at the trailing end. The window buttons run to the frame's own edge,
+			// the way every Windows caption does -- the corner is the largest target on the
+			// screen precisely because there is nothing between it and the edge, and a few
+			// millimetres of inset throws that away for symmetry nobody asked for.
+			.padding(start = AgehaSpacing.md),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		// The app tile. The handoff draws a monogram here because its prototype has no artwork;
@@ -139,14 +165,23 @@ fun AgehaTitleBar(
 			color = skin.inkFaint,
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
-			// Allowed to shrink, not to grow. A long context line truncates instead of pushing
-			// the skin switcher and the window buttons off the edge of a narrow window.
-			modifier = Modifier.weight(1f, fill = false),
+			// This weight is what pins everything after it to the right edge, and it has to be a
+			// *filling* one.
+			//
+			// It used to be `weight(1f, fill = false)` followed by a `Spacer(Modifier.weight(1f))`,
+			// which looks like the same thing and is not: a Row splits its leftover space between
+			// weighted children by weight, so the spacer only ever received half of it. The other
+			// half was the share this text declined to fill, and with the default `Arrangement.Start`
+			// that surplus collected *after* the last child -- leaving the skin switcher and the
+			// window buttons floating in the middle of the bar with a dead gap between them and the
+			// corner. Filling here gives the text every pixel that is going, so the controls sit
+			// hard against the edge at any window width, and the line still truncates rather than
+			// pushing them off it.
+			modifier = Modifier.weight(1f),
 		)
-		Spacer(Modifier.weight(1f))
 		SkinSwitcher(theme = theme, onTheme = onTheme)
 		Spacer(Modifier.width(AgehaSpacing.sm))
-		WindowButtons(onMinimize, onToggleMaximize, onClose)
+		WindowButtons(onMinimize, onToggleMaximize, onClose, isMaximized)
 	}
 }
 
@@ -220,17 +255,26 @@ private fun Swatch(
 }
 
 /**
- * Minimise, maximise, close.
+ * Minimise, maximise/restore, close.
  *
  * Drawn rather than typed. The handoff writes them as `-`, `▢` and `✕`, and two of those are
  * characters Archivo does not carry -- a text implementation would fall through to whatever face
  * Skia found next and put three mismatched glyphs in the corner of every window. A 1.5dp stroke on
  * a `Canvas` is the same weight as every other icon in the interface and cannot go missing.
+ *
+ * The order is Windows' own -- minimise, maximise, close, left to right -- and it is not a
+ * preference. It is muscle memory: a user's hand goes to the far corner for close without looking,
+ * and any other arrangement means they occasionally close a window they meant to minimise.
  */
 @Composable
-private fun WindowButtons(onMinimize: () -> Unit, onToggleMaximize: () -> Unit, onClose: () -> Unit) {
+private fun WindowButtons(
+	onMinimize: () -> Unit,
+	onToggleMaximize: () -> Unit,
+	onClose: () -> Unit,
+	isMaximized: Boolean,
+) {
 	Row(verticalAlignment = Alignment.CenterVertically) {
-		WindowButton("Minimise", onMinimize) { color ->
+		WindowButton("Minimise", onMinimize, tag = WINDOW_MINIMIZE_TAG) { color ->
 			drawLine(
 				color,
 				Offset(0f, size.height / 2),
@@ -239,8 +283,29 @@ private fun WindowButtons(onMinimize: () -> Unit, onToggleMaximize: () -> Unit, 
 				StrokeCap.Round,
 			)
 		}
-		WindowButton("Maximise", onToggleMaximize) { color ->
-			drawRect(color, style = Stroke(1.5.dp.toPx()))
+		// One slot, two buttons. See `isMaximized` on [AgehaTitleBar].
+		WindowButton(
+			label = if (isMaximized) "Restore" else "Maximise",
+			onClick = onToggleMaximize,
+			tag = WINDOW_MAXIMIZE_TAG,
+		) { color ->
+			val stroke = 1.5.dp.toPx()
+			if (isMaximized) {
+				// Windows' restore mark: a square with a second one peeking out behind its top
+				// right corner. Both are drawn at three quarters of the glyph box so the pair
+				// occupies the same optical area as the single square it replaces -- otherwise
+				// the button visibly grows when you maximise the window.
+				val side = size.width * 0.75f
+				val offset = size.width - side
+				translate(left = offset) {
+					drawRect(color, size = Size(side, side), style = Stroke(stroke))
+				}
+				translate(top = offset) {
+					drawRect(color, size = Size(side, side), style = Stroke(stroke))
+				}
+			} else {
+				drawRect(color, style = Stroke(stroke))
+			}
 		}
 		WindowButton("Close", onClose, tag = WINDOW_CLOSE_TAG, isDestructive = true) { color ->
 			drawLine(color, Offset(0f, 0f), Offset(size.width, size.height), 1.5.dp.toPx(), StrokeCap.Round)
@@ -257,13 +322,42 @@ private fun WindowButton(
 	isDestructive: Boolean = false,
 	draw: DrawScope.(Color) -> Unit,
 ) {
-	// Close is the one button whose mistake cannot be undone, so it is the one that is coloured.
-	// Everything else in this row is `--ink2` and stays there.
-	val tint = if (isDestructive) AgehaTheme.skin.accent else MaterialTheme.colorScheme.onSurfaceVariant
+	// Hover feedback, which on Windows is not decoration -- it is the only thing that tells you
+	// which of three unlabelled 46dp glyphs your pointer is actually on. Without it these read as
+	// three marks painted on the bar rather than as buttons, and people click the wrong one.
+	//
+	// Close gets the loud treatment for the same reason Windows gives it one: it fills, and the
+	// glyph inverts onto the fill. The other two get a quiet raised step. `error`/`onError` rather
+	// than the skin accent, because that is the one pair in the palette the contrast test already
+	// guarantees is legible together in every theme.
+	val interaction = remember { MutableInteractionSource() }
+	val isHovered by interaction.collectIsHoveredAsState()
+	val fill = when {
+		!isHovered -> Color.Transparent
+		isDestructive -> MaterialTheme.colorScheme.error
+		else -> MaterialTheme.colorScheme.surfaceContainerHighest
+	}
+	val tint = when {
+		isHovered && isDestructive -> MaterialTheme.colorScheme.onError
+		// Close is the one button whose mistake cannot be undone, so it is the one that is
+		// coloured at rest. Everything else in this row is `--ink2` and stays there.
+		isDestructive -> AgehaTheme.skin.accent
+		isHovered -> MaterialTheme.colorScheme.onSurface
+		else -> MaterialTheme.colorScheme.onSurfaceVariant
+	}
 	Box(
 		Modifier
-			.size(width = 34.dp, height = TITLE_BAR_HEIGHT)
-			.clickable(onClick = onClick)
+			.size(width = 46.dp, height = TITLE_BAR_HEIGHT)
+			.background(fill)
+			.hoverable(interaction)
+			// An arrow, not the text caret the title bar's context line would otherwise leak onto
+			// its neighbours, and not a hand either -- native caption buttons do not use one.
+			.pointerHoverIcon(PointerIcon.Default)
+			.clickable(
+				interactionSource = interaction,
+				indication = null,
+				onClick = onClick,
+			)
 			.then(if (tag != null) Modifier.testTag(tag) else Modifier)
 			.semantics { contentDescription = label },
 		contentAlignment = Alignment.Center,

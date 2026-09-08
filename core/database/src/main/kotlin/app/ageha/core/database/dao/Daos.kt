@@ -84,6 +84,16 @@ interface HistoryDao {
 	@Query("SELECT * FROM history WHERE manga_id = :mangaId AND deleted_at = 0")
 	suspend fun find(mangaId: Long): HistoryEntity?
 
+	/**
+	 * One manga's position, as a subscription.
+	 *
+	 * The details screen needs this live rather than fetched once: marking a chapter read writes
+	 * this row, and a screen that had read it at open time would keep drawing the old markers
+	 * until it was navigated away from and back.
+	 */
+	@Query("SELECT * FROM history WHERE manga_id = :mangaId AND deleted_at = 0")
+	fun observe(mangaId: Long): Flow<HistoryEntity?>
+
 	@Upsert
 	suspend fun upsert(entry: HistoryEntity)
 

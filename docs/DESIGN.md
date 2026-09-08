@@ -594,6 +594,40 @@ has to show both skins at once — exactly one of two swatches can come from the
 `AgehaSkin.EmberSwatch` and `GlassSwatch` are literal, live in the design system, and are used
 nowhere else.
 
+### 11.2a The default ink is provided, not inherited
+
+`Text` with no `color` resolves `LocalContentColor`. Its default value is **`Color.Black`**, and
+Material only overrides it from inside a `Surface` — a container Ageha does not use. `MaterialTheme`
+does not provide it; a `colorScheme` does nothing for it. Ageha therefore drew 69 of its 187 `Text`
+call sites in black on a near-black window, including every chapter title in the chapter list.
+
+`AgehaTheme` provides `onSurface`. One place, not 69, because the 70th call site would have been
+written black too — and `DefaultTextColorTest` asserts the resolved default in every theme.
+
+The lesson worth keeping: every colour check in this project — the contrast tests, the palette
+tests, the review screenshots — inspects a colour that is *named*. None of them could see text that
+names none. A design system needs a test for its defaults, not only for its tokens.
+
+### 11.2b The third ink is repaired, not transcribed
+
+`--ink3` is the handoff's quietest text colour and Ageha draws real words in it — the title bar's
+context line, every mono count, every settings hint, the meta line under every cover. Transcribed
+literally it measured **1.26:1** in AMOLED, **1.87:1** in Light, 2.85:1 in Ember and 3.16:1 in
+Glass against surfaces the app really draws it on. AA asks 4.5:1 of body text; 3:1 is the floor for
+a mark carrying *no* text at all. All four failed both.
+
+`PaletteGenerator.textSafeInk` walks it in tone — lighter in a dark theme, darker in a light one —
+until the worst pairing across the whole surface ramp clears 4.5:1, and stops there. Same shape as
+`textSafeAccent` and the same bargain: the handoff's exact hex is worth having right up to the
+point where holding it makes the text unreadable. Hue and chroma are held, so the ink stays warm in
+Ember and cool in Glass; it is lifted to the threshold and no further, so it is still quieter than
+`onSurfaceVariant`. `AgehaContrastTest` holds both properties.
+
+Two things let this ship. The contrast tests covered the roles *Material* names, and `--ink3` has
+none — so the app's second most-used text colour was the one colour nothing measured. And
+`renderShell` only ever rendered Ember and Glass, so the two themes where it was worst were the two
+nobody was ever shown a picture of. It renders all four now.
+
 ### 11.3 The blur does not exist, and cannot
 
 `--blur: blur(22px)` is a `backdrop-filter`. Compose Desktop has none: `Modifier.blur` blurs a
@@ -658,8 +692,20 @@ and barely legible on Paper — two of the four backgrounds that screen offers.
 
 The window is undecorated so the title bar can carry what a native caption cannot: a context line
 with live counts, the skin switcher, and the app's own mark at 21dp. What a caption did for free is
-written back in `TitleBar.kt` and `WindowResize.kt` — dragging, double-click to maximise, three
-window buttons, eight resize edges anchored to the drag origin so they do not drift.
+written back in `TitleBar.kt` and `WindowResize.kt`, and *all* of it has to be — a caption that is
+nine tenths of the way there is a window that feels broken in one way its owner cannot name:
+
+- the buttons run to the frame's own edge in Windows' order, minimise, maximise, close, so the
+  corner is the large target it is everywhere else (`TitleBarTest` measures it);
+- they light under the pointer — close fills `error` and inverts its mark onto `onError`, the other
+  two take a `surfaceContainerHighest` step — because three unlabelled 9dp marks otherwise give no
+  clue which one is under the cursor;
+- the middle one draws a restore glyph and renames itself once the window is maximised;
+- double-clicking the bar maximises;
+- dragging a *maximised* window restores it under the cursor and keeps following, rather than
+  sliding a screen-filling frame half off the display, which is what moving a maximised frame
+  actually does;
+- eight resize edges anchored to the drag origin so they do not drift.
 
 **One thing does not come back.** Edge-drag Aero Snap is driven by non-client hit-testing that an
 undecorated window has opted out of; restoring it needs `WM_NCHITTEST` over JNI. `Win`+arrow still

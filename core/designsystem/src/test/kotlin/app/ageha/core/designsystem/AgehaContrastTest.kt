@@ -82,6 +82,75 @@ class AgehaContrastTest {
 	}
 
 	/**
+	 * The tables of non-Material tokens, alongside the schemes they belong to.
+	 *
+	 * Paired rather than iterated separately, because the only interesting question about a skin
+	 * token is how it measures against *its own* theme's surfaces.
+	 */
+	private val skins = listOf(
+		Triple("light", AgehaColorTokens.Light, AgehaSkinTokens.Light),
+		Triple("ember", AgehaColorTokens.Ember, AgehaSkinTokens.Ember),
+		Triple("glass", AgehaColorTokens.Glass, AgehaSkinTokens.Glass),
+		Triple("amoled", AgehaColorTokens.Amoled, AgehaSkinTokens.Amoled),
+	)
+
+	/** Every surface step Ageha draws body text on. */
+	private fun surfaceRamp(s: AgehaScheme): List<Pair<String, Color>> = listOf(
+		"surface" to s.surface,
+		"surfaceDim" to s.surfaceDim,
+		"surfaceBright" to s.surfaceBright,
+		"surfaceVariant" to s.surfaceVariant,
+		"surfaceContainerLowest" to s.surfaceContainerLowest,
+		"surfaceContainerLow" to s.surfaceContainerLow,
+		"surfaceContainer" to s.surfaceContainer,
+		"surfaceContainerHigh" to s.surfaceContainerHigh,
+		"surfaceContainerHighest" to s.surfaceContainerHighest,
+	)
+
+	/**
+	 * The third ink is text, and is held to the text floor.
+	 *
+	 * The gap this closes: `inkFaint` has no Material role, so nothing above covers it -- and it
+	 * is the colour of the title bar's context line, every mono count, every settings hint and
+	 * the meta line under every cover. Left underived it measured 1.26:1 in AMOLED and 1.87:1 in
+	 * Light against surfaces the app really does draw it on, which is not "quiet", it is
+	 * invisible. `PaletteGenerator.textSafeInk` lifts it to this floor; this is what keeps it
+	 * there when someone next transcribes a skin.
+	 */
+	@TestFactory
+	fun `the third ink meets WCAG AA in every theme`(): List<DynamicTest> =
+		skins.flatMap { (name, scheme, skin) ->
+			surfaceRamp(scheme).map { (label, bg) ->
+				DynamicTest.dynamicTest("$name: inkFaint/$label") {
+					val r = ratio(skin.inkFaint, bg)
+					assertTrue(r >= 4.5) {
+						"$name inkFaint on $label is %.2f:1, below the 4.5:1 AA floor".format(r)
+					}
+				}
+			}
+		}
+
+	/**
+	 * And it is still the *third* ink, not a second copy of the second.
+	 *
+	 * The repair above walks the ink toward legibility, and an over-eager walk would land it on
+	 * top of `onSurfaceVariant` -- at which point the palette has three inks and two tones, and
+	 * the hierarchy the handoff draws with stops existing. This asserts the ordering survives.
+	 */
+	@TestFactory
+	fun `the third ink stays quieter than the second`(): List<DynamicTest> =
+		skins.map { (name, scheme, skin) ->
+			DynamicTest.dynamicTest(name) {
+				val second = ratio(scheme.onSurfaceVariant, scheme.surface)
+				val third = ratio(skin.inkFaint, scheme.surface)
+				assertTrue(third < second) {
+					("$name inkFaint is %.2f:1 against surface and onSurfaceVariant is %.2f:1 -- " +
+						"the third ink is no longer quieter than the second").format(third, second)
+				}
+			}
+		}
+
+	/**
 	 * Borders and dividers are not text, so AA does not apply, but they still have to be visible.
 	 * WCAG's non-text threshold is 3:1; `outlineVariant` is deliberately allowed to be quieter
 	 * than that because it separates rather than delimits, so only `outline` is held to it.

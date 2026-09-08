@@ -136,6 +136,14 @@ data class LibraryEntry(
 	val lastReadAt: Long?,
 	val progressPercent: Float?,
 	val newChapters: Int,
+	/**
+	 * The number of the chapter last read, when the stored chapter row carries one.
+	 *
+	 * Null in two ordinary cases: history imported from an Android backup, which brings positions
+	 * without chapter rows, and a source that numbers nothing. The card drops the number rather
+	 * than printing "Chapter null".
+	 */
+	val lastChapterNumber: Float? = null,
 ) {
 	val hasBeenRead: Boolean get() = lastReadAt != null
 
@@ -144,6 +152,7 @@ data class LibraryEntry(
 			manga = MangaMapping.toModel(row.manga),
 			lastReadAt = row.updatedAt.takeIf { it > 0 },
 			progressPercent = row.percent.takeIf { it >= 0f },
+			lastChapterNumber = row.chapterNumber?.takeIf { it > 0f },
 			// A source that *loses* chapters -- a rescrape, a removed branch -- would otherwise
 			// produce a negative badge. Clamped, because "-3 new chapters" is never right.
 			newChapters = ((currentChapterCount ?: row.chaptersAtLastRead) - row.chaptersAtLastRead)

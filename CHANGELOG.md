@@ -8,11 +8,83 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
-- **A command panel, on `Ctrl+K` or the magnifier in the navigation pill.** One field, over
-  whatever screen you are on. It filters your library from the first keystroke, then asks every
-  enabled source and appends what they find underneath. It replaced two controls that each did
-  half of that: the library's own search box, which could not reach a source, and a separate
-  search screen, which could not see your library.
+- **Chapters can be marked read and unread, from a right-click.** On a chapter row it is "Mark
+  read up to here" / "Mark unread from here"; on a library cover it is the whole title at once.
+  Read chapters recede to the secondary ink, the one you stopped part-way through says `reading`,
+  and everything ahead is left unmarked.
+  - Both labels say how far they reach, because both reach past the row that was clicked. A menu
+    that said only "Mark as read" would look like it had marked the wrong forty chapters.
+  - **Read state is a prefix, not a set of flags, and that is stated rather than hidden.** The
+    Android schema Ageha stays importable from keeps *one* reading position per manga and has no
+    per-chapter table, so marking read moves that position rather than setting flags — which is
+    also what upstream does. There is no way to say "read 1–10 and 30–40 but not 11–29", and a
+    schema with room to say it is a schema a backup could not cross.
+  - Marking read writes a position `resume` reads as *finished*, so continuing afterwards opens
+    the chapter **after** the one just marked rather than reopening it.
+  - Branch-local, for the same reason resuming is: chapter order only means anything within one
+    scanlation branch, so marking read on the English branch says nothing about the French one.
+  - Marking a never-opened title read from the grid says so instead of doing nothing. There are no
+    chapter rows to point a position at until something has been opened once.
+- **A "Continue reading" button on the details screen**, beside "Remove from library", shown once
+  a title has been started. It resolves through the same pipeline Continue Reading has always
+  used, so it inherits all three of that pipeline's answers — open the reader, fetch a chapter
+  list first, or offer a cross-source search for a source this parsers build no longer has —
+  rather than re-deriving them and disagreeing.
+- **The chapter list opens on the chapter you were last reading**, a couple of rows down from the
+  top so there is context above it, and the header states the position as `Chapter 214 · 45%`.
+  The number is the half that was missing: a percentage says how much is left and nothing about
+  where you are, which for a 900-chapter series is the less useful of the two.
+- **Library cards read `Ch 214 · 45%`** rather than a bare percentage. The chapter number comes
+  from the history join, so it is the chapter you stopped on rather than a claim about how many
+  there are — which is why it is never `Ch 214 / 260`; that total only exists once a source has
+  been asked for a fresh list, and a card in a grid has not asked.
+- **A home button at the right of the navigation pill**, which returns to the library at the top.
+  Not the same thing as the Library word three places to its left: that switches *section*, and
+  each section keeps its own back stack, so pressing it from four screens deep returns you to
+  whatever details screen you last left the library on. Nothing in Ageha took you to the top.
+  It lights only when you are actually there.
+- **A "Default English sources" button on Explore**, beside the search box, that turns them all on
+  in one press. It carries the count it would enable — "+37", not a bare number, because the sign
+  is the part that says this adds rather than replaces — and it is the only *filled* control on a
+  screen where everything else is a ghost outline. That is the point: the chips and the Filters
+  button narrow what you are looking at, this one changes what you have, and two different kinds
+  of consequence should not look alike.
+  - It uses `colorScheme.primary` rather than the skin accent. The accent is the handoff's colour
+    for dots, rules and borders, held to the 3:1 that non-text elements need; neither skin's
+    accent clears 4.5:1 as a fill behind a label, and this fill carries one.
+  - It is not drawn at all once every default is already on. A button that stays put with nothing
+    left to do teaches people, once, that it does nothing.
+  - Pressing it turns on every default that is off, *including* ones switched off earlier — unlike
+    the automatic first-run seed, which only ever acts where no choice exists. Somebody who asks
+    for the default set by name should get the default set; a button that quietly skipped what you
+    once turned off would be one whose result nobody could predict. It never turns anything off,
+    which is why it asks for no confirmation.
+- **A fresh install now starts with about 210 sources on, instead of none.** The rule is English
+  or multi-language, not 18+, and not flagged broken by the parser library — so MangaDex, ComicK,
+  MangaReader.To and the ~200 others that qualify are ready to search on first launch. The other
+  ~1,150 are still off and still one switch away in Explore → Filters → All sources.
+  - It is computed from the catalogue rather than kept as a list of names. A baked list of 210
+    constants would be a second table describing the parsers library, going stale in both
+    directions the moment that library moved: sources renamed upstream would silently drop out,
+    and sources added upstream would never appear.
+  - **It only ever fires on a genuinely first run** — an empty sources table. Anything else and a
+    parsers update that added English sources would quietly switch them on for someone who had
+    curated their own list. Existing installations can opt in with `cli defaults --apply`, which
+    adds only sources you have never ruled on and never re-enables one you turned off.
+  - This reverses what `docs/RUNNING.md` used to promise, and that section is rewritten rather
+    than quietly left standing: Ageha no longer ships with everything off. Nothing is contacted
+    until a source is actually opened, which is the part that mattered.
+- **One search, on `Ctrl+K` or the magnifier in the navigation pill, and it is the full page.**
+  It searches your library *and* every enabled source, grouping each source separately with your
+  own shelf listed first. It replaced two controls that each did half of that: the library's own
+  search box, which could not reach a source, and a cross-source search screen, which could not
+  see your library.
+  - This shipped once as a popover command panel and that was a mistake, reported plainly: *"this
+    small bar causes me to miss out on a lot of searches"*. It was right. The panel was capped at
+    **five rows total — three from your library and two from every enabled source combined.** That
+    is a sensible shape for a command palette jumping to a known destination, and the wrong one
+    for a fan-out across 1360 sites, where the row you wanted was usually the sixth. The panel is
+    gone; the same two shortcuts now open the full page, which caps nothing.
 - **Settings is the handoff's screen now**: seven sections down a rail, and rows that put a label
   and a plain-language hint on the left with one control on the right. The controls are segmented
   groups and real popovers rather than stacks of radio buttons — a popover opens below its button,
@@ -30,6 +102,15 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   narrowing the catalogue no longer means reopening the same menu three times while it covers the
   list it is filtering. The language chips moved into it.
 - **Licences** in Settings → About actually opens now. It was a button that did nothing.
+- **Chapter navigation in the reader.** The bottom bar carries **Prev**, **Chapters** and **Next**
+  beside the "Ch 3 of 40" readout — previous and next chapter, and a way to the chapter list of
+  whatever you are reading. The list button is not the same as Close: closing returns you to
+  wherever the reader was opened from, which is a shelf or a search result as often as it is a
+  chapter list. `C` on the keyboard, next to the existing `N` and `P`.
+  - The bottom bar now appears as soon as the chrome does, rather than waiting for a page list.
+    Its *readouts* still wait — a chapter that has not loaded cannot honestly say "1 / 0" — but a
+    chapter that is loading slowly or has failed outright is exactly when someone wants to skip it
+    or go back to the list, and hiding the buttons along with the numbers made that a dead end.
 
 - **Two skins, Ember and Glass.** The interface is rebuilt to the Ember & Glass design handoff:
   same layout, two materials. Ember is flat — opaque panels, warm near-black, small radii, a red
@@ -56,6 +137,20 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Changed
 
+- **Preloading now counts from the bottom edge of the window rather than from the page the reading
+  position is recorded against.** In webtoon mode those are different pages — often several apart
+  on a tall window or a zoomed-out strip — so "preload 6" was spending part of its budget on
+  artwork already on screen, and past a certain window height it preloaded nothing at all. Pages
+  still arrived blank and filled in a beat later, exactly as if the setting were off. It now means
+  six pages beyond what you can see, in both modes, at any zoom and any window height. Page *url*
+  resolution follows the same edge, so the two halves cannot disagree about where the artwork runs
+  out.
+- **Clicking a row in Continue Reading opens that title's chapter list** — scrolled to where you
+  stopped — instead of jumping straight into the reader. Resuming is one extra click, on the button
+  above; everything else the screen could not previously reach (the chapters either side of the one
+  you stopped on, what you had already read, the description) is one fewer.
+  - An opened archive is the exception and has to be: a CBZ is one chapter with no source behind
+    it, so a chapter list would be empty under a failure notice. It still opens the reader.
 - **The library is one column now.** The shelf rail down the left edge is gone; your shelves are
   chips above the grid, beside the ordering chips, and the width the rail was using went back to
   the covers. The library's search box went with it — `Ctrl+K` searches your library *and* your
@@ -69,6 +164,15 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
   in Settings → Library and backup, and "Open comic archive" moved there too. Every keyboard
   shortcut is unchanged, including `Ctrl+O`.
 - **Settings switches are drawn for a pointer**, not a fingertip.
+- **The window buttons behave like Windows' own.** They light under the pointer — close fills red
+  and inverts its mark, the other two take a quiet raised step — so it is possible to tell which of
+  three unlabelled marks you are about to click. The middle one turns into a restore glyph, and
+  renames itself "Restore", once the window is maximised. And dragging a maximised window's title
+  bar now restores it under the cursor and keeps following, instead of sliding a screen-filling
+  frame half off the screen.
+- **Every theme is rendered for review, not just the two skins.** `renderShell` covered Ember and
+  Glass, which is how a palette ends up with two themes nobody has ever looked at. It now writes
+  all four.
 - **Reader page placeholders follow the reader background.** The "could not be loaded" text and the
   loading spinner were a fixed grey chosen against black; on the Paper and White backgrounds they
   were barely legible.
@@ -83,6 +187,83 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Fixed
 
+- **The chapter list no longer forgets a reading position it was shown a moment ago.** It
+  subscribes to the history row rather than reading it once, so marking a chapter read redraws the
+  markers from what was actually written instead of from an optimistic guess that could disagree
+  with it.
+- **Searching sources on Explore was broken again, and this time it was the screen's own fault.**
+  The picker's search box was rebuilt with the design handoff's glass chrome as a bare
+  `BasicTextField` handed the query straight from the view model — the exact call `AgehaSearchField`
+  had been written to replace, in a new coat. Drawing your own chrome around a text field opts out
+  of the decoration, not out of the caret bug: characters were dropped and reordered as they were
+  typed. The caret logic is now a state holder (`rememberSearchFieldState`) that any chrome can
+  wrap, and the picker uses it. `SourceSearchTest` drives the real `SourcePickerScreen` against a
+  lagging view model and fails against the wiring that shipped — which `SearchFieldTest` could not
+  do, since it only ever composed the component the picker had stopped using.
+- **Clearing the search box did not always clear the search.** Delete the query quickly enough and
+  the field went empty while the list stayed filtered by a query no longer on screen: an edit
+  returning the box to the text upstream last showed was suppressed as an echo of it. Every change
+  to the text is published now; only caret moves are silent.
+- **The search box put the caret behind the letter you had just typed.** `AgehaSearchField` exists
+  to prevent exactly this, and had the bug hiding inside its own fix: it adopted any incoming
+  `value` that differed from the last text it emitted, which cannot tell *"someone cleared the
+  query"* from *"the view model has not caught up yet"*. When a recomposition landed between the
+  keystroke and the state update, the field adopted the **previous** text — wiping the character
+  and dropping the caret to the end of the shorter string. It now tracks the echo it is waiting
+  for and ignores upstream until that arrives. `SearchFieldTest` drives a deliberately lagging
+  upstream and fails against the old implementation.
+- **The reader's page bar is a scrubber, and it works in webtoon mode.** Press anywhere on it to
+  jump there and keep dragging to travel through the chapter. Two things were wrong before: each
+  tick carried its own `clickable`, so the only way to move was to hit one 6dp target — and above
+  the 40-tick cap most pages had no target at all — and in webtoon mode the strip ignored the seek
+  entirely, because it only scrolled on a chapter change. `ReaderUiState.seekId` now distinguishes
+  "something asked to go to a page" from "the strip reported where it is", so a seek scrolls and a
+  scroll does not fight itself.
+- **The storage card's numbers contradicted each other.** It read *"56 MB of 931 GB used"* beside
+  *"253 GB free"* — the first says the disk holds 56 MB, the second says 678 GB is gone. 931 GB was
+  the volume's capacity, and the bar plotted Ageha's bytes against it, so a 73%-full disk drew as
+  empty. The headline now says **"used by Ageha"**, the bar carries a third segment for everything
+  else on the volume, and the legend closes the arithmetic: `pages + thumbnails + other + free =
+  capacity`.
+- **Cross-source search only ever showed you two results.** The command panel behind `Ctrl+K` and
+  the nav-pill magnifier drew at most three library rows and two source rows, whatever the sources
+  actually returned. Both entry points now open the full-page search, which groups every source
+  separately and truncates nothing — and that page now searches your library too, so nothing the
+  panel could find is lost. `CommandPanel.kt` is deleted rather than left unreachable; it is in
+  git history if the shape is ever wanted again.
+- **The skin switcher and the window buttons were not against the right edge.** They floated in the
+  middle of the title bar with a gap between them and the corner. The context line carried
+  `weight(1f, fill = false)` and was followed by a `Spacer(Modifier.weight(1f))`; a `Row` divides
+  its leftover space *between* weighted children, so the spacer only ever received half of it, and
+  the half the text declined to fill collected after the last child instead. The text fills now,
+  and the close button runs to the frame's own edge — which is what makes the corner the large
+  target it is in every other Windows application. `TitleBarTest` measures it.
+- **37% of the app's text was being drawn in black, on a near-black window.** Every chapter title
+  in the chapter list, most of Settings, half of the details screen — 69 of 187 `Text` call sites.
+  - `Text` with no `color` resolves `LocalContentColor`, whose default value is `Color.Black`.
+    Material only ever overrides it from inside a `Surface`, and Ageha uses no `Surface` anywhere;
+    `MaterialTheme` does not provide it, and handing it a `colorScheme` does nothing for it. So the
+    app had been asking for black and getting it.
+  - `AgehaTheme` now provides `onSurface` as the default. Fixed there rather than by adding
+    `color =` to 69 call sites, because the 70th would have been written black too.
+  - It hid because every check the project had — review, the palette's contrast tests, the whole
+    screenshot set — verifies colours that are *named* somewhere, and the entire failure was text
+    that names none. `DefaultTextColorTest` now asserts the default itself, in every theme, against
+    the surfaces it lands on; it fails 14 of its 20 cases against the old code.
+  - The details screen — the one where this was most visible — had no screenshot in the review set
+    at all. `renderShell` now renders it.
+- **The quietest text colour was unreadable in every theme, and invisible in two.** `--ink3` — the
+  title bar's context line, every mono count, every settings hint, the meta under every cover, 44
+  call sites — measured **1.26:1** in AMOLED and **1.87:1** in Light against surfaces the app
+  really draws it on. WCAG asks 4.5:1 of body text and 3:1 of a *non-text* mark; this was under
+  both. Ember and Glass were better and still failing, at 2.85:1 and 3.16:1.
+  - `PaletteGenerator.textSafeInk` now walks the ink in tone — lighter in a dark theme, darker in a
+    light one — until the worst pairing across the whole surface ramp clears 4.5:1, and stops
+    there. Hue and chroma are held, so the ink stays warm in Ember and cool in Glass rather than
+    collapsing to grey, and it is still quieter than `onSurfaceVariant` above it.
+  - Two new factories in `AgehaContrastTest` hold it to that floor and to that ordering. The gap
+    that let this ship: the contrast tests covered the roles Material names, and `--ink3` has no
+    Material role.
 - **A source listing stopped after its first page.** Browsing any source showed twenty titles and
   then nothing, however far you scrolled. The view model was correct; the bug was one composition
   above it. `BrowseScreen` hoisted a `derivedStateOf` out of a `remember(manga.size, hasMore)` and

@@ -1,5 +1,6 @@
 package app.ageha.desktop
 
+import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaManga
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -126,5 +127,57 @@ class NavigatorTest {
 		assertEquals(Destination.Sources, navigator.current)
 		navigator.switchTo(Section.LIBRARY)
 		assertEquals(Destination.Details(manga(1)), navigator.current)
+	}
+
+	private fun chapter(id: Long, source: String = "TEST") = AgehaChapter(
+		id = id,
+		title = "Chapter $id",
+		number = id.toFloat(),
+		volume = null,
+		url = "/c/$id",
+		scanlator = null,
+		uploadDate = null,
+		branch = null,
+		sourceName = source,
+	)
+
+	/**
+	 * The reader's Chapters button reaches the chapter list from wherever the reader was opened.
+	 *
+	 * This is the case that makes the door necessary rather than redundant: the reader was pushed
+	 * straight onto a section root -- which is what Continue Reading and an opened archive both
+	 * do -- so going *back* lands on that root and never passes a chapter list at all.
+	 */
+	@Test
+	fun `the chapter list is reachable from a reader opened without one underneath`() {
+		val navigator = Navigator()
+		navigator.switchTo(Section.CONTINUE)
+		navigator.read(manga(1), chapter(1))
+
+		navigator.openChapterList(manga(1))
+
+		assertEquals(Destination.Details(manga(1)), navigator.current)
+		// And the reader was popped rather than buried, so one Escape still returns to the shelf.
+		assertTrue(navigator.back())
+		assertEquals(Destination.Continue, navigator.current)
+	}
+
+	/**
+	 * Opened *from* a chapter list, the same button returns to the one already there.
+	 *
+	 * Pushing a second copy would work and would be wrong: Escape would then need pressing twice
+	 * to leave a screen the user only ever visited once.
+	 */
+	@Test
+	fun `the chapter list is not duplicated when it is already underneath`() {
+		val navigator = Navigator()
+		navigator.openManga(manga(1))
+		navigator.read(manga(1), chapter(1))
+
+		navigator.openChapterList(manga(1))
+
+		assertEquals(Destination.Details(manga(1)), navigator.current)
+		assertTrue(navigator.back())
+		assertEquals(Destination.Library, navigator.current)
 	}
 }

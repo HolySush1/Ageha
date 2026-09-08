@@ -25,6 +25,7 @@ class ReaderKeysTest {
 		override fun previousPage() { calls += "previous" }
 		override fun nextChapter() { calls += "nextChapter" }
 		override fun previousChapter() { calls += "previousChapter" }
+		override fun chapters() { calls += "chapters" }
 		override fun goToPage(index: Int) { calls += "goTo:$index" }
 		override fun setScale(scale: PageScale) { calls += "scale:${scale.name}" }
 		override fun toggleChrome() { calls += "chrome" }
@@ -132,5 +133,19 @@ class ReaderKeysTest {
 		assertTrue(ReaderKeys.help.size >= 10)
 		assertTrue(ReaderKeys.help.any { it.first.contains("Escape") })
 		assertTrue(ReaderKeys.help.any { it.first.contains("F11") })
+	}
+
+	/**
+	 * C opens the chapter list.
+	 *
+	 * Next to N and P deliberately -- next chapter, previous chapter, pick one -- and asserted
+	 * here because a binding with no test is a binding that survives being renamed out of the
+	 * `when`.
+	 */
+	@Test
+	fun `c opens the chapter list`() {
+		for (mode in ReaderMode.entries) {
+			assertEquals(listOf("chapters"), press(Key.C, mode).calls, "C in $mode")
+		}
 	}
 }

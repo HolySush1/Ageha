@@ -13,6 +13,28 @@ clients registered per service, which is explained in
 
 ![The design system](docs/design-gallery.png)
 
+## Disclaimer
+
+**The manga sources are nothing to do with this project or its author.**
+
+Ageha hosts no manga, stores no manga on any server, and is not affiliated with, endorsed by, or
+connected to any of the ~1360 sites it can read. It bundles none of their content. The list of
+sites comes from [kotatsu-parsers-redo](https://github.com/Kotatsu-Redo/kotatsu-parsers-redo), a
+separate GPL-3.0 library maintained by other people; Ageha consumes it as a dependency and does not
+write, review or endorse a single parser in it. When you enable a source, your own computer talks
+to that site directly, as your browser would. What is on the far end, whether reading it is lawful
+where you are, and whether you should be, are your business — please support publishers and
+official releases where they exist.
+
+**Ageha is an unofficial fork.** It is a desktop port of
+[Kotatsu-Redo](https://github.com/Kotatsu-Redo/Kotatsu-Redo), which is itself a fork of
+[Kotatsu](https://github.com/KotatsuApp/Kotatsu), an Android manga reader. It is not affiliated
+with or endorsed by the Kotatsu authors or the Kotatsu-Redo maintainers, and anything wrong with it
+should be reported here rather than to either of them. Full attribution and the GPL-3.0 statement
+of changes are in [NOTICE.md](NOTICE.md).
+
+The software is provided without warranty of any kind, as GPL-3.0 sections 15 and 16 set out.
+
 ## Running it
 
 **If you just want to use Ageha, read [docs/RUNNING.md](docs/RUNNING.md)** -- installing it, where

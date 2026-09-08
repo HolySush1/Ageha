@@ -130,6 +130,25 @@ class Navigator {
 	}
 
 	/**
+	 * Leave the reader for the chapter list of the manga being read.
+	 *
+	 * Not [back], and that is the whole reason it exists. Going back returns to whatever pushed
+	 * the reader, which is the chapter list only when the user arrived that way -- from Continue
+	 * Reading, from a search result or from an opened archive it is a shelf, a result list or the
+	 * screen they were on before. "Show me the other chapters of this" is a different intent from
+	 * "undo my last navigation", and it needs its own door.
+	 *
+	 * The reader is popped rather than left underneath, so the details screen does not accumulate
+	 * a stack of readers behind it as someone moves between chapters -- and so Escape from the
+	 * chapter list still goes where it went before.
+	 */
+	fun openChapterList(manga: AgehaManga) {
+		if (current is Destination.Read) back()
+		if (current == Destination.Details(manga)) return
+		push(Destination.Details(manga))
+	}
+
+	/**
 	 * Search every enabled source for a title.
 	 *
 	 * Pushed onto the *current* section rather than switching to Explore. It is reached from a
@@ -156,6 +175,20 @@ class Navigator {
 	fun openGlobalSearch() {
 		if (current is Destination.SearchAll) return
 		push(Destination.SearchAll(query = "", subject = null))
+	}
+
+	/**
+	 * Back to the screen Ageha opens on.
+	 *
+	 * The library, at the root of its own stack -- which is where a launch lands, and therefore
+	 * the only honest destination for a control called Home. Resetting the stack as well as the
+	 * section is the part that matters: switching section alone would return someone to whatever
+	 * details screen they had left the library on, which is a different place from the one they
+	 * asked for.
+	 */
+	fun openHome() {
+		section = Section.LIBRARY
+		resetToRoot()
 	}
 
 	/** Jump to Continue Reading, from the shelf's "see all". */

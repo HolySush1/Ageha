@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -153,7 +154,7 @@ fun AgehaShell(
 	}
 	val browseViewModel = remember { BrowseViewModel(application.catalog, application.sources, scope) }
 	val detailsViewModel = remember {
-		DetailsViewModel(application.catalog, application.library, scope)
+		DetailsViewModel(application.catalog, application.library, application.history, scope)
 	}
 	// Keyed on the two defaults it reads, so changing them in Settings rebuilds the view model
 	// rather than leaving the new value to take effect at the next launch.
@@ -245,6 +246,20 @@ fun AgehaShell(
 		}
 	}
 
+	// Something the library grid could not do, said out loud.
+	//
+	// Marking a never-opened title read is a request the schema cannot honour -- there is no
+	// chapter to point a reading position at until one has been stored. Surfaced here rather than
+	// inside the view model for the same reason the resume outcomes are: a notice is
+	// application-level furniture and outlives the screen that produced it.
+	val libraryNotice by libraryViewModel.notice.collectAsState()
+	LaunchedEffect(libraryNotice) {
+		libraryNotice?.let { message ->
+			application.notices.post("Nothing to mark read yet", message)
+			libraryViewModel.consumeNotice()
+		}
+	}
+
 	// Boxed so notices can float over whatever screen is current. They are application-level --
 	// a backup import's report outlives the screen that started it -- so they are anchored to the
 	// window rather than owned by a screen.
@@ -288,6 +303,8 @@ fun AgehaShell(
 						// The handoff's "All 260 chapters". Ageha already has that list, on the
 						// details screen, with the read and downloaded flags WIRING.md asks for.
 						onOpenChapters = { navigator.openManga(it.manga) },
+						onMarkRead = libraryViewModel::markRead,
+						onMarkUnread = libraryViewModel::markUnread,
 					)
 				}
 
@@ -297,7 +314,26 @@ fun AgehaShell(
 					ContinueScreen(
 						state = state,
 						imageHeaders = headers,
-						onOpen = { continueViewModel.open(it.mangaId) },
+						// The chapter list, not the reader.
+						//
+						// Clicking a row used to resume immediately, which is one click to the
+						// page you were on and no clicks at all to anything else -- not the
+						// chapters either side of it, not what you had already read, not the
+						// description. The chapter list answers all of those and carries a
+						// "Continue reading" button that does the one thing this used to do, so
+						// resuming costs one extra click and everything else costs one fewer.
+						//
+						// An opened archive is the exception, and it has to be: a CBZ is one
+						// chapter with no source behind it, so the details screen has nothing to
+						// ask and would show an empty list under a failure notice. There is
+						// nowhere for it to go but the reader.
+						onOpen = { entry ->
+							if (entry.isLocalFile) {
+								continueViewModel.open(entry.mangaId)
+							} else {
+								navigator.openManga(entry.manga)
+							}
+						},
 						onSearch = continueViewModel::search,
 						onRemove = continueViewModel::remove,
 						onFindElsewhere = { entry ->
@@ -602,6 +638,7 @@ fun AgehaShell(
 						coverOffset = preferences.coverOffset,
 						onPageChange = readerViewModel::goToPage,
 						onScroll = readerViewModel::recordScroll,
+						onVisibleThrough = readerViewModel::recordVisible,
 						onNextPage = readerViewModel::nextPage,
 						onPreviousPage = readerViewModel::previousPage,
 						onNextChapter = readerViewModel::nextChapter,
@@ -663,6 +700,17 @@ fun AgehaShell(
 							onRemoveFromLibrary = detailsViewModel::removeFromLibrary,
 							onSelectBranch = detailsViewModel::selectBranch,
 							onRetry = detailsViewModel::retry,
+							// Resolved through the same pipeline Continue Reading uses, rather
+							// than by opening `state.marker`'s chapter directly. That pipeline
+							// already knows the three things this button would otherwise have to
+							// re-derive: that a finished chapter means the *next* one, that a
+							// manga with no stored chapters needs them fetched first, and that a
+							// source missing from this parsers build has nothing to open at all.
+							onContinueReading = {
+								continueViewModel.open(destination.manga.id)
+							},
+							onMarkReadThrough = detailsViewModel::markReadThrough,
+							onMarkUnreadFrom = detailsViewModel::markUnreadFrom,
 						)
 					}
 				}
@@ -746,8 +794,93 @@ private fun FloatingNav(
 				)
 			}
 		}
+		HomeButton(
+			isSelected = navigator.section == Section.LIBRARY && !navigator.canGoBack,
+			onClick = navigator::openHome,
+		)
 	}
 }
+
+/**
+ * Back to the screen Ageha opens on, from anywhere.
+ *
+ * ## Why this is not the same thing as the Library word two places to its left
+ *
+ * That one switches *section*, and each section keeps its own back stack -- so pressing Library
+ * from four screens deep in Explore returns you to whatever details screen you last left the
+ * library on, which is deliberate and is what makes flicking between sections cheap. It is also
+ * not what someone reaching for a home button wants: they want the top, and there was no control
+ * in Ageha that took them there. Escape unwinds one screen at a time and the breadcrumb only
+ * appears on the screens that have one.
+ *
+ * So this resets the stack as well, and lights only when you are actually at the root -- a home
+ * button that looks pressed while you are three screens deep is a home button that has lied about
+ * where you are.
+ *
+ * ## Why an icon at the end rather than a sixth word
+ *
+ * The same reason the magnifier is one: five words plus a sixth is where a pill becomes a menu
+ * bar. It sits at the trailing end because that is the far corner of the pill -- the easiest
+ * target in it after the two ends of the window -- and because a control that undoes navigation
+ * belongs beside the controls that perform it, not in the middle of them.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeButton(isSelected: Boolean, onClick: () -> Unit) {
+	val shape = AgehaGlass.PillShape
+	TooltipArea(
+		tooltip = {
+			Box(
+				Modifier
+					.glassSurface(MaterialTheme.shapes.small, GlassTone.RAISED)
+					.padding(AgehaSpacing.sm),
+			) {
+				Text(
+					"Home - the library, at the top",
+					style = AgehaTextStyles.metadata,
+					color = MaterialTheme.colorScheme.onSurface,
+				)
+			}
+		},
+	) {
+		Box(
+			Modifier
+				.clip(shape)
+				.background(
+					if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+				)
+				.border(
+					1.dp,
+					if (isSelected) AgehaTheme.skin.accentLine else AgehaTheme.skin.line,
+					shape,
+				)
+				.clickable(onClick = onClick)
+				.padding(horizontal = 14.dp, vertical = 9.dp)
+				.testTag(NAV_HOME_TAG),
+			contentAlignment = Alignment.Center,
+		) {
+			Icon(
+				imageVector = Icons.Default.Home,
+				// Named, because an icon-only control with no accessible name is a control only
+				// the person who wrote it can use.
+				contentDescription = "Home",
+				tint = if (isSelected) {
+					MaterialTheme.colorScheme.onSurface
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+				modifier = Modifier.size(18.dp),
+			)
+		}
+	}
+}
+
+/**
+ * Test tag for the end-to-end journey driver.
+ *
+ * See [SEARCH_ALL_TAG]: an icon has no text to find it by.
+ */
+const val NAV_HOME_TAG = "nav-home"
 
 /**
  * The sections either side of the search button.

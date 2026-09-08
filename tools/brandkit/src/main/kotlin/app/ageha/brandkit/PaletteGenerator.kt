@@ -352,6 +352,67 @@ object PaletteGenerator {
 	 * without first asking which theme it is in. For a skin these are transcribed; for the brand
 	 * themes they fall out of the resolved scheme at the same alphas the handoff uses.
 	 */
+	/**
+	 * Every surface the third ink is drawn on.
+	 *
+	 * The same set `AgehaContrastTest` already holds `onSurface` to, and for the same reason: a
+	 * card is `surfaceContainer`, a dialog is `surfaceContainerHigh`, the title bar is
+	 * `surfaceContainerLow`, and the window itself is `surface`. An ink that clears AA on one
+	 * step of the ramp and fails on the next is an ink that is legible on whichever screen
+	 * somebody happened to check.
+	 */
+	private fun inkSurfaces(resolved: Map<String, Int>): List<Int> = listOf(
+		"surface",
+		"surfaceDim",
+		"surfaceBright",
+		"surfaceVariant",
+		"surfaceContainerLowest",
+		"surfaceContainerLow",
+		"surfaceContainer",
+		"surfaceContainerHigh",
+		"surfaceContainerHighest",
+	).map(resolved::getValue)
+
+	/**
+	 * The third ink, lifted only as far as it takes to be readable.
+	 *
+	 * `--ink3` is the handoff's quietest text colour and Ageha draws real words in it -- the title
+	 * bar's context line, every mono count, every settings hint, the chapter and page meta under a
+	 * cover. As transcribed it measures 2.33:1 in Light, 2.83:1 in AMOLED, 3.49:1 in Ember and
+	 * 4.11:1 in Glass against the surfaces it sits on. All four are under WCAG AA, and the two
+	 * worst are under the 3:1 that even a *non-text* mark is held to: in Light this is grey text
+	 * on cream that a lot of people simply cannot read.
+	 *
+	 * So it walks in tone -- lighter in a dark theme, darker in a light one -- until the worst
+	 * pairing across [inkSurfaces] clears [AA], and stops there. Same shape as [textSafeAccent]
+	 * and the same bargain: the handoff's exact hex is worth having right up to the point where
+	 * holding it makes the text unreadable, and then it is not.
+	 *
+	 * Hue and chroma are held, so the ink stays the theme's own -- warm in Ember, cool in Glass --
+	 * rather than collapsing to a neutral grey. It stays a *third* ink too: it is lifted to the
+	 * threshold and no further, so it still reads as quieter than `onSurfaceVariant` above it.
+	 */
+	private fun textSafeInk(ink: Int, resolved: Map<String, Int>, dark: Boolean): Int {
+		val surfaces = inkSurfaces(resolved)
+		fun worst(candidate: Int) = surfaces.minOf { contrastRatio(candidate, it) }
+		if (worst(ink) >= AA) return ink
+		val hct = Hct.fromInt(ink)
+		// Toward the ink, away from the paper: a dark theme's text gets lighter and a light
+		// theme's gets darker. Walking the *nearer* direction would sometimes invert the ink
+		// against its own background, which is not a quieter colour, it is a different design.
+		val step = if (dark) 1.0 else -1.0
+		var tone = hct.tone
+		while (tone > 0.0 && tone < 100.0) {
+			tone += step
+			val candidate = Hct.from(hct.hue, hct.chroma, tone).toInt()
+			if (worst(candidate) >= AA) return candidate
+		}
+		// Unreachable while `onSurface` itself clears AA on this ramp, which the contrast test
+		// asserts independently. Falling back to it rather than to the failing ink means a broken
+		// palette ships a *readable* third ink, not an invisible one.
+		return resolved.getValue("onSurface")
+	}
+
 	fun resolveSkinTokens(theme: Theme): Map<String, Int> {
 		val resolved = resolve(theme)
 		val surface = resolved.getValue("surface")
@@ -359,7 +420,11 @@ object PaletteGenerator {
 			?: return mapOf(
 				"accent" to resolved.getValue("tertiary"),
 				"accentLine" to Tint(resolved.getValue("tertiary"), 0.65).over(surface),
-				"inkFaint" to Tint(resolved.getValue("onSurface"), 0.38).over(surface),
+				"inkFaint" to textSafeInk(
+					Tint(resolved.getValue("onSurface"), 0.38).over(surface),
+					resolved,
+					theme != Theme.LIGHT,
+				),
 				"line" to resolved.getValue("outlineVariant"),
 				"lineStrong" to resolved.getValue("outline"),
 				"inset" to Tint(resolved.getValue("onSurface"), 0.05).over(surface),
@@ -375,7 +440,11 @@ object PaletteGenerator {
 		return mapOf(
 			"accent" to skin.accent.argb,
 			"accentLine" to skin.accentLine.over(surface),
-			"inkFaint" to skin.inkFaint.over(skin.panel2.over(surface)),
+			"inkFaint" to textSafeInk(
+				skin.inkFaint.over(skin.panel2.over(surface)),
+				resolved,
+				dark = true,
+			),
 			"line" to skin.line.over(surface),
 			"lineStrong" to skin.lineStrong.over(surface),
 			"inset" to skin.inset.over(surface),

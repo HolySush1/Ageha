@@ -3,7 +3,6 @@ package app.ageha.core.data
 import app.ageha.core.database.dao.HistoryDao
 import app.ageha.core.database.dao.MangaDao
 import app.ageha.core.database.dao.MangaPrefsDao
-import app.ageha.core.database.entity.HistoryEntity
 import app.ageha.core.database.entity.MangaPrefsEntity
 import app.ageha.core.model.AgehaChapter
 import app.ageha.core.model.AgehaManga
@@ -127,20 +126,9 @@ class ReaderRepository(
 	/**
 	 * Record where the reader is.
 	 *
-	 * `created_at` is preserved across updates: it is when this manga was *first* opened, and
-	 * overwriting it on every page turn would make "reading since" meaningless and would confuse
-	 * a sync server that treats it as an identity.
-	 *
-	 * `deleted_at` is cleared, because reading something again un-deletes it. A user who removed
-	 * a manga and then opened it from search has resumed it, and a tombstone left in place would
-	 * have the next sync delete it out from under them.
-	 *
-	 * **The manga row is written first, and that is not optional.** `history.manga_id` is a real,
-	 * enforced foreign key, and until this was added, recording a position for anything that was
-	 * not already *favourited* failed with a constraint violation -- reading from search, reading
-	 * from a browse listing, and opening a local file all wrote no history at all. Favouriting was
-	 * the only path that happened to insert the row. Found by rendering the reader against a real
-	 * CBZ, which is exactly the case with no library entry behind it.
+	 * The row itself is written by [HistoryWriter], which the chapter list's mark-read actions
+	 * share. Everything unobvious about that write -- the foreign key on the manga row, the
+	 * guarded chapter upsert, the preserved `created_at` -- is documented there.
 	 */
 	suspend fun savePosition(
 		manga: AgehaManga,
@@ -151,48 +139,16 @@ class ReaderRepository(
 		pageCount: Int = 0,
 		now: Long = System.currentTimeMillis(),
 	) {
-		this.manga.upsertWithTags(
-			MangaMapping.toEntity(manga),
-			manga.tags.map { MangaMapping.toEntity(it) },
-		)
-		val existing = history.find(manga.id)
-		val chapters = manga.chapters
-		// Store the chapter list too, but not on every page turn.
-		//
-		// This is what makes Continue Reading answerable offline: the last chapter's number and
-		// name, and the identity of the chapter after it, both come from these rows rather than
-		// from the source. Until now nothing wrote to the `chapters` table at all.
-		//
-		// Guarded because `savePosition` runs on a debounce behind every page turn, and rewriting
-		// four hundred chapter rows each time would turn a page turn into a bulk upsert. The three
-		// conditions are the only ones that can change what is stored: nothing stored yet, a move
-		// to a different chapter, or a chapter list that has grown since.
-		if (!chapters.isNullOrEmpty() &&
-			(existing == null ||
-				existing.chapterId != chapter.id ||
-				existing.chaptersCount != chapters.size)
-		) {
-			this.manga.upsertChapters(
-				chapters.mapIndexed { index, item -> MangaMapping.toEntity(item, manga.id, index) },
-			)
-		}
-		history.upsert(
-			HistoryEntity(
-				mangaId = manga.id,
-				createdAt = existing?.createdAt ?: now,
-				updatedAt = now,
-				chapterId = chapter.id,
-				page = page,
-				// Zero means "not known", so a caller that cannot say keeps whatever was known
-				// before rather than overwriting a real count with a claim of nothing.
-				pageCount = pageCount.takeIf { it > 0 }
-					?: existing?.takeIf { it.chapterId == chapter.id }?.pageCount
-					?: 0,
-				scroll = scroll,
-				percent = percent,
-				deletedAt = 0,
-				chaptersCount = chapters?.size ?: existing?.chaptersCount ?: 0,
-			),
+		HistoryWriter.write(
+			mangaDao = this.manga,
+			historyDao = history,
+			manga = manga,
+			chapter = chapter,
+			page = page,
+			scroll = scroll,
+			percent = percent,
+			pageCount = pageCount,
+			now = now,
 		)
 	}
 

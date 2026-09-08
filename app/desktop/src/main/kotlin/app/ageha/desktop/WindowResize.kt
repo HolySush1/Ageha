@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -20,6 +22,121 @@ import java.awt.Cursor
 import java.awt.MouseInfo
 import java.awt.Rectangle
 import java.awt.Window
+
+/**
+ * The title bar's drag behaviour, including the one part of it that is not just "move the window".
+ *
+ * ## Why not `WindowDraggableArea`
+ *
+ * Compose's own drag area moves the window and nothing else, which is right for a floating window
+ * and wrong for a maximised one. On Windows, dragging a maximised window's caption *restores* it --
+ * it drops to its floating size under your cursor and keeps following the pointer, which is how
+ * people pull a window off one monitor and onto another without ever pressing the restore button.
+ * `WindowDraggableArea` on a maximised window instead moves the maximised frame itself, sliding a
+ * screen-filling window partly off the screen and leaving it in a state that has no name and no
+ * way back except the restore button. That is worse than doing nothing.
+ *
+ * ## Why the pointer is read from AWT rather than from the gesture
+ *
+ * The same reason [WindowResizeHandles] does it, and it matters more here: `window.location` is in
+ * the same user-space pixels `MouseInfo` reports, while the gesture's deltas are in Compose's
+ * density-scaled space. Mixing the two makes a window drift away from the cursor on any display
+ * that is not at 100% scaling -- which on Windows is most of them.
+ *
+ * @param onRestore asked for exactly once per drag, and only when the drag began on a maximised
+ *   window. It is a request rather than an action because the placement lives in `WindowState`;
+ *   this composable waits for the frame to actually come down before it re-anchors.
+ */
+@Composable
+fun WindowDragArea(
+	window: Window,
+	isMaximized: Boolean,
+	onRestore: () -> Unit,
+	content: @Composable () -> Unit,
+) {
+	// Read at drag time rather than captured into the pointer handler's key, so that starting a
+	// drag does not depend on a `pointerInput` that was rebuilt the moment the window's placement
+	// changed -- which is precisely the moment this gesture is in the middle of.
+	val maximizedNow by rememberUpdatedState(isMaximized)
+	val restore by rememberUpdatedState(onRestore)
+	Box(
+		Modifier.pointerInput(window) {
+			var anchorX = 0
+			var anchorY = 0
+			var origin: Rectangle? = null
+			// Three states rather than a boolean: a drag that began maximised has to ask for the
+			// restore, then wait for it, then re-anchor. Collapsing the ask and the wait means
+			// re-anchoring against bounds the frame has not taken yet.
+			var pendingRestore = false
+			var awaitingRestore = false
+
+			detectDragGestures(
+				onDragStart = {
+					origin = Rectangle(window.bounds)
+					pendingRestore = maximizedNow
+					awaitingRestore = false
+					MouseInfo.getPointerInfo()?.location?.let {
+						anchorX = it.x
+						anchorY = it.y
+					}
+				},
+				onDragEnd = { origin = null },
+				onDragCancel = { origin = null },
+			) { change, _ ->
+				change.consume()
+				val start = origin ?: return@detectDragGestures
+				val now = MouseInfo.getPointerInfo()?.location ?: return@detectDragGestures
+
+				when {
+					pendingRestore -> {
+						// A threshold, so that a click that wobbles by a pixel does not unmaximise
+						// the window. Windows applies one here for the same reason.
+						val travel = maxOf(kotlin.math.abs(now.x - anchorX), kotlin.math.abs(now.y - anchorY))
+						if (travel < RESTORE_THRESHOLD) return@detectDragGestures
+						restore()
+						pendingRestore = false
+						awaitingRestore = true
+					}
+
+					awaitingRestore -> {
+						val bounds = window.bounds
+						// Still the maximised geometry: the placement change has not reached the
+						// frame yet. Nothing to re-anchor against, so wait for the next event.
+						if (bounds.width == start.width && bounds.height == start.height) {
+							return@detectDragGestures
+						}
+						// Put the restored window under the cursor where it was on the maximised
+						// one, *proportionally* across its width. Grabbing a maximised window
+						// three quarters of the way along its title bar and having it reappear
+						// with the cursor off its right edge is the bug this avoids.
+						val fraction = if (start.width > 0) {
+							((anchorX - start.x).toDouble() / start.width).coerceIn(0.0, 1.0)
+						} else {
+							0.5
+						}
+						val x = now.x - (bounds.width * fraction).toInt()
+						val y = now.y - (anchorY - start.y).coerceAtMost(bounds.height)
+						window.setLocation(x, y)
+						origin = Rectangle(x, y, bounds.width, bounds.height)
+						anchorX = now.x
+						anchorY = now.y
+						awaitingRestore = false
+					}
+
+					else -> window.setLocation(
+						start.x + (now.x - anchorX),
+						start.y + (now.y - anchorY),
+					)
+				}
+			}
+		},
+	) {
+		content()
+	}
+}
+
+/** How far the pointer must travel before a maximised window comes down. Windows uses about this. */
+private const val RESTORE_THRESHOLD = 5
 
 /**
  * The eight edges an undecorated window has to grow back.

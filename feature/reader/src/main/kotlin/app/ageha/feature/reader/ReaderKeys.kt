@@ -13,6 +13,9 @@ interface ReaderActions {
 	fun previousPage()
 	fun nextChapter()
 	fun previousChapter()
+
+	/** Leave the reader for this manga's chapter list. Not the same as [close]. */
+	fun chapters()
 	fun goToPage(index: Int)
 	fun setScale(scale: PageScale)
 	fun toggleChrome()
@@ -101,6 +104,13 @@ object ReaderKeys {
 				true
 			}
 
+			// The keyboard half of the Chapters button. Next to N and P because it is the third
+			// thing in that group: next chapter, previous chapter, pick one.
+			Key.C -> {
+				actions.chapters()
+				true
+			}
+
 			Key.F, Key.F11 -> {
 				actions.toggleFullscreen()
 				true
@@ -151,6 +161,7 @@ object ReaderKeys {
 		"Page Up / Page Down" to "Forward / back",
 		"Home / End" to "First / last page of the chapter",
 		"N / P" to "Next / previous chapter",
+		"C" to "All chapters of this manga",
 		"1 / 2 / 3 / 4" to "Fit page / width / height / original size",
 		"F or F11" to "Fullscreen",
 		"H" to "Show or hide the controls",

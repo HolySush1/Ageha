@@ -131,6 +131,11 @@ data class Preferences(
 	/**
 	 * The handoff's `opts.preload`: how many pages ahead the reader fetches.
 	 *
+	 * Ahead of the **bottom edge of the window**, not of the page the position is recorded
+	 * against. In webtoon mode those are different pages -- often several apart -- and counting
+	 * from the recorded one spent part of this budget on artwork already on screen, which made the
+	 * setting look like it did nothing. See `ReaderScreen.PreloadPages`.
+	 *
 	 * Zero means the whole chapter. Six by default: enough that a fast reader never waits on a
 	 * page turn, few enough that opening a chapter does not fetch forty images for someone who
 	 * will close it after two.

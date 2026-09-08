@@ -53,6 +53,18 @@ fun GlobalSearchScreen(
 	onNeedHeaders: (String) -> Unit,
 	modifier: Modifier = Modifier,
 	searchFocus: FocusRequester = remember { FocusRequester() },
+	/**
+	 * Titles already in the user's library that match the query.
+	 *
+	 * Here because this screen is now the *only* search in Ageha, and a search that cannot find a
+	 * book you already own is not a search. It was reachable through the command panel before, in
+	 * a list capped at three library rows and two from every source combined; this screen replaced
+	 * that panel, so it has to inherit the one thing the panel did better than it.
+	 *
+	 * A plain list of models rather than a dependency on `:feature:library` -- the shell filters
+	 * the library it already has loaded and hands the matches down.
+	 */
+	libraryMatches: List<AgehaManga> = emptyList(),
 ) {
 	Column(modifier.fillMaxSize()) {
 		SearchBar(state, onQuery, onSubmit, searchFocus)
@@ -67,19 +79,27 @@ fun GlobalSearchScreen(
 					"search term are skipped rather than asked.",
 			)
 
-			state.results.isEmpty() -> EmptyState(
+			state.results.isEmpty() && libraryMatches.isEmpty() -> EmptyState(
 				title = "No source can answer that",
 				detail = "None of your enabled sources supports searching by title. Enable a few " +
 					"more in Explore and try again.",
 			)
 
-			!state.isSearching && state.found == 0 -> EmptyState(
+			!state.isSearching && state.found == 0 && libraryMatches.isEmpty() -> EmptyState(
 				title = "Nothing found",
 				detail = "None of your ${state.searchedCount} enabled sources has anything " +
 					"matching \"${state.query}\".",
 			)
 
 			else -> LazyColumn(Modifier.fillMaxSize()) {
+				// Your own shelf first, always. It is the one group whose answer is already known
+				// -- no request, no waiting -- and "you already have this" is the single most
+				// useful thing a search can tell you before it starts listing places to get it.
+				if (libraryMatches.isNotEmpty()) {
+					item(key = LIBRARY_GROUP_KEY) {
+						LibraryGroup(libraryMatches, imageHeaders, onOpenManga)
+					}
+				}
 				items(state.ordered, key = { it.sourceName }) { group ->
 					SourceGroup(group, imageHeaders, onOpenManga, onOpenSource, onNeedHeaders)
 				}
@@ -134,6 +154,59 @@ private fun SearchBar(
 		}
 	}
 }
+
+/**
+ * Matches from the user's own library, drawn as the first group.
+ *
+ * Deliberately the same shape as a [SourceGroup] rather than a different-looking panel: it is one
+ * more place the title was found, and the whole point of this screen is that every place is listed
+ * the same way. What differs is the heading and the absence of an "Open source" button -- there is
+ * no source to open, you are already there.
+ */
+@Composable
+private fun LibraryGroup(
+	matches: List<AgehaManga>,
+	imageHeaders: Map<String, Map<String, String>>,
+	onOpenManga: (AgehaManga) -> Unit,
+) {
+	Column(Modifier.padding(vertical = AgehaSpacing.sm)) {
+		Row(
+			Modifier.fillMaxWidth().padding(horizontal = AgehaSpacing.lg),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Text(
+				"In your library",
+				style = MaterialTheme.typography.titleSmall,
+				color = MaterialTheme.colorScheme.onSurface,
+				modifier = Modifier.weight(1f),
+			)
+			Text(
+				"${matches.size}",
+				style = AgehaTextStyles.metadata,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
+		LazyRow(
+			contentPadding = androidx.compose.foundation.layout.PaddingValues(
+				horizontal = AgehaSpacing.md,
+			),
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			items(matches, key = { "library:${it.sourceName}:${it.id}" }) { manga ->
+				MangaCard(
+					manga = manga,
+					imageHeaders = imageHeaders[manga.sourceName].orEmpty(),
+					onClick = { onOpenManga(manga) },
+					modifier = Modifier.width(132.dp),
+				)
+			}
+		}
+	}
+}
+
+/** Stable key for the library group, so it never collides with a source named the same. */
+private const val LIBRARY_GROUP_KEY = "__ageha_library_group__"
 
 @Composable
 private fun SourceGroup(

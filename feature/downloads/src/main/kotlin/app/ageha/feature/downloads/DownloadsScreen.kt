@@ -472,16 +472,28 @@ private fun StorageCard(
 			) {
 				Text(formatBytes(storage.used), style = MaterialTheme.typography.titleLarge)
 				Text(
-					"of " + formatBytes(storage.capacity) + " used · " +
+					// "used by Ageha", not "of N used".
+					//
+					// The old line read "56 MB of 931 GB used", which says the disk is 56 MB full.
+					// It was not -- 931 GB is the volume's *capacity*, and the same card said
+					// "253 GB free" two lines below, i.e. 678 GB occupied. Two numbers on one card
+					// disagreeing by three orders of magnitude. The headline is Ageha's own
+					// footprint and now says so; the volume is described by the bar and the legend.
+					"used by Ageha · " +
 						storage.chapterCount + " chapters · " + storage.titles.size + " titles",
 					style = AgehaTextStyles.monoMeta,
 					color = skin.inkFaint,
 					modifier = Modifier.padding(bottom = 2.dp),
 				)
 			}
-			// A stacked bar rather than two. Both segments measure against the same capacity, so
-			// putting them on one track is what lets the eye compare them at all -- and the empty
-			// remainder is the number this screen is really about.
+			// The whole volume on one track: Ageha's pages, Ageha's thumbnails, everything else
+			// already on the disk, and what is left.
+			//
+			// The third segment is the fix. Without it the bar plotted 56 MB against 931 GB and so
+			// drew an empty disk however full the disk actually was -- which made it useless for
+			// the one judgement it exists to support: whether there is room. Ageha's share stays
+			// in the accent, so it is still legible as *ours* against a neutral for everyone
+			// else's.
 			Row(
 				Modifier
 					.fillMaxWidth()
@@ -492,20 +504,35 @@ private fun StorageCard(
 				val capacity = storage.capacity.coerceAtLeast(1L).toFloat()
 				val pages = (storage.pages / capacity).coerceIn(0f, 1f)
 				val thumbs = (storage.thumbnails / capacity).coerceIn(0f, 1f)
+				val other = (storage.otherUsed / capacity).coerceIn(0f, 1f)
 				if (pages > 0f) Box(Modifier.fillMaxHeight().weight(pages).background(skin.accent))
 				if (thumbs > 0f) {
 					Box(Modifier.fillMaxHeight().weight(thumbs).background(skin.accentLine))
 				}
-				// Never zero. A weight of exactly 0 makes the remainder vanish and the two filled
+				if (other > 0f) {
+					Box(
+						Modifier.fillMaxHeight().weight(other)
+							.background(skin.inkFaint.copy(alpha = 0.45f)),
+					)
+				}
+				// Never zero. A weight of exactly 0 makes the remainder vanish and the filled
 				// segments stretch to the full width, which would draw a full disk on an empty one.
-				Box(Modifier.fillMaxHeight().weight((1f - pages - thumbs).coerceAtLeast(0.0001f)))
+				Box(
+					Modifier.fillMaxHeight()
+						.weight((1f - pages - thumbs - other).coerceAtLeast(0.0001f)),
+				)
 			}
 			Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.lg)) {
 				LegendKey(skin.accent, "pages", formatBytes(storage.pages))
 				LegendKey(skin.accentLine, "thumbnails", formatBytes(storage.thumbnails))
+				LegendKey(
+					skin.inkFaint.copy(alpha = 0.45f),
+					"other",
+					formatBytes(storage.otherUsed),
+				)
 				Box(Modifier.weight(1f))
 				Text(
-					formatBytes(storage.free) + " free",
+					formatBytes(storage.free) + " free of " + formatBytes(storage.capacity),
 					style = AgehaTextStyles.monoMeta,
 					color = skin.inkFaint,
 				)

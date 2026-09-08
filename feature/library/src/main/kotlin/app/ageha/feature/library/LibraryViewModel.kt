@@ -6,6 +6,7 @@ import app.ageha.core.data.HistoryRepository
 import app.ageha.core.data.LibraryCategory
 import app.ageha.core.data.LibraryEntry
 import app.ageha.core.data.LibraryRepository
+import app.ageha.core.model.AgehaManga
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -110,6 +111,35 @@ class LibraryViewModel(
 
 	fun removeFromLibrary(mangaId: Long) {
 		scope.launch { library.removeFromLibrary(mangaId) }
+	}
+
+	/**
+	 * Something the grid could not do, waiting to be said out loud.
+	 *
+	 * Published rather than thrown or swallowed. Marking a never-opened title read is a request
+	 * this schema genuinely cannot honour -- there is no chapter to point a position at -- and a
+	 * right-click that quietly does nothing is the worst of the three available outcomes.
+	 */
+	private val _notice = MutableStateFlow<String?>(null)
+	val notice: StateFlow<String?> = _notice.asStateFlow()
+
+	fun consumeNotice() {
+		_notice.value = null
+	}
+
+	/** Mark a whole title read, from the grid's right-click menu. */
+	fun markRead(manga: AgehaManga) {
+		scope.launch {
+			if (!history.markAllRead(manga.id)) {
+				_notice.value = "Ageha has no chapter list for \"${manga.title}\" yet. " +
+					"Open it once so the chapters are stored, then try again."
+			}
+		}
+	}
+
+	/** Mark a whole title unread, clearing its progress. See `HistoryRepository.markAllUnread`. */
+	fun markUnread(manga: AgehaManga) {
+		scope.launch { history.markAllUnread(manga.id) }
 	}
 
 	fun createCategory(title: String) {

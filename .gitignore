@@ -45,6 +45,9 @@ signing.properties
 # Skills installed by `npx skills add`
 .agents/
 
+# Scratch copies kept while reworking a file. Never part of the project.
+.tmpwork/
+
 # Skills installed by `npx skills add` land here as symlinks into .agents/.
 # skills-lock.json is committed so the set is reproducible; the content is not ours to vendor.
 .claude/skills/

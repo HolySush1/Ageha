@@ -36,7 +36,23 @@ data class StorageReport(
 	/** Total size of that volume. */
 	val capacity: Long,
 ) {
+	/** What Ageha itself is occupying. Never the same thing as what the disk is occupying. */
 	val used: Long get() = pages + thumbnails
+
+	/**
+	 * Everything on the volume that is not Ageha's.
+	 *
+	 * Needed because the storage bar is drawn against [capacity], and without this the two numbers
+	 * on the card contradicted each other: a 931 GB disk with 253 GB free is 73% full, but the bar
+	 * only ever knew about Ageha's own bytes, so it rendered that disk as empty. Reporting the
+	 * remainder makes the bar show the volume the user actually has, with Ageha's share marked on
+	 * it -- which is the comparison the screen exists to make.
+	 *
+	 * Clamped at zero: `capacity` and `free` are two separate filesystem calls and a write between
+	 * them can make the arithmetic briefly negative.
+	 */
+	val otherUsed: Long get() = (capacity - free - used).coerceAtLeast(0L)
+
 	val chapterCount: Int get() = titles.sumOf { it.chapterCount }
 
 	companion object {

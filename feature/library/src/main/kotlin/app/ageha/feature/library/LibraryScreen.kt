@@ -28,6 +28,7 @@ import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.CardStyle
 import app.ageha.core.designsystem.EmptyState
+import app.ageha.core.designsystem.MangaCardAction
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.designsystem.SectionHeader
@@ -74,6 +75,10 @@ fun LibraryScreen(
 	blurAdultCovers: Boolean = false,
 	/** The banner's "All N chapters". Opens that title's chapter list. */
 	onOpenChapters: (ContinueEntry) -> Unit = {},
+	/** Right-click a card: mark the whole title read. */
+	onMarkRead: (AgehaManga) -> Unit = {},
+	/** Right-click a card: mark the whole title unread, clearing its progress. */
+	onMarkUnread: (AgehaManga) -> Unit = {},
 ) {
 	// Resolving image headers is a per-source cost, not a per-cover one, so it is asked for once
 	// per distinct source in the current view rather than from inside the grid's item scope.
@@ -115,7 +120,7 @@ fun LibraryScreen(
 			)
 
 			else -> MangaGrid(
-				manga = state.entries.map { it.toGridItem(imageHeaders) },
+				manga = state.entries.map { it.toGridItem(imageHeaders, onMarkRead, onMarkUnread) },
 				onClick = onOpenManga,
 				style = cardStyle,
 				blurAdult = blurAdultCovers,
@@ -234,19 +239,23 @@ private fun ShelfControls(
 /**
  * A library row as the grid draws it.
  *
- * ## Why the position reads as a percentage rather than "Ch 214 / 260"
+ * ## Why the position reads "Ch 214 · 45%" rather than "Ch 214 / 260"
  *
- * The handoff prints a chapter position on every card. Ageha cannot honestly produce one here.
- * A [LibraryEntry] carries how far through the *current chapter* the reader is and how many
- * chapters have appeared since they last opened it -- there is no total, because the Android
- * schema this database stays compatible with has no per-chapter read table, and the total only
- * exists after a source has been asked for a fresh chapter list.
+ * The handoff prints a chapter position on every card, as a fraction. Ageha can honestly produce
+ * the left half of one and not the right: the history join carries the chapter last read, so the
+ * number is a fact, but there is no total, because the Android schema this database stays
+ * compatible with has no per-chapter read table and the chapter count only exists after a source
+ * has been asked for a fresh list.
  *
- * So the card says what is actually known. A percentage is the same information the progress bar
- * underneath it carries, stated in a form you can read at a glance across a grid, and it never
- * claims a chapter count that came from nowhere.
+ * So the card pairs the number with the percentage instead. Between them they answer both halves
+ * of "where am I" -- which chapter, and how much of the whole thing that is -- without either one
+ * claiming a total that came from nowhere.
  */
-private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>): MangaGridItem {
+private fun LibraryEntry.toGridItem(
+	headers: Map<String, Map<String, String>>,
+	onMarkRead: (AgehaManga) -> Unit,
+	onMarkUnread: (AgehaManga) -> Unit,
+): MangaGridItem {
 	val percent = progressPercent
 	// 100% is the threshold rather than a mark-as-read flag, for the same reason: there is no
 	// per-chapter table to ask. Reaching the end of the last chapter Ageha knows about is the
@@ -257,7 +266,7 @@ private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>): 
 		imageHeaders = headers[manga.sourceName].orEmpty(),
 		badgeCount = newChapters,
 		progress = percent,
-		positionLabel = percent?.let { "${(it * 100).roundToInt()}%" },
+		positionLabel = positionLabel(),
 		stateLabel = when {
 			isComplete -> "read"
 			percent != null && percent > 0f -> "reading"
@@ -267,7 +276,33 @@ private fun LibraryEntry.toGridItem(headers: Map<String, Map<String, String>>): 
 			else -> null
 		},
 		isComplete = isComplete,
+		actions = listOf(
+			MangaCardAction("Mark as read") { onMarkRead(manga) },
+			MangaCardAction("Mark as unread") { onMarkUnread(manga) },
+		),
 	)
+}
+
+/**
+ * The card's mono position line: `Ch 214 · 45%`.
+ *
+ * The chapter number comes from the history join, which already carries the row for the chapter
+ * last read -- so this is the number of the chapter you stopped on, not a claim about how many
+ * there are. That distinction is why it reads `Ch 214` and never `Ch 214 / 260`: the total only
+ * exists once a source has been asked for a fresh chapter list, and a card in a grid has not
+ * asked.
+ *
+ * Either half can be missing on its own. A backup-imported row has a percentage and no chapter
+ * rows behind it; a source that numbers nothing has chapters and no numbers.
+ */
+private fun LibraryEntry.positionLabel(): String? {
+	val chapter = lastChapterNumber?.let { value ->
+		val whole = value.toInt()
+		// 12.5 is a real chapter number; 12.0 must not print as "12.0".
+		if (value == whole.toFloat()) "Ch $whole" else "Ch $value"
+	}
+	val percent = progressPercent?.let { "${(it * 100).roundToInt()}%" }
+	return listOfNotNull(chapter, percent).takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 
 /** The library's title, selectable so a user can copy a manga name out of it. */

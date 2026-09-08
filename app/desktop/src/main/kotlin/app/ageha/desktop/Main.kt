@@ -3,7 +3,6 @@ package app.ageha.desktop
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,10 +80,6 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 	val navigator = remember { Navigator() }
 	val searchFocus = remember { FocusRequester() }
 
-	// The command panel's open state lives here rather than in the shell, because two things open
-	// it and only one of them is inside the shell: the magnifier in the nav pill, and Ctrl+K,
-	// which is bound on the window because that is where key events arrive.
-	var commandPanelOpen by remember { mutableStateOf(false) }
 	val keyRouter = remember { KeyRouter() }
 	var isFullscreen by remember { mutableStateOf(false) }
 
@@ -199,13 +194,18 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					event.isCtrlPressed && event.key == Key.Comma -> {
 						navigator.switchTo(Section.SETTINGS); true
 					}
-					// Ctrl+K opens the command panel: the keyboard half of the magnifier in the
+					// Ctrl+K opens the full-page search: the keyboard half of the magnifier in the
 					// navigation pill, and the shortcut the `CTRL K` cap beside Explore's search
-					// field promises. It toggles rather than only opening, because the key that
-					// summoned a panel is the one a hand already on the keyboard reaches for to
-					// dismiss it.
+					// field promises.
+					//
+					// It used to toggle a popover panel. That panel showed three library rows and
+					// two source results in total, which is a fine shape for a command palette
+					// jumping to a known destination and the wrong one for searching 1360 sites --
+					// the answer you wanted was usually the sixth row. Same key, same intent, no
+					// cap.
 					event.isCtrlPressed && event.key == Key.K -> {
-						commandPanelOpen = !commandPanelOpen
+						navigator.openGlobalSearch()
+						runCatching { searchFocus.requestFocus() }
 						true
 					}
 					// Ctrl+Shift+F searches every enabled source, from wherever you are. Tested
@@ -257,7 +257,13 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 					// minimise and close away from someone halfway through a chapter, to hide
 					// 38px they are not looking at. True immersion is fullscreen, which the
 					// reader already has a key for.
-					WindowDraggableArea {
+					// Ageha's own drag area rather than Compose's, so that dragging a maximised
+					// window restores it under the cursor the way Windows does. See WindowResize.kt.
+					WindowDragArea(
+						window = window,
+						isMaximized = windowState.placement == WindowPlacement.Maximized,
+						onRestore = { windowState.placement = WindowPlacement.Floating },
+					) {
 						AgehaTitleBar(
 							context = windowContextLine(app, navigator),
 							theme = preferences.theme,
@@ -278,6 +284,9 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 									}
 							},
 							onClose = onExit,
+							// So the middle button shows a restore mark, and says "Restore", once
+							// the window already fills the screen.
+							isMaximized = windowState.placement == WindowPlacement.Maximized,
 						)
 					}
 					AgehaShell(
@@ -295,8 +304,6 @@ private fun ApplicationScope.AgehaWindow(app: AgehaApplication, onExit: () -> Un
 						onImportBackup = { importBackup(app, navigator) },
 						onExportBackup = { exportBackup(app) },
 						onOpenArchive = { openLocalArchive(app, navigator) },
-						isCommandPanelOpen = commandPanelOpen,
-						onCommandPanelOpenChange = { commandPanelOpen = it },
 					)
 				}
 				// Last, so the edges sit above the content that would otherwise swallow the drag.
