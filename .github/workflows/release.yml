@@ -20,9 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Zulu here, unlike every other workflow, and for one specific reason.
+      #
+      # The Conveyor Gradle plugin exports the JDK that Gradle's toolchain resolved -- and since
+      # `jvmToolchain(21)` names no vendor, that is whatever this step installed. The Microsoft
+      # build of OpenJDK publishes no Windows/ARM64 21, so Conveyor built five of the six targets
+      # and then failed the entire release on the last one: "JAR files were imported but no JVM
+      # inputs were supplied for 'windows.aarch64'". Zulu ships all six.
+      #
+      # Only this workflow needs it. Nothing else packages anything, and leaving the others on the
+      # ordinary JDK keeps them representative of what a contributor actually builds with.
       - uses: actions/setup-java@v4
         with:
-          distribution: microsoft
+          distribution: zulu
           java-version: "21"
 
       - uses: gradle/actions/setup-gradle@v4
