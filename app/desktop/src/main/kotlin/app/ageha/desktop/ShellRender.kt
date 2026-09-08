@@ -17,6 +17,10 @@ import app.ageha.feature.library.ContinueHero
 import app.ageha.feature.settings.SettingsSection
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import app.ageha.core.data.SourceListing
+import app.ageha.feature.explore.ExploreUiState
+import app.ageha.feature.explore.SourceFilter
+import app.ageha.feature.explore.SourcePickerScreen
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 
@@ -35,11 +39,22 @@ fun main(args: Array<String>) {
 	val outDir = File(args.firstOrNull() ?: "build/shell").apply { mkdirs() }
 	val app = AgehaApplication.start()
 	try {
-		// Both skins, every screen. One skin's screenshots cannot show what the other looks like,
-		// and the whole premise of the design is that the two are different materials rather than
-		// two palettes -- so a review set that only ever renders Ember is a review set that
+		// Every theme, every screen. One theme's screenshots cannot show what another looks like,
+		// and the whole premise of the design is that the two skins are different materials rather
+		// than two palettes -- so a review set that only ever renders Ember is a review set that
 		// cannot catch Glass being broken.
-		for ((skinName, mode) in listOf("ember" to AgehaThemeMode.EMBER, "glass" to AgehaThemeMode.GLASS))
+		//
+		// Light and AMOLED are here because leaving them out cost something real. This set used to
+		// be the two skins alone, which meant the two *brand* themes were never looked at -- and
+		// the third ink sat at 1.87:1 in Light and 1.26:1 in AMOLED, unreadable, through however
+		// many reviews, because no reviewer was ever shown a picture of it. A palette that is only
+		// rendered in the themes someone happens to use is a palette with two themes.
+		for ((skinName, mode) in listOf(
+			"ember" to AgehaThemeMode.EMBER,
+			"glass" to AgehaThemeMode.GLASS,
+			"light" to AgehaThemeMode.LIGHT,
+			"amoled" to AgehaThemeMode.AMOLED,
+		))
 		for ((name, section) in listOf(
 			"library" to Section.LIBRARY,
 			"continue" to Section.CONTINUE,
@@ -74,9 +89,10 @@ fun main(args: Array<String>) {
 		renderSettingsPanels(app, outDir)
 		renderCollapsedRail(app, outDir)
 		renderSearchAll(app, outDir)
-		renderCommandPanel(app, outDir)
 		renderContinueHero(app, outDir)
 		renderReader(app, outDir)
+		renderDetails(app, outDir)
+		renderDefaultSourcesButton(app, outDir)
 		val descriptors = app.sources.allDescriptors()
 		println("sources visible to the UI: ${descriptors.size}")
 		// The picker hides both of these by default, so a build where either count collapses to zero
@@ -88,6 +104,64 @@ fun main(args: Array<String>) {
 		app.close()
 	}
 }
+
+
+/**
+ * Renders the source picker with default sources still to enable, in both skins.
+ *
+ * The button only exists while some default is off, which on a working installation is almost
+ * never -- so the shell renders above, drawn against the real database, cannot show it. That is
+ * exactly the kind of control that ships broken: it appears on a first run, in front of a new
+ * user, and nobody who reviews the app ever sees it.
+ *
+ * So this composes the picker with a state that has some, and does it in both skins, because the
+ * fill is `colorScheme.primary` and the two skins put that in different places.
+ */
+private fun renderDefaultSourcesButton(app: AgehaApplication, outDir: File) {
+	val listings = app.sources.allDescriptors().take(SAMPLE_ROWS).mapIndexed { index, descriptor ->
+		SourceListing(descriptor = descriptor, isEnabled = index % 2 == 0, isPinned = false, lastUsedAt = 0)
+	}
+	val state = ExploreUiState(
+		sources = listings,
+		filter = SourceFilter.ALL,
+		totalCount = app.sources.allDescriptors().size,
+		enabledCount = listings.count { it.isEnabled },
+		defaultsOff = 37,
+		isLoading = false,
+	)
+	for ((skinName, mode) in listOf("ember" to AgehaThemeMode.EMBER, "glass" to AgehaThemeMode.GLASS)) {
+		val scene = ImageComposeScene(width = 1280, height = 520, density = Density(1f)) {
+			AgehaTheme(mode = mode) {
+				SourcePickerScreen(
+					state = state,
+					onOpenSource = {},
+					onSearch = {},
+					onFilter = {},
+					onLocale = {},
+					onHideBroken = {},
+					onShowAdult = {},
+					onSetEnabled = { _, _ -> },
+					onEnableDefaults = {},
+					modifier = Modifier.fillMaxSize(),
+				)
+			}
+		}
+		try {
+			scene.render(0L)
+			runBlocking { delay(RENDER_FRAME_GAP_MS) }
+			val image = scene.render(RENDER_FRAME_GAP_MS * 1_000_000)
+			File(outDir, "shell-defaults-$skinName.png").writeBytes(
+				checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
+			)
+			println("wrote shell-defaults-$skinName.png")
+		} finally {
+			scene.close()
+		}
+	}
+}
+
+/** Enough rows for the list under the button to read as a list. */
+private const val SAMPLE_ROWS = 8
 
 /** Long enough for the parsers bridge and the first Room emission. */
 private const val RENDER_SETTLE_MS = 2_500L
@@ -176,42 +250,6 @@ private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
  * anybody's server. That is the intended behaviour on a machine that has never been configured,
  * and rendering it proves the screen handles it.
  */
-/**
- * Renders the command panel over the library.
- *
- * It is an overlay rather than a destination, so nothing in the screen loop can reach it -- and an
- * overlay that only appears on a keystroke is exactly the surface that ships broken. Composing it
- * with `isCommandPanelOpen = true` proves the panel lays out, that its backdrop covers the window,
- * and that the field and rows draw over a live screen rather than under it.
- */
-private fun renderCommandPanel(app: AgehaApplication, outDir: File) {
-	val navigator = Navigator().apply { switchTo(Section.LIBRARY) }
-	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
-		AgehaTheme(mode = AgehaThemeMode.EMBER) {
-			AgehaShell(
-				app,
-				navigator,
-				FocusRequester(),
-				Modifier.fillMaxSize(),
-				isCommandPanelOpen = true,
-			)
-		}
-	}
-	try {
-		var image = scene.render()
-		repeat(RENDER_FRAMES) {
-			runBlocking { delay(RENDER_FRAME_GAP_MS) }
-			image = scene.render()
-		}
-		File(outDir, "shell-command-panel.png").writeBytes(
-			checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes,
-		)
-		println("wrote shell-command-panel.png")
-	} finally {
-		scene.close()
-	}
-}
-
 private fun renderSearchAll(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { searchAllSources("berserk", subject = "Berserk") }
 	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
@@ -347,6 +385,48 @@ private fun renderReader(app: AgehaApplication, outDir: File) {
 		println("wrote shell-reader.png (from a real CBZ of ${LocalArchive.pages(archive).size} pages)")
 	} finally {
 		scene.close()
+	}
+}
+
+/**
+ * Renders the details screen -- the cover, the blurb and the chapter list.
+ *
+ * Added late, and the omission cost something. This is the screen a user opens to *choose* a
+ * chapter, and it was the one screen with no picture in the review set: the render loop covered
+ * the five sections, the settings panels, search, the command panel, the hero and the reader, and
+ * stopped. So when every chapter title in the list turned out to be drawing in `Color.Black` on a
+ * near-black window -- the default `LocalContentColor`, which nothing in the app was providing --
+ * there was no screenshot anywhere in which it could have been noticed. It was reported by
+ * someone using the app.
+ *
+ * Built on the same throwaway CBZ the reader render uses, so it needs no network and no library.
+ */
+private fun renderDetails(app: AgehaApplication, outDir: File) {
+	val archive = File(outDir, "sample.cbz").apply { if (!exists()) writeSampleArchive(this) }
+	val (manga, _) = app.reader.localManga(archive)
+
+	for ((name, mode) in listOf(
+		"ember" to AgehaThemeMode.EMBER,
+		"light" to AgehaThemeMode.LIGHT,
+	)) {
+		val navigator = Navigator().apply { openManga(manga) }
+		val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {
+			AgehaTheme(mode = mode) {
+				AgehaShell(app, navigator, FocusRequester(), Modifier.fillMaxSize())
+			}
+		}
+		try {
+			// The chapter list arrives from the repository asynchronously, so the first frame is
+			// an empty list. Same two-frame treatment as every other render here.
+			scene.render(0L)
+			runBlocking { delay(RENDER_SETTLE_MS) }
+			val image = scene.render(RENDER_SETTLE_MS * 1_000_000)
+			val file = "shell-details-$name.png"
+			File(outDir, file).writeBytes(checkNotNull(image.encodeToData(EncodedImageFormat.PNG)).bytes)
+			println("wrote $file")
+		} finally {
+			scene.close()
+		}
 	}
 }
 

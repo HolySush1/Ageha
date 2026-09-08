@@ -66,6 +66,13 @@ data class ExploreUiState(
 	val totalCount: Int = 0,
 	val enabledCount: Int = 0,
 	/**
+	 * How many of the default English sources are currently off.
+	 *
+	 * The button that turns them on shows this, and goes away at zero. A button that stays put
+	 * after it has nothing left to do teaches people that it does nothing.
+	 */
+	val defaultsOff: Int = 0,
+	/**
 	 * How many sources the same search would find with the filter set to [SourceFilter.ALL].
 	 *
 	 * Carried so the screen can tell "nothing is called that" apart from "nothing you have turned
@@ -115,7 +122,11 @@ class ExploreViewModel(
 		sources.observeAll(),
 		query,
 		filters,
-	) { all, text, f ->
+		// Its own flow rather than a count derived from `all`, because "off" here means off in the
+		// database, and `all` has already had the tab and the filters applied by the time anything
+		// could count it.
+		sources.observeDefaultsOff(),
+	) { all, text, f, defaultsOff ->
 		val visible = when (f.view) {
 			SourceFilter.ENABLED -> all.filter { it.isEnabled }
 			SourceFilter.ALL -> all
@@ -169,6 +180,7 @@ class ExploreViewModel(
 			parsersVersion = sources.parsersVersion,
 			totalCount = all.size,
 			enabledCount = all.count { it.isEnabled },
+			defaultsOff = defaultsOff.size,
 			// Only computed when this filter came back with nothing, which is the only time the
 			// screen asks. Running the same search over 1360 entries on every keystroke to answer
 			// a question nobody asked would be the one expensive thing on this screen.
@@ -212,6 +224,18 @@ class ExploreViewModel(
 
 	fun setEnabled(name: String, enabled: Boolean) {
 		scope.launch { sources.setEnabled(name, enabled) }
+	}
+
+	/**
+	 * Turn on the default English sources.
+	 *
+	 * No confirmation, because there is nothing here to be sorry about: it only ever switches
+	 * sources *on*, the list it changes is the one on screen, and every row it touches has its own
+	 * switch to undo it. A dialog guarding an additive, visible, reversible action is a dialog
+	 * people learn to dismiss without reading.
+	 */
+	fun enableDefaults() {
+		scope.launch { sources.enableDefaults() }
 	}
 
 	fun markUsed(name: String) {

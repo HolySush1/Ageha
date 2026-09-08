@@ -120,8 +120,6 @@ fun AgehaShell(
 	 * field, and a cap printed next to a field that does not answer to that key is worse than no
 	 * cap at all -- so the shortcut has to be real, and it has to reach this state.
 	 */
-	isCommandPanelOpen: Boolean = false,
-	onCommandPanelOpenChange: (Boolean) -> Unit = {},
 ) {
 	val scope = application.scope
 	val libraryViewModel = remember {
@@ -203,11 +201,6 @@ fun AgehaShell(
 	// action and one string of result -- a class for it would be ceremony.
 	var appUpdateChecking by remember { mutableStateOf(false) }
 	var appUpdateResult by remember { mutableStateOf<String?>(null) }
-
-	// The panel is *state*, not a destination, and deliberately so: search is an action you take on
-	// the screen you are already looking at, not a place you navigate to. Giving it a destination
-	// put it in the same back stack as the screen that launched it and made Escape ambiguous.
-	val searchOpen = isCommandPanelOpen
 
 	val notices by application.notices.notices.collectAsState()
 
@@ -322,6 +315,15 @@ fun AgehaShell(
 					}
 					val state by globalSearchViewModel.state.collectAsState()
 					val headers by libraryViewModel.imageHeaders.collectAsState()
+					// The library half of the search, which this screen inherited when it replaced
+					// the command panel. Driven off the same query the source fan-out uses, so the
+					// two halves can never disagree about what was asked.
+					//
+					// Local and instant: it filters rows already in memory rather than issuing a
+					// request, so unlike the source groups it needs no debounce and no minimum
+					// length.
+					val libraryState by libraryViewModel.state.collectAsState()
+					LaunchedEffect(state.query) { libraryViewModel.search(state.query) }
 					Column(Modifier.fillMaxSize()) {
 						BreadcrumbBar(navigator, "Search all sources")
 						GlobalSearchScreen(
@@ -333,6 +335,11 @@ fun AgehaShell(
 							onOpenSource = navigator::openSource,
 							onNeedHeaders = libraryViewModel::ensureHeaders,
 							searchFocus = searchFocus,
+							libraryMatches = if (state.query.isBlank()) {
+								emptyList()
+							} else {
+								libraryState.entries.map { it.manga }
+							},
 						)
 					}
 				}
@@ -518,6 +525,7 @@ fun AgehaShell(
 						onHideBroken = exploreViewModel::setHideBroken,
 						onShowAdult = exploreViewModel::setShowAdult,
 						onSetEnabled = exploreViewModel::setEnabled,
+						onEnableDefaults = exploreViewModel::enableDefaults,
 						searchFocus = searchFocus,
 					)
 				}
@@ -565,6 +573,10 @@ fun AgehaShell(
 									override fun previousPage() = readerViewModel.previousPage()
 									override fun nextChapter() = readerViewModel.nextChapter()
 									override fun previousChapter() = readerViewModel.previousChapter()
+									override fun chapters() {
+										readerViewModel.savePositionNow()
+										navigator.openChapterList(destination.manga)
+									}
 									override fun goToPage(index: Int) = readerViewModel.goToPage(index)
 									override fun setScale(scale: app.ageha.core.model.PageScale) =
 										readerViewModel.setScale(scale)
@@ -592,6 +604,16 @@ fun AgehaShell(
 						onScroll = readerViewModel::recordScroll,
 						onNextPage = readerViewModel::nextPage,
 						onPreviousPage = readerViewModel::previousPage,
+						onNextChapter = readerViewModel::nextChapter,
+						onPreviousChapter = { readerViewModel.previousChapter() },
+						// The position is flushed on the way out rather than left to the
+						// debounce, for the same reason the DisposableEffect below does it: the
+						// reader is about to be popped, and the page turn most worth remembering
+						// is the last one.
+						onOpenChapterList = {
+							readerViewModel.savePositionNow()
+							navigator.openChapterList(destination.manga)
+						},
 						onSetMode = readerViewModel::setMode,
 						onSetScale = readerViewModel::setScale,
 						onSetBackground = { onPreferencesChange(preferences.copy(readerBackground = it)) },
@@ -650,46 +672,19 @@ fun AgehaShell(
 		if (!navigator.isImmersive) {
 			FloatingNav(
 				navigator = navigator,
-				onSearchAllSources = { onCommandPanelOpenChange(true) },
+				// Straight to the full-page search, not a popover.
+				//
+				// This used to open the command panel, which showed at most three library rows and
+				// two results from every enabled source *combined*. Against 1360 sources that is
+				// not a summary, it is a coin toss -- reported as "this small bar causes me to
+				// miss out on a lot of searches", which is exactly what a five-row cap over a
+				// fan-out search does. The full page groups every source separately and caps
+				// nothing.
+				onSearchAllSources = {
+					navigator.openGlobalSearch()
+					runCatching { searchFocus.requestFocus() }
+				},
 				modifier = Modifier.align(Alignment.TopCenter),
-			)
-		}
-
-		// The handoff's command panel, over whatever screen is current.
-		//
-		// The library query is the *same* state the grid filters on, which is the handoff being
-		// deliberate rather than lazy: typing here filters the shelf behind the panel live, so
-		// closing it leaves the library showing what was just searched for instead of throwing
-		// the query away.
-		if (searchOpen && !navigator.isImmersive) {
-			val libraryState by libraryViewModel.state.collectAsState()
-			val headers by libraryViewModel.imageHeaders.collectAsState()
-			val globalState by globalSearchViewModel.state.collectAsState()
-			// One request per enabled source is not something to spend on a keystroke. The local
-			// half of the panel is already live; this is the half that costs someone bandwidth.
-			LaunchedEffect(libraryState.query) {
-				val query = libraryState.query
-				if (query.length >= REMOTE_SEARCH_MIN_LENGTH) {
-					delay(REMOTE_SEARCH_DEBOUNCE_MS)
-					globalSearchViewModel.search(query)
-				}
-			}
-			CommandPanel(
-				query = libraryState.query,
-				onQuery = libraryViewModel::search,
-				local = libraryState.entries,
-				remote = globalState.results.flatMap { it.manga },
-				isSearchingRemote = globalState.isSearching,
-				imageHeaders = headers,
-				onOpen = { manga ->
-					onCommandPanelOpenChange(false)
-					navigator.openManga(manga)
-				},
-				onSeeAllResults = {
-					onCommandPanelOpenChange(false)
-					navigator.searchAllSources(libraryState.query)
-				},
-				onDismiss = { onCommandPanelOpenChange(false) },
 			)
 		}
 
