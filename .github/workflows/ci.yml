@@ -36,6 +36,24 @@ jobs:
       - name: Build and test
         run: ./gradlew build --no-daemon
 
+      # The reports, whenever the suite goes red.
+      #
+      # Gradle's console output truncates a stack to its first line, which for an assertion is
+      # enough and for a *timeout* is not: `UncompletedCoroutinesError at TestBuilders.kt:353`
+      # names the mechanism and nothing about which coroutine, which test, or what it was waiting
+      # on. That was the whole of the evidence the first time this suite failed here, and it cost
+      # a round trip through CI to learn nothing.
+      #
+      # `if: failure()` rather than `always()`: a green run's reports are noise, and this is the
+      # only artifact anyone would download while looking at a red one.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+
       # Proves the application actually composes against the real graph -- the real parsers build
       # through the classloader boundary, the real database, the real screens -- without a display.
       # A green unit suite does not catch a shell that opens blank.

@@ -60,12 +60,24 @@ fun <T> motionTween(
 	durationMs: Int,
 	delayMs: Int = 0,
 	easing: Easing = AgehaMotion.standard,
-): FiniteAnimationSpec<T> =
-	if (LocalMotionEnabled.current) {
-		tween(durationMillis = durationMs, delayMillis = delayMs, easing = easing)
-	} else {
-		snap()
+): FiniteAnimationSpec<T> {
+	val enabled = LocalMotionEnabled.current
+	// Remembered, and not merely to save an allocation.
+	//
+	// A spec handed to a *Modifier* -- `Modifier.animateItem` is the one that matters -- is part of
+	// that modifier element's identity. Building a fresh instance on every composition makes the
+	// element compare unequal every time, so Compose updates the underlying node on every
+	// recomposition of every item in the list, whether or not anything about the animation
+	// changed. In a grid being scrolled that is work proportional to items times frames, for no
+	// reason at all.
+	return remember(enabled, durationMs, delayMs, easing) {
+		if (enabled) {
+			tween(durationMillis = durationMs, delayMillis = delayMs, easing = easing)
+		} else {
+			snap()
+		}
 	}
+}
 
 /**
  * The pointer-response spring: hover, press, the sliding selection indicator.
@@ -76,29 +88,40 @@ fun <T> motionTween(
  * `VisibilityThreshold` constants for exactly this, and the call sites here pass them.
  */
 @Composable
-fun <T> snappySpring(visibilityThreshold: T? = null): FiniteAnimationSpec<T> =
-	if (LocalMotionEnabled.current) {
-		spring(
-			dampingRatio = AgehaMotion.SNAPPY_DAMPING,
-			stiffness = AgehaMotion.SNAPPY_STIFFNESS,
-			visibilityThreshold = visibilityThreshold,
-		)
-	} else {
-		snap()
+fun <T> snappySpring(visibilityThreshold: T? = null): FiniteAnimationSpec<T> {
+	val enabled = LocalMotionEnabled.current
+	// Remembered for the reason [motionTween] gives.
+	return remember(enabled, visibilityThreshold) {
+		if (enabled) {
+			spring(
+				dampingRatio = AgehaMotion.SNAPPY_DAMPING,
+				stiffness = AgehaMotion.SNAPPY_STIFFNESS,
+				visibilityThreshold = visibilityThreshold,
+			)
+		} else {
+			snap()
+		}
 	}
+}
 
 /** The settle spring: a thing finding a new position, with no overshoot. See [snappySpring]. */
 @Composable
-fun <T> settleSpring(visibilityThreshold: T? = null): FiniteAnimationSpec<T> =
-	if (LocalMotionEnabled.current) {
-		spring(
-			dampingRatio = AgehaMotion.SETTLE_DAMPING,
-			stiffness = AgehaMotion.SETTLE_STIFFNESS,
-			visibilityThreshold = visibilityThreshold,
-		)
-	} else {
-		snap()
+fun <T> settleSpring(visibilityThreshold: T? = null): FiniteAnimationSpec<T> {
+	val enabled = LocalMotionEnabled.current
+	// Remembered for the reason [motionTween] gives. This is the one that is actually handed to
+	// `Modifier.animateItem`, in `MangaGrid` and `MangaList`.
+	return remember(enabled, visibilityThreshold) {
+		if (enabled) {
+			spring(
+				dampingRatio = AgehaMotion.SETTLE_DAMPING,
+				stiffness = AgehaMotion.SETTLE_STIFFNESS,
+				visibilityThreshold = visibilityThreshold,
+			)
+		} else {
+			snap()
+		}
 	}
+}
 
 /** [snappySpring] widened to [AnimationSpec], for APIs that ask for the looser type. */
 @Composable
