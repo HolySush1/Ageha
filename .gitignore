@@ -2,7 +2,16 @@
 
 # Gradle
 .gradle/
+# Depth-agnostic on purpose -- every module has its own output directory, not just the root.
+# The cost is that it also matches a *Kotlin package* called `build`, which is not output at all;
+# `buildSrc`'s own task types live in one. That cost was paid once already: the package was
+# silently never committed, every local build kept working because the files were still on disk,
+# and the repository only turned out to be unbuildable when CI cloned it fresh. The re-include
+# below is what keeps that from happening again. It works because only the `build` directory
+# itself is excluded here -- git cannot re-include a file whose *parent* directory is excluded,
+# and `src/main/kotlin/app/ageha/` is not.
 build/
+!*/src/**/build/
 # Kotlin 2.x's build-tools session directory. Local scratch, regenerated every build.
 .kotlin/
 !gradle/wrapper/gradle-wrapper.jar
