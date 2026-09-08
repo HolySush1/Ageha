@@ -66,7 +66,12 @@ jobs:
           # The version comes from the tag, not from the build file, so a release cannot be cut
           # with a version that disagrees with what it is tagged.
           version="${GITHUB_REF_NAME#v}"
-          conveyor -Kapp.signing-key="$CONVEYOR_SIGNING_KEY" -Kapp.version="$version" make copied-site
+          # The token is passed as a *config key*, not merely as an environment variable.
+          # Conveyor does not read GITHUB_TOKEN on its own: it fails the publish step with
+          # "Releasing to GitHub requires an OAuth token. Please set it in your config at key
+          # `app.site.github.oauth-token`" -- after building the package, so the failure looks
+          # like a build problem and is not one.
+          conveyor             -Kapp.signing-key="$CONVEYOR_SIGNING_KEY"             -Kapp.site.github.oauth-token="$GITHUB_TOKEN"             -Kapp.version="$version"             make copied-site
 
       - uses: actions/upload-artifact@v4
         with:
