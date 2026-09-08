@@ -53,7 +53,7 @@ class AppUpdateCheckerTest {
 
 	private fun checker(current: String) = AppUpdateChecker(
 		httpClient = http,
-		repo = "Kotatsu-Redo/Ageha",
+		repo = "HolySush1/Ageha",
 		currentVersion = current,
 		apiBase = "http://127.0.0.1:" + server.address.port,
 	)
