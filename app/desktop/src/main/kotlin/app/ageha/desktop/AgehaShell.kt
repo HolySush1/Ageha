@@ -250,6 +250,26 @@ fun AgehaShell(
 	// together while one shared download runs.
 	val remedyProgress = browserInstallProgress(application.browser)
 
+	// The cache, measured only while the panel that shows it is open.
+	//
+	// Sizing it walks a directory and asks OkHttp for a figure it computes from disk, which is not
+	// work to repeat on every recomposition of a library grid. Keying the effect on the current
+	// destination means it is measured when Settings opens and refreshed after a clear, and never
+	// otherwise.
+	val cacheMaintenance = remember(application) {
+		CacheMaintenance(
+			imageLoader = application.imageLoader,
+			httpClient = application.sourceStack.httpClient,
+			browserCacheDir = java.io.File(app.ageha.core.network.AgehaPaths.cacheDir, "browser"),
+		)
+	}
+	var cacheReport by remember { mutableStateOf(CacheReport.EMPTY) }
+	var cacheEpoch by remember { mutableStateOf(0) }
+	var clearingCache by remember { mutableStateOf(false) }
+	LaunchedEffect(navigator.current, cacheEpoch) {
+		if (navigator.current == Destination.Settings) cacheReport = cacheMaintenance.report()
+	}
+
 	// Where a Continue Reading entry resolved to.
 	//
 	// Handled here rather than inside either screen because both the shelf and the Continue screen
@@ -621,6 +641,25 @@ fun AgehaShell(
 						// broken -- see the note beside the button in SettingsScreen.
 						onInstallBrowser = { remedies.handle(FailureCopy.Remedy.INSTALL_BROWSER, null) },
 						browserProgress = remedyProgress,
+						cacheBytes = cacheReport.clearable,
+						browserCacheBytes = cacheReport.browser,
+						clearingCache = clearingCache,
+						onClearCache = {
+							scope.launch {
+								clearingCache = true
+								val freed = runCatching { cacheMaintenance.clear() }.getOrDefault(0L)
+								clearingCache = false
+								// Bumping the epoch re-measures, so the row shows what is actually
+								// left rather than assuming the clear emptied everything -- an
+								// entry being read at that moment survives eviction.
+								cacheEpoch++
+								application.notices.post(
+									"Cache cleared",
+									"Freed " + freed / 1024 / 1024 + " MB. Downloaded chapters " +
+										"were not touched.",
+								)
+							}
+						},
 						onClearHistory = {
 							scope.launch {
 								val cleared = application.history.clearAll()

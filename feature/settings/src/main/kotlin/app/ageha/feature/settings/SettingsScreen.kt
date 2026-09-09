@@ -185,6 +185,13 @@ fun SettingsScreen(
 	onInstallBrowser: (() -> Unit)? = null,
 	/** What that install is doing, while it runs. Null when nothing is running. */
 	browserProgress: String? = null,
+	/** Image plus HTTP cache, in bytes. See the Downloads panel. */
+	cacheBytes: Long = 0L,
+	/** The browser component's profile, in bytes. Reported only. */
+	browserCacheBytes: Long = 0L,
+	/** Empty the image and HTTP caches. Null draws no button. */
+	onClearCache: (() -> Unit)? = null,
+	clearingCache: Boolean = false,
 ) {
 	var section by remember { mutableStateOf(initialSection) }
 	Row(
@@ -252,7 +259,14 @@ fun SettingsScreen(
 					onInstallBrowser, browserProgress,
 				)
 
-				SettingsSection.DOWNLOADS -> DownloadsPanel(parallelDownloads, onParallelDownloads)
+				SettingsSection.DOWNLOADS -> DownloadsPanel(
+					parallel = parallelDownloads,
+					onParallel = onParallelDownloads,
+					cacheBytes = cacheBytes,
+					browserCacheBytes = browserCacheBytes,
+					onClearCache = onClearCache,
+					clearingCache = clearingCache,
+				)
 
 				SettingsSection.APPEARANCE -> AppearancePanel(theme, onTheme, motion, onMotion)
 
@@ -676,7 +690,16 @@ private fun SourcesPanel(
  * shorter panel.
  */
 @Composable
-private fun DownloadsPanel(parallel: Int, onParallel: (Int) -> Unit) {
+private fun DownloadsPanel(
+	parallel: Int,
+	onParallel: (Int) -> Unit,
+	/** Image plus HTTP cache, in bytes. What "Clear cache" would reclaim. */
+	cacheBytes: Long,
+	/** The browser component's Chromium profile, in bytes. Reported, never cleared -- see below. */
+	browserCacheBytes: Long,
+	onClearCache: (() -> Unit)?,
+	clearingCache: Boolean,
+) {
 	PanelHeading(
 		"Downloads",
 		"Chapters are saved as ordinary CBZ files, readable in any comic reader. What is on " +
@@ -704,6 +727,72 @@ private fun DownloadsPanel(parallel: Int, onParallel: (Int) -> Unit) {
 			"one small site is how an application gets its whole user base blocked. Raising this " +
 			"speeds up a queue spread across several sources and does very little for one.",
 	)
+
+	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+	// The cache, which until now was invisible.
+	//
+	// Reading a chapter writes every page of it to disk whether or not anything was downloaded --
+	// Coil caches the images, OkHttp caches the responses -- and neither was reported anywhere or
+	// removable from inside the application. Up to three quarters of a gigabyte of manga could sit
+	// under the user's profile with no way to find it, which for a reader is a privacy question
+	// as much as a disk one.
+	Text("Cache", style = MaterialTheme.typography.titleMedium)
+	SettingsRows(
+		listOf(
+			{
+				SettingRow(
+					"Cached pages and covers",
+					// The size is the hint rather than a separate line, because the size *is* the
+					// reason anyone reads this row.
+					formatCacheBytes(cacheBytes) + " · rebuilt automatically as you read",
+				) {
+					if (onClearCache != null) {
+						Button(onClick = onClearCache, enabled = !clearingCache && cacheBytes > 0) {
+							Text(if (clearingCache) "Clearing…" else "Clear cache")
+						}
+					}
+				}
+			},
+		),
+	)
+	Explain(
+		"Nothing you have downloaded is touched -- those are CBZ files on the Downloads screen, " +
+			"and they are the only copies Ageha treats as yours. This is the throwaway copy of " +
+			"everything you have merely looked at, and clearing it costs you nothing but a " +
+			"re-fetch of anything you open again.",
+	)
+	if (browserCacheBytes > 0) {
+		Explain(
+			"The browser component holds a further " + formatCacheBytes(browserCacheBytes) +
+				", and is left alone on purpose: that folder is its cookie store, so emptying it " +
+				"would sign you out of every source you have logged into and throw away the " +
+				"anti-bot clearances that make those sources work.",
+		)
+	}
+}
+
+/**
+ * Bytes as something a person can read.
+ *
+ * Binary units, and one decimal below 10 so that a cache creeping past a gigabyte reads as "1.4 GB"
+ * rather than flattening to "1 GB" -- this number exists to be watched, and a figure that only
+ * moves in whole gigabytes looks stuck.
+ */
+private fun formatCacheBytes(bytes: Long): String {
+	if (bytes <= 0L) return "empty"
+	val units = listOf("B", "KB", "MB", "GB", "TB")
+	var value = bytes.toDouble()
+	var unit = 0
+	while (value >= 1024 && unit < units.lastIndex) {
+		value /= 1024
+		unit++
+	}
+	return when {
+		unit == 0 -> "${value.toInt()} ${units[unit]}"
+		value < 10 -> String.format("%.1f %s", value, units[unit])
+		else -> "${value.toInt()} ${units[unit]}"
+	}
 }
 
 /** The handoff's 1 / 3 / 5 / 8, plus Ageha's own polite default of 2. */

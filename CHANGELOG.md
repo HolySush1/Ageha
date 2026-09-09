@@ -8,6 +8,16 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **A cache row in Settings, with a Clear cache button.** Reading a chapter writes every page of it
+  to disk whether or not you downloaded anything -- Coil keeps a 512MB image cache, OkHttp a 256MB
+  response cache -- and neither was reported anywhere or removable from inside the application. Up
+  to three quarters of a gigabyte of manga could sit under your profile with no way to find it,
+  which for a reader is a privacy question as much as a disk one. Settings > Downloads now shows
+  the size and clears it; downloaded chapters are untouched.
+
+  The browser component's Chromium profile is reported separately and deliberately never cleared:
+  it is that browser's cookie store, so emptying it would sign you out of every source you had
+  logged into and discard the anti-bot clearances that make those sources work.
 - **The browser component: JCEF, downloaded on demand.** `:core:browser` is a new module holding
   `BrowserComponent` (fetch, unpack and start Chromium into the user's data directory) and
   `JcefJsRuntime` (the `PAGE_CONTEXT`, `REQUEST_INTERCEPTION` and `LOCAL_STORAGE` tiers).
