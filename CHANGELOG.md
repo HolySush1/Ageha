@@ -23,6 +23,21 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Fixed
 
+- **A stale bridge jar survived every Ageha upgrade, permanently.** The extracted parsers build is
+  keyed on the parsers commit, which does not change when Ageha's own child-side code does -- so
+  `ageha-bridge.jar` from the previous release stayed on disk forever, and the lock check could not
+  see it because an older extraction verifies perfectly. It is simply the wrong one. Since the
+  bridge calls `JsRuntime` across a parent-first boundary, changing that interface made the old jar
+  call a method that no longer existed: `NoSuchMethodError`, surfacing as a source that "returned
+  something the parser could not read" -- indistinguishable from a broken parser. Extraction now
+  compares the bundled bridge against the one on disk and re-extracts on a mismatch.
+- **Request interception waited for the wrong thing.** It returned when the page finished loading,
+  but the request a parser is waiting for is made by the site's *own* JavaScript afterwards, and
+  the marker navigation that hands back the result comes later still -- so load-end arrived before
+  the interesting part every time. It now waits for the requests, bounded by the caller's timeout.
+- **Interception cancelled the site's own navigation.** Every navigation that was not the exact url
+  asked for was blocked, which breaks any single-page source: ALLMANGA downloaded all its bundles
+  and then never called its own API. Only the caller's pattern is intercepted now.
 - **The failure panel's remedy buttons did nothing at all.** `SourceFailureNotice` drew "Install
   browser component", "Open in browser", "Sign in" and "Report this", and called an `onRemedy`
   that no screen ever passed -- so the null-safe call swallowed every press. They are now wired,

@@ -6,10 +6,10 @@ import app.ageha.core.js.JsUnavailableException
 import app.ageha.core.model.JsCapability
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
@@ -119,9 +119,14 @@ class JcefJsRuntime(
 	): List<InterceptedHttpRequest> = withBrowser(
 		JsCapability.REQUEST_INTERCEPTION,
 		pageUrl,
-		timeoutMillis,
+		// The outer bound is the caller's deadline plus a grace period, and the *inner* wait uses
+		// the caller's figure exactly. Interception is the one operation where running out of time
+		// is an ordinary outcome rather than a failure -- the answer is "these are the requests
+		// that happened" -- so the inner wait returns what it has instead of throwing, and this
+		// outer bound exists only to guarantee a wedged browser still gets torn down.
+		timeoutMillis + CAPTURE_GRACE_MILLIS,
 	) { session ->
-		session.captureUpTo(maxRequests, pageScript, urlPattern)
+		session.captureUpTo(maxRequests, pageScript, urlPattern, timeoutMillis)
 	}
 
 	/**
@@ -168,6 +173,14 @@ class JcefJsRuntime(
 		}
 	}
 }
+
+/**
+ * How much longer than the caller's deadline a browser is given before it is killed outright.
+ *
+ * Only ever reached when something is genuinely stuck: the inner wait already honours the caller's
+ * timeout and returns normally at it.
+ */
+private const val CAPTURE_GRACE_MILLIS = 5_000L
 
 /** A page load or script that did not finish inside the timeout the parser asked for. */
 class BrowserTimeoutException(
@@ -318,7 +331,18 @@ private class BrowserSession(
 					isRedirect: Boolean,
 				): Boolean {
 					val target = request?.url ?: return false
-					if (target == url) return false
+					// Only the caller's own pattern is treated as a signal and stopped. Everything
+					// else is the site doing its job and is allowed through.
+					//
+					// Cancelling every navigation that was not the exact url asked for looked
+					// safe -- nothing but the marker should be navigating, surely -- and it broke
+					// modern sources outright. ALLMANGA is a single-page app: it routes itself
+					// after the first load, and blocking that left a page whose bundles had all
+					// downloaded and which then never requested a single thing from its own API.
+					// The symptom was a parser reporting that its data never arrived, which reads
+					// exactly like a dead source and was entirely self-inflicted.
+					val pattern = wanted ?: return false
+					if (!pattern.containsMatchIn(target)) return false
 					record(request)
 					return true
 				}
@@ -460,21 +484,26 @@ private class BrowserSession(
 		max: Int,
 		pageScript: String?,
 		urlPattern: Regex?,
+		timeoutMillis: Long,
 	): List<InterceptedHttpRequest> {
 		limit = max.takeIf { it > 0 } ?: Int.MAX_VALUE
 		this.pageScript = pageScript
 		wanted = urlPattern
 		created.await()
 		browser.loadURL(url)
-		// A failed load does not fail the call. A page script that navigates away to signal its
-		// result *causes* a main-frame error by design, and the requests captured before it are
-		// exactly what the caller asked for.
-		runCatching {
-			select {
-				enough.onAwait { }
-				loaded.onAwait { }
-			}
-		}
+		// Waits for the requests, not for the page.
+		//
+		// Returning when the main frame finished loading looked like a sensible way to avoid
+		// spending a parser's whole timeout, and it was wrong -- it is the reason this returned
+		// nothing from a site that works. The request a parser is waiting for is made by the
+		// site's *own* JavaScript after the document is complete, and the marker navigation its
+		// page script performs to hand back the result comes later still. Load-end therefore
+		// arrives reliably before the interesting part, every time.
+		//
+		// So the only completion signal is having what was asked for, bounded by the caller's
+		// timeout. Running out of it returns the matches so far rather than throwing: a parser
+		// that asked for one request and got none will say so far better than this class can.
+		withTimeoutOrNull(timeoutMillis) { enough.await() }
 		return captured.toList()
 	}
 

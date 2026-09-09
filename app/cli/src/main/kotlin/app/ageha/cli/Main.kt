@@ -99,6 +99,10 @@ fun main(args: Array<String>) {
 			System.err.println("Browser component ready.")
 		}
 	}
+	val jsRuntimeForCli = CompositeJsRuntime(
+		script = RhinoJsRuntime(),
+		browser = JcefJsRuntime(browser).takeIf { wantsBrowser },
+	)
 	val stack = Ageha.createSourceStack(
 		jsRuntime = CompositeJsRuntime(
 			script = RhinoJsRuntime(),
@@ -127,8 +131,30 @@ fun main(args: Array<String>) {
 					details(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
 				}
 
+				// A window onto what a page actually does, for diagnosing a browser-tier source.
+				// Loads the url and prints every request matching the pattern, which answers the
+				// question a failing parser cannot: is the site making the call at all?
+				"intercept" -> requireArgs(args, 3) {
+					val captured = jsRuntimeForCli.interceptRequests(
+						pageUrl = args[1],
+						filterScript = null,
+						pageScript = null,
+						maxRequests = flag(args, "--max")?.toIntOrNull() ?: 40,
+						timeoutMillis = flag(args, "--timeout")?.toLongOrNull() ?: 20_000L,
+						urlPattern = args[2].takeIf { it != "*" }?.let(::Regex),
+					)
+					println("" + captured.size + " request(s) matched")
+					captured.forEach { println("  " + it.method + " " + it.url) }
+				}
+
 				"pages" -> requireArgs(args, 3) {
-					pages(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
+					pages(
+						stack = stack,
+						sourceName = args[1],
+						query = args[2],
+						index = args.getOrNull(3)?.toIntOrNull() ?: 0,
+						chapterIndex = flag(args, "--chapter")?.toIntOrNull() ?: 0,
+					)
 				}
 				else -> {
 					System.err.println("Unknown command: " + command)
@@ -532,11 +558,25 @@ private suspend fun details(stack: SourceStack, sourceName: String, query: Strin
 	}
 }
 
-private suspend fun pages(stack: SourceStack, sourceName: String, query: String, index: Int) {
+private suspend fun pages(
+	stack: SourceStack,
+	sourceName: String,
+	query: String,
+	index: Int,
+	chapterIndex: Int,
+) {
 	val client = stack.registry.clientFor(sourceName)
 	val full = client.details(pick(client, query, index))
-	val chapter = full.chapters.orEmpty().firstOrNull()
-		?: error("'" + full.title + "' has no chapters on " + client.descriptor.title + ".")
+	val chapters = full.chapters.orEmpty()
+	// Selectable rather than always the first, because the first chapter is a bad test subject
+	// on a surprising number of sources: it is where prototypes, one-shot prologues and "chapter
+	// 0" placeholders live, and several of those legitimately have no pages at all. Debugging a
+	// page fetch against one of those attributes the source's emptiness to your own code.
+	val chapter = chapters.getOrNull(chapterIndex)
+		?: error(
+			"'" + full.title + "' has " + chapters.size + " chapter(s) on " +
+				client.descriptor.title + "; no index " + chapterIndex + ".",
+		)
 
 	val pages = client.pages(chapter)
 	println(full.title + " -- chapter " + (chapter.number?.toString() ?: "?"))

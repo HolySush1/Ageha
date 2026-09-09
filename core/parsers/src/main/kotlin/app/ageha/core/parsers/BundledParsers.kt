@@ -42,7 +42,8 @@ object BundledParsers {
 		// fallback everything else falls back to, so a corrupted copy of it is the one failure
 		// with no recovery path -- and re-extracting costs a few hundred milliseconds once.
 		if (installation.isInstalled(VERSION) &&
-			installation.verify(VERSION) is LockVerification.Verified
+			installation.verify(VERSION) is LockVerification.Verified &&
+			bridgeMatchesBundle(installation)
 		) {
 			return VERSION
 		}
@@ -66,6 +67,46 @@ object BundledParsers {
 			staging.deleteRecursively()
 		}
 		return VERSION
+	}
+
+	/**
+	 * Whether the extracted bridge is the one this build of Ageha ships.
+	 *
+	 * The lock check above cannot answer this. It asks whether what is on disk still matches what
+	 * was written when it was extracted -- an *older* bridge, extracted cleanly, passes it
+	 * perfectly. And the directory is keyed on [VERSION], which names the parsers commit and does
+	 * not change when Ageha's own child-side code does. So without this, upgrading Ageha leaves
+	 * the previous release's bridge jar in place permanently.
+	 *
+	 * That is not a theoretical staleness. The bridge implements `MangaLoaderContext` and calls
+	 * `JsRuntime`, which is loaded parent-first and therefore comes from the *new* application:
+	 * change a signature on that interface and the old bridge calls a method that no longer
+	 * exists. It surfaces at runtime as `NoSuchMethodError` inside a source, which reads as a
+	 * broken parser and sends you looking upstream at somebody else's code. It cost most of an
+	 * afternoon exactly once.
+	 *
+	 * Hashing 80KB on launch is a fair price for never doing that again.
+	 */
+	private fun bridgeMatchesBundle(installation: ParsersInstallation): Boolean {
+		val onDisk = installation.bridgeJarFor(VERSION).takeIf { it.isFile } ?: return false
+		val bundled = javaClass.classLoader
+			.getResourceAsStream("$RESOURCE_DIR/${ParsersInstallation.BRIDGE_JAR}")
+		// No bundled copy is not a mismatch. It means this is a downloaded build rather than the
+		// one shipped inside the app, and re-extracting over it would be actively wrong.
+			?: return true
+		val bundledDigest = bundled.use(::sha256)
+		return bundledDigest == runCatching { ParsersLock.sha256(onDisk) }.getOrNull()
+	}
+
+	private fun sha256(stream: java.io.InputStream): String {
+		val digest = java.security.MessageDigest.getInstance("SHA-256")
+		val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+		while (true) {
+			val read = stream.read(buffer)
+			if (read < 0) break
+			digest.update(buffer, 0, read)
+		}
+		return digest.digest().joinToString("") { "%02x".format(it) }
 	}
 
 	private fun readIndex(): List<String> {
