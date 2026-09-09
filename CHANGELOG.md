@@ -4,7 +4,7 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [Unreleased]
+## [0.3.2] - 2026-09-09
 
 ### Added
 
