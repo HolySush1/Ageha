@@ -33,6 +33,7 @@ object NoJsRuntime : JsRuntime {
 		pageScript: String?,
 		maxRequests: Int,
 		timeoutMillis: Long,
+		urlPattern: Regex?,
 	): List<InterceptedHttpRequest> = refuseJsCapability(JsCapability.REQUEST_INTERCEPTION)
 
 	override suspend fun openInteractive(url: String, userAgent: String?): Boolean =

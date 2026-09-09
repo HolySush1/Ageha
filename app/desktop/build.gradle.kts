@@ -17,6 +17,7 @@ dependencies {
 	implementation(project(":core:parsers"))
 	implementation(project(":core:network"))
 	implementation(project(":core:js"))
+	implementation(project(":core:browser"))
 	implementation(project(":core:database"))
 	implementation(project(":feature:library"))
 	implementation(project(":feature:explore"))

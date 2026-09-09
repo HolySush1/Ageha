@@ -8,6 +8,30 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### Added
 
+- **The browser component: JCEF, downloaded on demand.** `:core:browser` is a new module holding
+  `BrowserComponent` (fetch, unpack and start Chromium into the user's data directory) and
+  `JcefJsRuntime` (the `PAGE_CONTEXT`, `REQUEST_INTERCEPTION` and `LOCAL_STORAGE` tiers).
+  `CompositeJsRuntime` joins it to Rhino so that plain scripts keep going to the cheap engine and
+  only the ~20 sources that need a real browser start one. The Java bindings ship; the ~200MB of
+  native Chromium is fetched the first time somebody asks for it.
+
+  **This does not yet make ALLMANGA work.** Install, startup, page navigation and request capture
+  are all built and were driven end to end against the live site; the last step -- the capability
+  check refusing the call before a browser is created -- is still failing and is not fixed. The
+  new `agehacli pages <SOURCE> <query> <n> --browser` is what that was debugged with and is how it
+  should be retested.
+
+### Fixed
+
+- **The failure panel's remedy buttons did nothing at all.** `SourceFailureNotice` drew "Install
+  browser component", "Open in browser", "Sign in" and "Report this", and called an `onRemedy`
+  that no screen ever passed -- so the null-safe call swallowed every press. They are now wired,
+  in one place, via `Remedies`; a remedy with no handler draws no button rather than an inert one.
+- The same buttons were also unreadable: `OutlinedButton` defaults its label and border to
+  `primary`, which on `errorContainer` is indigo on dark red and read as disabled. They now take
+  their colour from `onErrorContainer`.
+- Settings offers the browser install directly, rather than only reporting that it is missing.
+
 - **"Find another source", on library cards, browse results and the chapter header.** Ageha has
   had cross-source search since 0.2, and reaching it meant retyping a title that is usually a
   romanisation -- so the one search that spans all 1360 sources was the one you had to spell from

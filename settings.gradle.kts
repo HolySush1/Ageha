@@ -48,6 +48,7 @@ include(
 	":core:model",
 	":core:network",
 	":core:js",
+	":core:browser",
 	":core:jvmcontext",
 	":core:backup",
 	":core:sync",

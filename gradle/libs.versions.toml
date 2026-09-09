@@ -46,6 +46,13 @@ koin = "4.2.2"
 # per-platform packaging problem. See docs/ARCHITECTURE.md 5 for why this is not QuickJS.
 rhino = "1.9.1"
 
+# JCEF, for the browser component -- the PAGE_CONTEXT / REQUEST_INTERCEPTION / INTERACTIVE_BROWSER
+# tiers that around 20 of the 1,360 sources need. See docs/FINDINGS.md 4 C1.
+#
+# The version tracks Chromium's: 146.0.10 is Chromium 146. Bumping it changes the user-agent the
+# browser presents, which is load-bearing -- see JcefJsRuntime.browserUserAgent.
+jcef = "146.0.10"
+
 # Hydraulic Conveyor. Free for OSS under an OSI-approved licence, which GPL-3.0 is; the licence is
 # activated by setting `app.vcs-url` in conveyor.conf and carries one obligation, which the README
 # discharges. See docs/RELEASING.md.
@@ -115,3 +122,4 @@ koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
 compose-material-icons-core = { module = "org.jetbrains.compose.material:material-icons-core", version.ref = "compose-material-icons" }
 rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }
+jcef = { module = "me.friwi:jcefmaven", version.ref = "jcef" }

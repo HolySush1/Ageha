@@ -20,7 +20,12 @@ import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
+import app.ageha.core.browser.BrowserComponent
+import app.ageha.core.browser.BrowserInstallState
+import app.ageha.core.browser.JcefJsRuntime
+import app.ageha.core.js.CompositeJsRuntime
 import app.ageha.core.js.RhinoJsRuntime
+import kotlinx.coroutines.launch
 import app.ageha.core.parsers.Ageha
 import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.UpdateOutcome
@@ -49,7 +54,57 @@ fun main(args: Array<String>) {
 		printUsage()
 		exitProcess(2)
 	}
-	val stack = Ageha.createSourceStack(jsRuntime = RhinoJsRuntime())
+	// `--browser` starts the optional Chromium component, downloading it first if this machine
+	// has never had it. Off by default because it costs a ~200MB fetch and several seconds of
+	// startup, and because the overwhelming majority of what this CLI is used for -- listing
+	// sources, searching, reading a chapter list -- never needs a browser at all.
+	//
+	// It exists mainly so the browser tiers can be exercised without launching the UI: `pages
+	// ALLMANGA <url> --browser` is the end-to-end check that the whole path works, from
+	// MangaLoaderContext.interceptWebViewRequests down to a real page load.
+	val wantsBrowser = args.contains("--browser")
+	if (wantsBrowser) {
+		// CEF delivers its callbacks on the AWT event thread, whose default handler prints the
+		// exception and nothing else -- no stack, no cause. A handler that fails silently there
+		// looks exactly like a site that returned nothing, which is the most expensive kind of
+		// bug to chase. This makes the difference visible.
+		Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+			System.err.println("Uncaught on " + thread.name + ": " + error)
+			error.printStackTrace()
+		}
+	}
+	val browser = BrowserComponent(
+		installDir = File(AgehaPaths.dataDir, "browser"),
+		cacheDir = File(AgehaPaths.cacheDir, "browser"),
+	)
+	if (wantsBrowser) {
+		runBlocking {
+			// Progress on stderr, so that piping the command's output somewhere is not polluted
+			// by a download that only happens once.
+			val reporter = launch {
+				browser.state.collect { state ->
+					if (state is BrowserInstallState.Working) {
+						System.err.println(
+							"  " + state.step + (state.fraction?.let { " ${(it * 100).toInt()}%" } ?: ""),
+						)
+					}
+				}
+			}
+			val outcome = browser.install()
+			reporter.cancel()
+			if (outcome is BrowserInstallState.Failed) {
+				System.err.println("Browser component unavailable: " + outcome.reason)
+				exitProcess(1)
+			}
+			System.err.println("Browser component ready.")
+		}
+	}
+	val stack = Ageha.createSourceStack(
+		jsRuntime = CompositeJsRuntime(
+			script = RhinoJsRuntime(),
+			browser = JcefJsRuntime(browser).takeIf { wantsBrowser },
+		),
+	)
 	try {
 		runBlocking {
 			when (val command = args[0]) {

@@ -61,6 +61,7 @@ import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.CoverShape
+import app.ageha.core.designsystem.FailureCopy
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.model.AgehaChapter
@@ -106,6 +107,16 @@ fun DetailsScreen(
 	 * stops at 47 and the series did not, or when this source's branch is a machine translation --
 	 * both of which are things you only notice once you are looking at the chapters.
 	 */
+	/**
+	 * The failure panel's remedy button. Null draws no button at all.
+	 *
+	 * Optional because the panel is honest about it: a remedy with nobody listening is not a
+	 * remedy, and `SourceFailureNotice` omits the button rather than rendering one that swallows
+	 * every press -- which is exactly what it did before this parameter existed.
+	 */
+	onRemedy: ((FailureCopy.Remedy) -> Unit)? = null,
+	/** What that remedy is doing, while it is doing something slow. See `SourceFailureNotice`. */
+	remedyProgress: String? = null,
 	onFindElsewhere: () -> Unit = {},
 ) {
 	val manga = state.manga
@@ -207,7 +218,9 @@ fun DetailsScreen(
 					)
 				}
 			}
-			state.failure?.let { SourceFailureNotice(it, onRetry = onRetry) }
+			state.failure?.let {
+				SourceFailureNotice(it, onRetry = onRetry, onRemedy = onRemedy, remedyProgress = remedyProgress)
+			}
 		}
 
 		Column(Modifier.fillMaxSize()) {

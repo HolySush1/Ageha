@@ -82,6 +82,7 @@ import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.AgehaTheme
 import app.ageha.core.designsystem.ReaderBackground
 import app.ageha.core.designsystem.ReaderChrome
+import app.ageha.core.designsystem.FailureCopy
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.model.PageScale
@@ -156,6 +157,16 @@ fun ReaderScreen(
 	 * Null disables preloading, which is what the headless render and the tests want.
 	 */
 	imageLoader: ImageLoader? = null,
+	/**
+	 * The failure panel's remedy button. Null draws no button at all.
+	 *
+	 * Optional because the panel is honest about it: a remedy with nobody listening is not a
+	 * remedy, and `SourceFailureNotice` omits the button rather than rendering one that swallows
+	 * every press -- which is exactly what it did before this parameter existed.
+	 */
+	onRemedy: ((FailureCopy.Remedy) -> Unit)? = null,
+	/** What that remedy is doing, while it is doing something slow. See `SourceFailureNotice`. */
+	remedyProgress: String? = null,
 ) {
 	val chrome = remember(background) { ReaderChrome.forBackground(background) }
 	// How far down the chapter the viewport actually reaches.
@@ -210,7 +221,12 @@ fun ReaderScreen(
 			}
 
 			state.failure != null -> Box(Modifier.fillMaxSize().padding(AgehaSpacing.xxl), Alignment.Center) {
-				SourceFailureNotice(state.failure, onRetry = onRetry)
+				SourceFailureNotice(
+					state.failure,
+					onRetry = onRetry,
+					onRemedy = onRemedy,
+					remedyProgress = remedyProgress,
+				)
 			}
 
 			state.pages.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {

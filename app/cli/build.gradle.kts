@@ -5,6 +5,8 @@ plugins {
 dependencies {
 	implementation(project(":core:parsers"))
 	implementation(project(":core:js"))
+	implementation(project(":core:browser"))
+	implementation(project(":core:network"))
 	implementation(project(":core:model"))
 	implementation(project(":core:backup"))
 	implementation(project(":core:sync"))

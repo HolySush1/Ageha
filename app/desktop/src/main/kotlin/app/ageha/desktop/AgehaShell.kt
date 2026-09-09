@@ -96,6 +96,7 @@ import app.ageha.feature.downloads.DownloadStatus
 import app.ageha.feature.downloads.DownloadsScreen
 import app.ageha.feature.explore.SourcePickerScreen
 import app.ageha.core.data.ResumePoint
+import app.ageha.core.designsystem.FailureCopy
 import app.ageha.feature.explore.GlobalSearchScreen
 import app.ageha.feature.explore.GlobalSearchViewModel
 import app.ageha.feature.library.ContinueScreen
@@ -238,6 +239,16 @@ fun AgehaShell(
 	var appUpdateResult by remember { mutableStateOf<String?>(null) }
 
 	val notices by application.notices.notices.collectAsState()
+
+	// The failure panel's remedy buttons, finally attached to something. One handler for the whole
+	// shell rather than one per screen: "Install browser component" must mean the same thing, and
+	// run the same single install, whether it is pressed from browse, details or the reader.
+	val remedies = remember(application) {
+		Remedies(browser = application.browser, notices = application.notices, scope = scope)
+	}
+	// Read once here and passed down, so that every failure panel on screen relabels its button
+	// together while one shared download runs.
+	val remedyProgress = browserInstallProgress(application.browser)
 
 	// Where a Continue Reading entry resolved to.
 	//
@@ -606,6 +617,10 @@ fun AgehaShell(
 						onSyncNow = syncViewModel::syncNow,
 						onSyncOnStart = syncViewModel::setSyncOnStart,
 						initialSection = initialSettingsSection,
+						// The same install the failure panel offers, reachable before a source has
+						// broken -- see the note beside the button in SettingsScreen.
+						onInstallBrowser = { remedies.handle(FailureCopy.Remedy.INSTALL_BROWSER, null) },
+						browserProgress = remedyProgress,
 						onClearHistory = {
 							scope.launch {
 								val cleared = application.history.clearAll()
@@ -695,6 +710,8 @@ fun AgehaShell(
 							onFindElsewhere = { manga ->
 								navigator.searchAllSources(manga.title, subject = manga.title)
 							},
+							onRemedy = { remedies.handle(it, state.manga.firstOrNull()?.publicUrl) },
+							remedyProgress = remedyProgress,
 							searchFocus = searchFocus,
 						)
 					}
@@ -788,6 +805,8 @@ fun AgehaShell(
 						onHideChrome = { readerViewModel.setChromeVisible(false) },
 						preloadPages = preferences.preloadPages,
 						imageLoader = application.imageLoader,
+						onRemedy = { remedies.handle(it, destination.manga.publicUrl) },
+						remedyProgress = remedyProgress,
 					)
 				}
 
@@ -834,6 +853,10 @@ fun AgehaShell(
 								val title = state.manga?.title ?: destination.manga.title
 								navigator.searchAllSources(title, subject = title)
 							},
+							onRemedy = {
+								remedies.handle(it, state.manga?.publicUrl ?: destination.manga.publicUrl)
+							},
+							remedyProgress = remedyProgress,
 						)
 					}
 				}

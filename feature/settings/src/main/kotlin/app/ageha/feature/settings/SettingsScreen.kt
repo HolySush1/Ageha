@@ -175,6 +175,16 @@ fun SettingsScreen(
 	 * precisely the ones nobody checks before a release.
 	 */
 	initialSection: SettingsSection = SettingsSection.APPEARANCE,
+	/**
+	 * Fetch and start the optional browser component. Null hides the offer entirely.
+	 *
+	 * Nullable so the headless render and the tests can draw this panel without a handler, and so
+	 * the offer is absent rather than inert when nothing can service it -- the mistake the failure
+	 * panel's remedy button made for two releases.
+	 */
+	onInstallBrowser: (() -> Unit)? = null,
+	/** What that install is doing, while it runs. Null when nothing is running. */
+	browserProgress: String? = null,
 ) {
 	var section by remember { mutableStateOf(initialSection) }
 	Row(
@@ -239,6 +249,7 @@ fun SettingsScreen(
 					onUpdatePolicy, onCheckForUpdate, onRollBack, onPin,
 					hideBrokenSources, showAdultSources,
 					onHideBrokenSources, onShowAdultSources,
+					onInstallBrowser, browserProgress,
 				)
 
 				SettingsSection.DOWNLOADS -> DownloadsPanel(parallelDownloads, onParallelDownloads)
@@ -559,6 +570,10 @@ private fun SourcesPanel(
 	showAdultSources: Boolean,
 	onHideBrokenSources: (Boolean) -> Unit,
 	onShowAdultSources: (Boolean) -> Unit,
+	/** Fetch and start the optional browser component. Null hides the offer entirely. */
+	onInstallBrowser: (() -> Unit)?,
+	/** What that install is doing, while it runs. Null when nothing is running. */
+	browserProgress: String?,
 ) {
 	PanelHeading(
 		"Sources",
@@ -648,7 +663,7 @@ private fun SourcesPanel(
 	}
 
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	JavaScriptStatus(jsRuntime)
+	JavaScriptStatus(jsRuntime, onInstallBrowser, browserProgress)
 }
 
 /**
@@ -814,7 +829,11 @@ private fun themeHint(mode: AgehaThemeMode): String = when (mode) {
  * that worked yesterday and does not today, with no way to tell why.
  */
 @Composable
-private fun JavaScriptStatus(jsRuntime: JsRuntime) {
+private fun JavaScriptStatus(
+	jsRuntime: JsRuntime,
+	onInstallBrowser: (() -> Unit)?,
+	browserProgress: String?,
+) {
 	Text("JavaScript", style = MaterialTheme.typography.titleMedium)
 	val hasPlain = JsCapability.PLAIN_SCRIPT in jsRuntime.capabilities
 	val hasBrowser = jsRuntime.capabilities.any { it.requiresBrowser }
@@ -842,6 +861,29 @@ private fun JavaScriptStatus(jsRuntime: JsRuntime) {
 		style = AgehaTextStyles.metadata,
 		color = MaterialTheme.colorScheme.onSurfaceVariant,
 	)
+	// The same install the failure panel offers, reachable before anything has broken.
+	//
+	// Discovering an optional component only at the moment a source fails is a poor way to find
+	// out it exists -- and it is the *slow* moment to find out, because the download is hundreds
+	// of megabytes and the user is standing in front of a manga they wanted to read now. Someone
+	// who knows they use one of those sources can get it out of the way here.
+	if (!hasBrowser && onInstallBrowser != null) {
+		Row(
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+		) {
+			Button(onClick = onInstallBrowser, enabled = browserProgress == null) {
+				Text("Install browser component")
+			}
+			browserProgress?.let {
+				Text(it, style = AgehaTextStyles.metadata, color = MaterialTheme.colorScheme.onSurfaceVariant)
+			}
+		}
+		Explain(
+			"Around 200MB of Chromium, downloaded once into Ageha's data directory. It is not " +
+				"part of the installer because the other ~1,340 sources never start it.",
+		)
+	}
 }
 
 /**

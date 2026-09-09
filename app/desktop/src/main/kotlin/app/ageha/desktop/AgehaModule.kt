@@ -9,6 +9,9 @@ import app.ageha.core.database.AgehaDatabase
 import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.image.AgehaImages
 import app.ageha.core.js.JsRuntime
+import app.ageha.core.browser.BrowserComponent
+import app.ageha.core.browser.JcefJsRuntime
+import app.ageha.core.js.CompositeJsRuntime
 import app.ageha.core.js.RhinoJsRuntime
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.parsers.Ageha
@@ -49,15 +52,35 @@ val agehaModule = module {
 	single { NoticeCenter() }
 
 	/*
-	 * The JavaScript engine. Rhino, serving the PLAIN_SCRIPT tier.
+	 * The browser component: Chromium, for the ~20 sources that need a real one.
 	 *
-	 * This is what makes the ~257 conditionally-JS sources work: they are ordinary sources until
-	 * the site decides to serve an anti-bot interstitial, at which point the parser needs a script
-	 * evaluated or it fails. Without a runtime those sources work most days and mysteriously do
-	 * not on others. The remaining ~20 that need a real browser still refuse, with an actionable
-	 * message rather than a generic error -- see FailureNotice.
+	 * Constructed unconditionally and *not* started. Building this object costs nothing -- the
+	 * ~200MB of native Chromium is not a dependency, it is a download this object knows how to
+	 * fetch -- so it exists from launch in order to answer "is it installed", which the settings
+	 * panel and the failure notice both ask before offering anything.
 	 */
-	single<JsRuntime> { RhinoJsRuntime() }
+	single {
+		BrowserComponent(
+			installDir = File(AgehaPaths.dataDir, "browser"),
+			// Under the cache directory rather than the data one. It is a Chromium profile:
+			// regenerable, occasionally large, and exactly what `cacheDir` is documented to hold.
+			cacheDir = File(AgehaPaths.cacheDir, "browser"),
+		)
+	}
+
+	/*
+	 * The JavaScript engine: Rhino always, Chromium when it has been installed.
+	 *
+	 * Rhino serves the PLAIN_SCRIPT tier, which is what makes the ~257 conditionally-JS sources
+	 * work -- they are ordinary sources until the site serves an anti-bot interstitial, at which
+	 * point the parser needs a script evaluated or it fails. Without a runtime those sources work
+	 * most days and mysteriously do not on others.
+	 *
+	 * The composite adds the browser tiers on top *when they are available*, and the split is by
+	 * cost rather than by preference: an installed browser must not start being used for plain
+	 * scripts, or the common case begins paying the rare case's startup. See CompositeJsRuntime.
+	 */
+	single<JsRuntime> { CompositeJsRuntime(script = RhinoJsRuntime(), browser = JcefJsRuntime(get())) }
 
 	// One source stack for the process. It owns the OkHttp client, the cookie jar and the
 	// classloader holding the parsers build, and it is the only thing allowed to close them --
@@ -188,6 +211,7 @@ class AgehaApplication private constructor(
 	val downloader: ChapterDownloader get() = koin.get()
 	val downloadInventory: DownloadInventory get() = koin.get()
 	val jsRuntime: app.ageha.core.js.JsRuntime get() = koin.get()
+	val browser: BrowserComponent get() = koin.get()
 	val database: AgehaDatabase get() = koin.get()
 
 	fun close() {

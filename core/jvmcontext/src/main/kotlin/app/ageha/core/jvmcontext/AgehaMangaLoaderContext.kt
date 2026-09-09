@@ -128,23 +128,25 @@ class AgehaMangaLoaderContext(
 		pageScript = null,
 		maxRequests = DEFAULT_MAX_INTERCEPTED_REQUESTS,
 		timeoutMillis = timeout,
+		urlPattern = null,
 	).map(InterceptedHttpRequest::toParserModel)
 
 	override suspend fun interceptWebViewRequests(
 		url: String,
 		config: InterceptionConfig,
-	): List<InterceptedRequest> {
-		val captured = jsRuntime.interceptRequests(
-			pageUrl = url,
-			filterScript = config.filterScript,
-			pageScript = config.pageScript,
-			maxRequests = config.maxRequests,
-			timeoutMillis = config.timeoutMs,
-		).map(InterceptedHttpRequest::toParserModel)
-		// urlPattern is applied here rather than in the backend, so every backend behaves alike.
-		val pattern = config.urlPattern ?: return captured
-		return captured.filter { pattern.containsMatchIn(it.url) }
-	}
+	): List<InterceptedRequest> = jsRuntime.interceptRequests(
+		pageUrl = url,
+		filterScript = config.filterScript,
+		pageScript = config.pageScript,
+		maxRequests = config.maxRequests,
+		timeoutMillis = config.timeoutMs,
+		// Handed to the backend rather than applied to the result, because `maxRequests` has to
+		// count the requests the parser asked about. Filtering afterwards looked equivalent and
+		// was not: ALLMANGA asks for exactly one request, so the backend stopped watching at the
+		// page's first stylesheet and this filter then removed it, turning a working source into
+		// "did not return a result".
+		urlPattern = config.urlPattern,
+	).map(InterceptedHttpRequest::toParserModel)
 
 	override suspend fun captureWebViewUrls(
 		pageUrl: String,
@@ -156,7 +158,8 @@ class AgehaMangaLoaderContext(
 		pageScript = null,
 		maxRequests = DEFAULT_MAX_INTERCEPTED_REQUESTS,
 		timeoutMillis = timeout,
-	).map { it.url }.filter { urlPattern.containsMatchIn(it) }
+		urlPattern = urlPattern,
+	).map { it.url }
 
 	/**
 	 * A parser has decided that only a human with a browser can get past this.

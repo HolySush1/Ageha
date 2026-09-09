@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -178,6 +180,18 @@ fun SourceFailureNotice(
 	modifier: Modifier = Modifier,
 	onRetry: (() -> Unit)? = null,
 	onRemedy: ((FailureCopy.Remedy) -> Unit)? = null,
+	/**
+	 * What the remedy is doing right now, when it is doing something slow.
+	 *
+	 * A string rather than a percentage or a state enum, because the only caller that has anything
+	 * to say here is the browser install -- 200MB over somebody's connection -- and what it has to
+	 * say ("Downloading Chromium, 43%") is already a sentence by the time it reaches this. Keeping
+	 * it a string is also what stops this module having to know that a browser component exists.
+	 *
+	 * Non-null replaces the button's label and disables it, so a second click cannot start a
+	 * second download.
+	 */
+	remedyProgress: String? = null,
 ) {
 	val copy = describe(failure)
 	Column(
@@ -199,9 +213,27 @@ fun SourceFailureNotice(
 			color = MaterialTheme.colorScheme.onErrorContainer,
 		)
 		Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm)) {
-			copy.remedy?.let { remedy ->
-				OutlinedButton(onClick = { onRemedy?.invoke(remedy) }) {
-					Text(remedyLabel(remedy))
+			// Drawn only when something is actually listening.
+			//
+			// This button used to render unconditionally and call `onRemedy?.invoke(remedy)`, and
+			// no screen in the application ever passed an `onRemedy` -- so the null-safe call
+			// swallowed every press and the most prominent control on the panel did nothing at
+			// all. A remedy with no handler is not a remedy, and the copy above already explains
+			// the situation without it.
+			copy.remedy?.takeIf { onRemedy != null }?.let { remedy ->
+				OutlinedButton(
+					onClick = { onRemedy?.invoke(remedy) },
+					enabled = remedyProgress == null,
+					// The label and border default to `primary`, which on `errorContainer` is
+					// indigo on dark red -- low enough contrast that the button read as disabled
+					// even while it was enabled. Coloured from the container's own pair instead,
+					// which is contrast-guaranteed against it in every skin.
+					colors = ButtonDefaults.outlinedButtonColors(
+						contentColor = MaterialTheme.colorScheme.onErrorContainer,
+					),
+					border = BorderStroke(1.dp, MaterialTheme.colorScheme.onErrorContainer),
+				) {
+					Text(remedyProgress ?: remedyLabel(remedy))
 				}
 			}
 			if (copy.canRetry && onRetry != null) {

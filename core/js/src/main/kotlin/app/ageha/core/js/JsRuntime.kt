@@ -58,6 +58,16 @@ interface JsRuntime {
 		pageScript: String?,
 		maxRequests: Int,
 		timeoutMillis: Long,
+		/**
+		 * Which requests the caller actually wants, and therefore which ones [maxRequests] counts.
+		 *
+		 * The pattern belongs down here rather than in a filter applied to the returned list, and
+		 * that is not a tidiness argument. Parsers ask for very few requests -- ALLMANGA asks for
+		 * exactly one -- and a backend that counts every request a page makes reaches the cap on
+		 * the first stylesheet, stops watching, and hands back one asset instead of the API call
+		 * the parser was waiting for. Filtering afterwards cannot recover what was never captured.
+		 */
+		urlPattern: Regex? = null,
 	): List<InterceptedHttpRequest>
 
 	/**

@@ -60,6 +60,7 @@ import app.ageha.core.designsystem.glassSurface
 import app.ageha.core.designsystem.MangaGrid
 import app.ageha.core.designsystem.MangaCardAction
 import app.ageha.core.designsystem.MangaGridItem
+import app.ageha.core.designsystem.FailureCopy
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.designsystem.rememberSearchFieldState
 import app.ageha.core.model.AgehaManga
@@ -779,6 +780,16 @@ fun BrowseScreen(
 	 * otherwise, and gets wrong, because the name on the card is often a romanisation.
 	 */
 	onFindElsewhere: (AgehaManga) -> Unit = {},
+	/**
+	 * The failure panel's remedy button. Null draws no button at all.
+	 *
+	 * Optional because the panel is honest about it: a remedy with nobody listening is not a
+	 * remedy, and `SourceFailureNotice` omits the button rather than rendering one that swallows
+	 * every press -- which is exactly what it did before this parameter existed.
+	 */
+	onRemedy: ((FailureCopy.Remedy) -> Unit)? = null,
+	/** What that remedy is doing, while it is doing something slow. See `SourceFailureNotice`. */
+	remedyProgress: String? = null,
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
 	val gridState = rememberLazyGridState()
@@ -846,7 +857,12 @@ fun BrowseScreen(
 			}
 
 			state.manga.isEmpty() && state.failure != null -> Box(Modifier.padding(AgehaSpacing.lg)) {
-				SourceFailureNotice(state.failure, onRetry = onRetry)
+				SourceFailureNotice(
+					state.failure,
+					onRetry = onRetry,
+					onRemedy = onRemedy,
+					remedyProgress = remedyProgress,
+				)
 			}
 
 			state.manga.isEmpty() -> EmptyState(
@@ -878,7 +894,12 @@ fun BrowseScreen(
 						contentAlignment = Alignment.Center,
 					) {
 						when {
-							state.failure != null -> SourceFailureNotice(state.failure, onRetry = onRetry)
+							state.failure != null -> SourceFailureNotice(
+								state.failure,
+								onRetry = onRetry,
+								onRemedy = onRemedy,
+								remedyProgress = remedyProgress,
+							)
 							state.isLoadingMore -> CircularProgressIndicator(Modifier.size(24.dp))
 							!state.hasMore -> Text(
 								"End of listing",
