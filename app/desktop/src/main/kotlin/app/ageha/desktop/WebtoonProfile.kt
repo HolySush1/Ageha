@@ -16,8 +16,12 @@ import androidx.compose.runtime.getValue
 import app.ageha.core.model.ReaderMode
 import app.ageha.feature.reader.ReaderScreen
 import app.ageha.feature.reader.ReaderViewModel
+import coil3.EventListener
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.ConcurrentHashMap
 import java.awt.Color
 import java.awt.Font
 import java.awt.RenderingHints
@@ -85,8 +89,76 @@ fun main(args: Array<String>) {
 			"only ${report.resolvedPages} of $pages pages ever resolved -- the strip was scrolled " +
 				"past placeholders, so the frame times above are not the real cost"
 		}
+		// The read-ahead itself. `resolvedPages` proves urls were fetched ahead; this proves the
+		// *images* were, which is the difference between a strip of artwork and a strip of
+		// spinners. A regression here is silent in every other number on the report.
+		check(report.waitedPages <= WAIT_SLACK) {
+			"${report.waitedPages} pages were reached before their image was ready -- the reader " +
+				"is not loading far enough ahead of the scroll"
+		}
 	} finally {
 		app.close()
+	}
+}
+
+/**
+ * Whether each page was ready *before* the reader got to it.
+ *
+ * The frame times say the strip moves smoothly. They cannot say whether it moved smoothly past
+ * artwork or past placeholders, and that distinction is the entire point of reading ahead -- a
+ * reader that scrolls at 400fps while every page arrives a beat late is failing at the only thing
+ * the user asked for. `resolvedPages` was the first attempt at catching that and only covers page
+ * *urls*; a resolved url with no decoded image behind it is still a spinner.
+ *
+ * So this times the two events against each other:
+ *
+ *  - **ready** -- Coil reports the image decoded, whether that request came from the read-ahead
+ *    window, from `PreloadPages`, or from the page being on screen and asked for directly.
+ *  - **reached** -- the strip scrolled far enough that the page became the current one.
+ *
+ * Ready before reached is a *lead*: the page was sitting in memory when the reader arrived, and
+ * how far in front is how much slack the read-ahead is carrying. Ready after reached, or not at
+ * all, is a **wait** -- the reader arrived at a page and had to stop for it. Waits are the number
+ * this whole change exists to drive to zero.
+ */
+private class Readiness {
+	/** Written from Coil's threads, read from the render loop, hence the concurrent map. */
+	private val readyAt = ConcurrentHashMap<String, Long>()
+	private val reachedAt = HashMap<Int, Long>()
+
+	/**
+	 * Attach with `imageLoader.newBuilder().eventListener(...)`.
+	 *
+	 * A wrapper around the *real* loader rather than a fresh one: it has to share the application's
+	 * memory cache, disk cache and fetchers, or this would measure a loader nobody uses.
+	 */
+	fun listener(): EventListener = object : EventListener() {
+		override fun onSuccess(request: ImageRequest, result: SuccessResult) {
+			// `data` is the url string -- see `AgehaImages.readerRequest`, which sets it directly.
+			val url = request.data as? String ?: return
+			// First success only. A page can be requested more than once across a run and it is
+			// the earliest moment it became available that decides whether the reader waited.
+			readyAt.putIfAbsent(url, System.nanoTime())
+		}
+	}
+
+	/** Call every frame with the current page; only the first arrival at each page counts. */
+	fun reached(page: Int) {
+		reachedAt.putIfAbsent(page, System.nanoTime())
+	}
+
+	/** @param urls resolved page urls, indexed by page, as the reader finally knew them. */
+	fun summarise(urls: List<String?>): Pair<List<Double>, Int> {
+		val leads = ArrayList<Double>()
+		var waits = 0
+		for ((page, reached) in reachedAt) {
+			// A page whose url never resolved is already counted by `resolvedPages`; counting it
+			// again here would report one fault as two.
+			val url = urls.getOrNull(page) ?: continue
+			val ready = readyAt[url]
+			if (ready == null || ready > reached) waits++ else leads += (reached - ready) / NANOS_PER_MILLI
+		}
+		return leads to waits
 	}
 }
 
@@ -94,6 +166,10 @@ private class Report(
 	val reachedPage: Int,
 	val resolvedPages: Int,
 	val failedPages: Int,
+	/** Milliseconds each page was ready *before* the reader reached it. */
+	val leadMillis: List<Double>,
+	/** Pages the reader reached before their image was ready. The number that matters. */
+	val waitedPages: Int,
 	val frameMillis: List<Double>,
 	val heapBeforeBytes: Long,
 	val heapAfterBytes: Long,
@@ -115,6 +191,15 @@ private class Report(
 			appendLine("  heap after  ${heapAfterBytes / MB} MB (after gc)")
 			appendLine("  reached     page ${reachedPage + 1} of $PAGE_COUNT")
 			appendLine("  resolved    $resolvedPages pages, $failedPages failed")
+			// The read-ahead, in the only terms that matter to someone scrolling: how long each
+			// page had been sitting ready by the time they got to it, and how often it wasn't.
+			if (leadMillis.isNotEmpty()) {
+				val leads = leadMillis.sorted()
+				fun lead(p: Double) = leads[((leads.size - 1) * p).roundToLong().toInt()]
+				appendLine("  ready ahead ${"%.0f".format(lead(0.50))} ms p50, " +
+					"${"%.0f".format(lead(0.05))} ms p05 (${leads.size} pages)")
+			}
+			appendLine("  made wait   $waitedPages pages reached before their image was ready")
 		}
 	}
 }
@@ -134,6 +219,14 @@ private fun profile(
 	// Page 0 explicitly, never -1: resuming from history would start a rerun wherever the last one
 	// stopped and quietly measure a shorter strip each time.
 	viewModel.open(manga, chapter, startPage = 0)
+
+	// The application's own loader, wrapped so this can see when each page became available.
+	//
+	// Passing a loader at all is new, and its absence was a hole in this profile: with the
+	// parameter left null `ReaderScreen` disables preloading entirely, so every previous run
+	// measured a reader with the read-ahead switched off and could not have caught a fault in it.
+	val readiness = Readiness()
+	val instrumented = app.imageLoader.newBuilder().eventListener(readiness.listener()).build()
 
 	val scene = ImageComposeScene(width = WINDOW_WIDTH, height = WINDOW_HEIGHT, density = Density(1f)) {
 		AgehaTheme(mode = AgehaThemeMode.EMBER) {
@@ -159,6 +252,7 @@ private fun profile(
 				onRetry = viewModel::retry,
 				onClose = {},
 				modifier = Modifier.fillMaxSize(),
+				imageLoader = instrumented,
 			)
 		}
 	}
@@ -199,7 +293,11 @@ private fun profile(
 			frames += (System.nanoTime() - started) / NANOS_PER_MILLI
 			clock += FRAME_NANOS
 			heapPeak = maxOf(heapPeak, usedHeap())
-			reached = maxOf(reached, viewModel.state.value.currentPage)
+			val current = viewModel.state.value.currentPage
+			reached = maxOf(reached, current)
+			// Stamped every frame, recorded on first arrival: this is the "reached" half of the
+			// lead-time measurement.
+			readiness.reached(current)
 			// Images decode off-thread; without letting them land this measures a strip of
 			// placeholders, which is the cheap case and not the one at risk.
 			runBlocking { delay(SCROLL_FRAME_GAP_MS) }
@@ -207,9 +305,12 @@ private fun profile(
 
 		val heapPeakSeen = heapPeak
 		val finalState = viewModel.state.value
+		val (leads, waits) = readiness.summarise(finalState.pages.map { it.resolvedUrl })
 		System.gc()
 		return Report(
 			reachedPage = reached,
+			leadMillis = leads,
+			waitedPages = waits,
 			// Reported because it is the number that caught a real bug: a strip that scrolls
 			// beautifully while showing spinners is fast for the wrong reason.
 			resolvedPages = finalState.pages.count { it.resolvedUrl != null },
@@ -311,3 +412,14 @@ private const val END_OF_STRIP_SLACK = 3
  * very last pages can still be in flight when the scroll stops.
  */
 private const val UNRESOLVED_SLACK = 4
+
+/**
+ * How many pages may be reached before their image is ready.
+ *
+ * Not zero, and the reasons are all at the start of the run rather than in the steady state the
+ * read-ahead is for. The first page is on screen before anything has been decoded and can only
+ * ever be a wait; the couple behind it are reached while the window is still filling. Past that a
+ * wait means the strip outran the read-ahead, which is the fault this profile exists to catch, so
+ * the allowance stays small enough that a handful of them fails the run.
+ */
+private const val WAIT_SLACK = 3

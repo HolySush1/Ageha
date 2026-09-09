@@ -71,6 +71,12 @@ conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+# `Dispatchers.Main` on the JVM, resolved through a `ServiceLoader`. Without it `Dispatchers.Main`
+# does not fall back to anything -- every use *throws*, and Compose Multiplatform 1.12's
+# `compose.desktop.currentOs` does not bring it. Not theoretical: Coil builds `enqueue`'s request
+# scope on the main dispatcher, so the reader's page prefetch threw on every call and
+# `PreloadPages` swallowed it. Ageha shipped with the read-ahead silently doing nothing.
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 

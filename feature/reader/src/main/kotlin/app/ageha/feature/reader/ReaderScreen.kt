@@ -32,8 +32,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
@@ -354,12 +356,19 @@ private fun PagedReader(
  * A `LazyColumn` rather than a custom layout, and **this has now been measured** rather than
  * argued. The risk flagged in `docs/ARCHITECTURE.md` 1.4 was that lazy lists cannot handle a strip
  * of 200 very tall images. `:app:desktop:webtoonProfile` scrolls exactly that -- 200 pages of
- * 800x2400, end to end, through this composable -- and reports p50 1.8ms, p95 4.6ms, no frame over
- * the 60Hz budget, and a heap that peaks at 25MB and returns to its starting size. Retaining all
+ * 800x2400, end to end, through this composable -- and reports p50 3.3ms, p95 6.5ms, no frame over
+ * the 60Hz budget, and a heap that peaks at 28MB and returns to its starting size. Retaining all
  * 200 decoded would be well over a gigabyte, so the lazy list is doing the thing it was chosen
  * for: items that leave the viewport are disposed and Coil releases their bitmaps with them,
  * keeping the decoded set proportional to the window rather than to the chapter. A custom layout
  * is not needed.
+ *
+ * Those figures are worse than the p50 1.8ms / p95 4.6ms / 25MB this comment used to quote, and
+ * the regression is the feature. That run was measured with no image loader passed, which disables
+ * preloading -- so it was timing a strip that mostly scrolled past placeholders. The same profile
+ * now also reports that 199 of the 200 pages were decoded and waiting before the reader reached
+ * them, by a median of 306ms. Paying 1.5ms a frame to never wait on a page is the trade this
+ * composable exists to make, and there is still no frame over budget.
  *
  * Those numbers are around five times better than the same profile before the strip was width-
  * capped, and the reason is worth keeping: drawing an 800px page into a 1000px window was an
@@ -381,6 +390,11 @@ private fun PagedReader(
  *    the chapter decodes. Without it an unloaded page is zero pixels tall, the list composes a
  *    long run of them at once, and the strip lurches every time one resolves.
  */
+// The cache window and the `rememberLazyListState` overload that takes it are both still
+// experimental in Compose Foundation 1.12. Opted into here rather than project-wide, so the
+// exposure is one call in one composable: if the API is renamed, this is the only site to fix and
+// the fallback is the parameterless `rememberLazyListState` with byte prefetching still in place.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WebtoonReader(
 	state: ReaderUiState,
@@ -392,7 +406,37 @@ private fun WebtoonReader(
 	onZoom: (Float) -> Unit,
 	onToggleChrome: () -> Unit,
 ) {
-	val listState = rememberLazyListState()
+	// Compose pages before they are visible, not as they arrive.
+	//
+	// This is the half of "load ahead" that `PreloadPages` cannot do. That warms Coil's cache with
+	// bytes; this decides when the `AsyncImage` for a page is *constructed*. With a plain
+	// `rememberLazyListState` a lazy list composes only what is on screen, so a page's request
+	// started at the instant it became visible -- which is exactly too late. A warm cache turned
+	// that into one async hop; a cache that had not caught up turned it into the spinner, for the
+	// length of a download. Nothing read ahead in the layout at all.
+	//
+	// A *cache window* rather than an item count, and the unit is the point. The fraction overload
+	// measures in viewports, so three means three screens of artwork composed below the visible
+	// one whether this source publishes 1,000px pages or 12,000px ones. An item count cannot say
+	// that: `n` pages is a different distance in every chapter, which is the same flaw the
+	// page-counted preload setting has and the reason it is not reused here.
+	//
+	// One behind, because reading back up a strip is common enough that re-composing the page just
+	// left is a visible cost, and it is a page whose bitmap the memory cache still holds.
+	//
+	// The window is deliberately *not* wired to "Preload next pages". That setting's largest value
+	// is "Whole chapter", which as a cache window would mean composing 200 pages at once.
+	val listState = rememberLazyListState(
+		// `aheadFraction`/`behindFraction`, not `ahead`/`behind`: the latter names belong to the
+		// `Dp` overload, which would silently be a few hundred *pixels* of read-ahead instead of
+		// a few screens.
+		cacheWindow = remember {
+			LazyLayoutCacheWindow(
+				aheadFraction = VIEWPORTS_AHEAD,
+				behindFraction = VIEWPORTS_BEHIND,
+			)
+		},
+	)
 	val across = rememberScrollState()
 	val scope = rememberCoroutineScope()
 	val smooth = rememberSmoothScroller(listState, scope)
@@ -625,6 +669,7 @@ private fun ReaderPageImage(
  *    just read; spending a request to re-warm it would be work done to avoid work already done.
  *  - **Enqueued, not awaited.** `enqueue` hands the request to Coil's own dispatcher and returns,
  *    so a slow source cannot stall the page the reader is looking at.
+ *  - **Once per page.** See [warmed].
  */
 @Composable
 private fun PreloadPages(
@@ -634,17 +679,54 @@ private fun PreloadPages(
 	anchor: Int,
 ) {
 	if (loader == null) return
+
+	/**
+	 * The pages already handed to Coil, so each is enqueued exactly once.
+	 *
+	 * Not an optimisation -- without it this was actively making scrolling worse, which is the
+	 * opposite of what it is for. The effect below used to key on `state.pages`, and
+	 * `ReaderViewModel.updatePage` rebuilds that list on *every* url resolution while
+	 * `recordScroll` resolves on every scroll emission. So the effect restarted continuously
+	 * during a scroll and re-enqueued the same handful of urls each time. Coil does not coalesce
+	 * identical in-flight requests: those duplicates are real fetches and real decodes, filling
+	 * its dispatchers with work already in progress, and the request for the page actually on
+	 * screen queued behind them. The harder you scrolled the further behind it fell.
+	 *
+	 * Keyed on the chapter, because page keys are only unique within one and the next chapter's
+	 * pages have their own warming to do.
+	 */
+	val warmed = remember(state.chapter?.id) { mutableSetOf<String>() }
+
+	// Still keyed on `state.pages`, and deliberately.
+	//
+	// The restart is not the bug; the duplicate *enqueue* was. This effect has to re-run when a
+	// url resolves, because a page whose url arrived after the anchor last moved would otherwise
+	// never be warmed at all -- and in webtoon mode the anchor moves rarely, once per page of
+	// travel, so that gap is most of the chapter. What a restart now costs is a walk of at most
+	// `depth` entries and a set lookup each; the fetches happen once.
 	LaunchedEffect(anchor, state.pages, preloadPages, state.imageHeaders, loader) {
 		val depth = if (preloadPages <= 0) state.pages.size else preloadPages
 		// Best-effort, and swallowing the failure is the point rather than a shortcut. Warming a
 		// cache is not something the reader depends on: if a prefetch cannot be enqueued the page
 		// still loads when it is asked for, a moment later. Letting that throw would take down the
 		// screen someone is reading to save them a wait they would not have noticed.
+		//
+		// It has a bite, though, and it drew blood. This swallowed *every* call for the life of
+		// the project: `enqueue` builds its coroutine on `Dispatchers.Main`, nothing on the
+		// classpath provided one, and a missing main dispatcher throws rather than degrading. The
+		// read-ahead was dead and the only symptom was pages arriving late -- which reads as a
+		// slow source. What catches that now is not this line but `:app:desktop:webtoonProfile`,
+		// which fails if pages are reached before their image is ready. Keep it that way round:
+		// per-page failures belong here, and whether the feature works at all is a measurement.
 		runCatching {
 			for (offset in 1..depth) {
 				val page = state.pages.getOrNull(anchor + offset) ?: break
 				val url = page.resolvedUrl ?: continue
-				loader.enqueue(AgehaImages.readerRequest(url, state.imageHeaders))
+				// `add` reports whether it was new, so the check and the record are one operation
+				// and a page cannot be enqueued twice by two passes interleaving.
+				if (warmed.add(page.key)) {
+					loader.enqueue(AgehaImages.readerRequest(url, state.imageHeaders))
+				}
 			}
 		}
 	}
@@ -1228,6 +1310,27 @@ private val MIN_STRIP_WIDTH = 160.dp
 
 /** Aspect ratio (width / height) assumed for a page nothing is yet known about. */
 private const val DEFAULT_PAGE_RATIO = 0.7f
+
+/**
+ * How far past the visible strip pages are composed, in viewports.
+ *
+ * Three ahead is the read-ahead someone feels: at a normal reading pace it is several seconds of
+ * warning, which is enough for a page to be fetched and decoded before it is scrolled to rather
+ * than while it is being looked at.
+ *
+ * It is not free, and the cost is the reason `conveyor.conf` raises `-Xmx`. Pages are decoded at
+ * the source's own resolution -- see `AgehaImages.readerRequest`, which explains why that is not
+ * negotiable if zoom is to reveal detail -- so three viewports of a tall strip is several
+ * full-resolution bitmaps held live on top of the ones on screen. Coil's memory cache is a
+ * fraction of the heap, so a window this wide on the old 1536MB ceiling would have evicted the
+ * pages it had just warmed and done the work twice.
+ *
+ * One behind rather than zero: reading back up a strip is ordinary, and a page just left is one
+ * whose bitmap the memory cache still holds, so keeping it composed costs a slot and saves a
+ * rebuild.
+ */
+private const val VIEWPORTS_AHEAD = 3f
+private const val VIEWPORTS_BEHIND = 1f
 
 /**
  * One Ctrl+wheel notch of strip width.

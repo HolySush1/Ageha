@@ -32,6 +32,24 @@ dependencies {
 	implementation(libs.kotlinx.serialization.json)
 	runtimeOnly(libs.sqlite.bundled)
 
+	// Registers a `Dispatchers.Main` for the JVM, and it is not optional.
+	//
+	// `Dispatchers.Main` is looked up through a `ServiceLoader`, and with no provider on the
+	// classpath it does not degrade -- it throws `IllegalStateException` on first use. Compose
+	// Multiplatform 1.12's `compose.desktop.currentOs` does not supply one, so until this was
+	// added the application had no main dispatcher at all.
+	//
+	// What that cost: Coil builds the coroutine for `ImageLoader.enqueue` on the main dispatcher,
+	// so every page the reader tried to prefetch threw before a byte was fetched -- inside the
+	// `runCatching` in `ReaderScreen.PreloadPages` that exists to stop a failed prefetch taking
+	// down the reader. The read-ahead was dead for the life of the project and nothing said so.
+	// `webtoonProfile` now fails when pages are reached before their image is ready, which is the
+	// guard that would have caught it.
+	//
+	// `runtimeOnly` because nothing compiles against it: it is a service provider, and no code
+	// here names `Dispatchers.Swing`.
+	runtimeOnly(libs.kotlinx.coroutines.swing)
+
 	// Drives the real shell in the end-to-end test: semantics-based finders, synthetic clicks and
 	// typing, and an idle-aware clock. `runComposeUiTest` is the non-Rule entry point, so this
 	// does not drag JUnit 4 into a JUnit 5 project.

@@ -4,6 +4,38 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.1] - 2026-09-09
+
+### Fixed
+
+- **The reader now actually loads ahead of the scroll.** Pages arrived blank and filled in a beat
+  later, which is the one thing a reader must not do. Three faults, and the first is the one that
+  mattered:
+  - **Page prefetching had never run, in any release.** `Dispatchers.Main` is resolved through a
+    `ServiceLoader` and throws on first use when nothing provides it -- and Compose Multiplatform
+    1.12's `compose.desktop.currentOs` does not. Coil builds `enqueue`'s coroutine on the main
+    dispatcher, so every prefetch threw before fetching a byte, inside the `runCatching` that
+    exists to stop one bad page taking down the reader. The "Preload next pages" setting had been
+    doing nothing at all. Fixed by adding `kotlinx-coroutines-swing`.
+  - **The webtoon strip composed nothing beyond the viewport**, so a page's image request started
+    at the instant it became visible -- exactly too late. It now composes three viewports ahead
+    and one behind, measured as a fraction of the window rather than as a page count, because a
+    webtoon page is not a unit of distance.
+  - **Cache warming re-enqueued requests already in flight.** The effect restarted on every url
+    resolution, and Coil does not coalesce duplicate requests, so scrolling filled its fetch and
+    decode queues with work already in progress and the page on screen waited behind it. Each page
+    is now enqueued once.
+- `:app:desktop:webtoonProfile` passed no image loader, which disables preloading -- so it had been
+  profiling a reader with the read-ahead switched off, and could not have caught any of the above.
+  It now runs the real loader and reports how long each page was ready *before* it was reached,
+  failing if the strip outruns the read-ahead. On the 200-page profile: 199 of 200 pages ready
+  ahead by a median of 306ms, against 0 of 200 before.
+
+### Changed
+
+- Maximum heap raised from 1536MB to 3072MB. Coil sizes its memory cache at a quarter of the heap
+  and pages are decoded at full resolution, so the read-ahead window needs the room.
+
 ## [0.3.0] - 2026-09-09
 
 ### Added
