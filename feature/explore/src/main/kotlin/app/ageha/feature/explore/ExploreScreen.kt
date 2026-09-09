@@ -58,6 +58,7 @@ import app.ageha.core.designsystem.AgehaTextStyles
 import app.ageha.core.designsystem.EmptyState
 import app.ageha.core.designsystem.glassSurface
 import app.ageha.core.designsystem.MangaGrid
+import app.ageha.core.designsystem.MangaCardAction
 import app.ageha.core.designsystem.MangaGridItem
 import app.ageha.core.designsystem.SourceFailureNotice
 import app.ageha.core.designsystem.rememberSearchFieldState
@@ -769,6 +770,15 @@ fun BrowseScreen(
 	onLoadMore: () -> Unit,
 	onRetry: () -> Unit,
 	modifier: Modifier = Modifier,
+	/**
+	 * Right-click a result: search every enabled source for the same title.
+	 *
+	 * Browse is one source at a time by construction, so the question "who else has this" cannot
+	 * be answered by the screen the user is standing on. Reaching it from the card means the
+	 * title does not have to be retyped into a second search -- which is what a user does
+	 * otherwise, and gets wrong, because the name on the card is often a romanisation.
+	 */
+	onFindElsewhere: (AgehaManga) -> Unit = {},
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
 	val gridState = rememberLazyGridState()
@@ -849,7 +859,15 @@ fun BrowseScreen(
 			)
 
 			else -> MangaGrid(
-				manga = state.manga.map { MangaGridItem(manga = it, imageHeaders = state.imageHeaders) },
+				manga = state.manga.map { result ->
+					MangaGridItem(
+						manga = result,
+						imageHeaders = state.imageHeaders,
+						actions = listOf(
+							MangaCardAction("Find another source") { onFindElsewhere(result) },
+						),
+					)
+				},
 				onClick = onOpenManga,
 				state = gridState,
 				modifier = Modifier.fillMaxSize(),

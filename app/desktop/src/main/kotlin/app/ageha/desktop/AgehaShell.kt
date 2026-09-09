@@ -411,6 +411,9 @@ fun AgehaShell(
 						onOpenChapters = { navigator.openManga(it.manga) },
 						onMarkRead = libraryViewModel::markRead,
 						onMarkUnread = libraryViewModel::markUnread,
+						onFindElsewhere = { manga ->
+							navigator.searchAllSources(manga.title, subject = manga.title)
+						},
 					)
 				}
 
@@ -689,6 +692,9 @@ fun AgehaShell(
 							onSubmitSearch = browseViewModel::submitSearch,
 							onLoadMore = { browseViewModel.loadMore() },
 							onRetry = browseViewModel::retry,
+							onFindElsewhere = { manga ->
+								navigator.searchAllSources(manga.title, subject = manga.title)
+							},
 							searchFocus = searchFocus,
 						)
 					}
@@ -819,6 +825,15 @@ fun AgehaShell(
 							},
 							onMarkReadThrough = detailsViewModel::markReadThrough,
 							onMarkUnreadFrom = detailsViewModel::markUnreadFrom,
+							// `state.manga` rather than the destination's copy, so the query is
+							// the title the source returned rather than the one the card was
+							// built from -- those differ for a backup-imported row, whose stored
+							// title can be years stale. Falls back to the destination when the
+							// fetch has not landed or failed, which is when this is most needed.
+							onFindElsewhere = {
+								val title = state.manga?.title ?: destination.manga.title
+								navigator.searchAllSources(title, subject = title)
+							},
 						)
 					}
 				}

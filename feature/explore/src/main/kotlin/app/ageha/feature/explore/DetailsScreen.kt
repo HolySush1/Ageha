@@ -98,6 +98,15 @@ fun DetailsScreen(
 	onMarkReadThrough: (AgehaChapter) -> Unit = {},
 	/** Mark this chapter and everything after it unread. */
 	onMarkUnreadFrom: (AgehaChapter) -> Unit = {},
+	/**
+	 * Search every enabled source for this title, from the chapter header.
+	 *
+	 * It sits with the chapter count rather than beside Add to library, because the question it
+	 * answers is a chapter question. Someone reaches for this when the list in front of them
+	 * stops at 47 and the series did not, or when this source's branch is a machine translation --
+	 * both of which are things you only notice once you are looking at the chapters.
+	 */
+	onFindElsewhere: () -> Unit = {},
 ) {
 	val manga = state.manga
 	if (manga == null) {
@@ -202,7 +211,7 @@ fun DetailsScreen(
 		}
 
 		Column(Modifier.fillMaxSize()) {
-			ChapterHeader(state, onSelectBranch, onDownloadAll)
+			ChapterHeader(state, onSelectBranch, onDownloadAll, onFindElsewhere)
 			HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 			val chapterList = rememberLazyListState()
 			// Open on the chapter you were last reading, not on chapter one.
@@ -331,6 +340,7 @@ private fun ChapterHeader(
 	state: DetailsUiState,
 	onSelectBranch: (String?) -> Unit,
 	onDownloadAll: () -> Unit,
+	onFindElsewhere: () -> Unit,
 ) {
 	Row(
 		Modifier.fillMaxWidth().padding(AgehaSpacing.md),
@@ -357,6 +367,10 @@ private fun ChapterHeader(
 		if (state.chapters.isNotEmpty()) {
 			androidx.compose.material3.TextButton(onClick = onDownloadAll) { Text("Download all") }
 		}
+		// Unconditional, unlike Download all beside it. The moment this is most wanted is the one
+		// where there is nothing to download -- the source returned an empty list, or failed
+		// outright -- and hiding it behind `chapters.isNotEmpty()` would take it away exactly then.
+		androidx.compose.material3.TextButton(onClick = onFindElsewhere) { Text("Find another source") }
 		// Branches are the source's scanlation groups or languages. Only offered when there is
 		// more than one -- a single-branch manga does not need a control that does nothing.
 		if (state.branches.size > 1) {

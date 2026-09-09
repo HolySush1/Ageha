@@ -4,6 +4,20 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased]
+
+### Added
+
+- **"Find another source", on library cards, browse results and the chapter header.** Ageha has
+  had cross-source search since 0.2, and reaching it meant retyping a title that is usually a
+  romanisation -- so the one search that spans all 1360 sources was the one you had to spell from
+  memory. It is now a right-click away on any card, and a button in the chapter header, seeded
+  with the title the source itself returned.
+
+  The chapter-header button is deliberately *not* hidden when the chapter list is empty, unlike
+  the Download all button beside it. An empty or failed chapter list is precisely when "who else
+  has this" is the only useful question left on the screen.
+
 ## [0.3.1] - 2026-09-09
 
 ### Fixed

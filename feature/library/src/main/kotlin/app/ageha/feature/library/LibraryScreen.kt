@@ -79,6 +79,15 @@ fun LibraryScreen(
 	onMarkRead: (AgehaManga) -> Unit = {},
 	/** Right-click a card: mark the whole title unread, clearing its progress. */
 	onMarkUnread: (AgehaManga) -> Unit = {},
+	/**
+	 * Right-click a card: search every enabled source for this title.
+	 *
+	 * The same destination Continue Reading's "Find another source" reaches, offered here for the
+	 * opposite reason. There it is a rescue -- the entry's source is gone and the button is the
+	 * only way back to the title. On a library card the source is working fine, and the want is
+	 * that a scanlation has stalled, or the branch on this source is behind the one on another.
+	 */
+	onFindElsewhere: (AgehaManga) -> Unit = {},
 ) {
 	// Resolving image headers is a per-source cost, not a per-cover one, so it is asked for once
 	// per distinct source in the current view rather than from inside the grid's item scope.
@@ -120,7 +129,7 @@ fun LibraryScreen(
 			)
 
 			else -> MangaGrid(
-				manga = state.entries.map { it.toGridItem(imageHeaders, onMarkRead, onMarkUnread) },
+				manga = state.entries.map { it.toGridItem(imageHeaders, onMarkRead, onMarkUnread, onFindElsewhere) },
 				onClick = onOpenManga,
 				style = cardStyle,
 				blurAdult = blurAdultCovers,
@@ -255,6 +264,7 @@ private fun LibraryEntry.toGridItem(
 	headers: Map<String, Map<String, String>>,
 	onMarkRead: (AgehaManga) -> Unit,
 	onMarkUnread: (AgehaManga) -> Unit,
+	onFindElsewhere: (AgehaManga) -> Unit,
 ): MangaGridItem {
 	val percent = progressPercent
 	// 100% is the threshold rather than a mark-as-read flag, for the same reason: there is no
@@ -279,6 +289,7 @@ private fun LibraryEntry.toGridItem(
 		actions = listOf(
 			MangaCardAction("Mark as read") { onMarkRead(manga) },
 			MangaCardAction("Mark as unread") { onMarkUnread(manga) },
+			MangaCardAction("Find another source") { onFindElsewhere(manga) },
 		),
 	)
 }
