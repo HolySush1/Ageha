@@ -77,6 +77,15 @@ class Remedies(
 		}
 	}
 
+	/**
+	 * Hand [url] to the system browser, with the same failure reporting the remedies get.
+	 *
+	 * Public for the Add site dialog's "Request it upstream". Two copies of "open a link, and say
+	 * so when Windows will not" would drift, and the one that drifted would be the one that failed
+	 * silently.
+	 */
+	fun openLink(url: String) = open(url)
+
 	private fun open(url: String?) {
 		if (url.isNullOrBlank()) {
 			notices.post(

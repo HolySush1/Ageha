@@ -25,6 +25,7 @@ import app.ageha.core.browser.BrowserInstallState
 import app.ageha.core.browser.JcefJsRuntime
 import app.ageha.core.js.CompositeJsRuntime
 import app.ageha.core.js.RhinoJsRuntime
+import app.ageha.core.source.SiteLinks
 import kotlinx.coroutines.launch
 import app.ageha.core.parsers.Ageha
 import app.ageha.core.parsers.ParsersUpdateService
@@ -146,6 +147,8 @@ fun main(args: Array<String>) {
 					println("" + captured.size + " request(s) matched")
 					captured.forEach { println("  " + it.method + " " + it.url) }
 				}
+
+				"resolve" -> requireArgs(args, 2) { resolve(stack, args[1]) }
 
 				"pages" -> requireArgs(args, 3) {
 					pages(
@@ -558,6 +561,32 @@ private suspend fun details(stack: SourceStack, sourceName: String, query: Strin
 	}
 }
 
+/**
+ * Which source handles a pasted link, the same question the Add site dialog asks.
+ *
+ * Exists so the resolver can be exercised without the UI -- and so "does Ageha have this site"
+ * has an answer from a terminal, which is where a bug report about a missing site usually starts.
+ */
+private suspend fun resolve(stack: SourceStack, input: String) {
+	val link = SiteLinks.normalise(input) ?: error("'" + input + "' is not a link.")
+	val host = SiteLinks.hostOf(link)
+	val found = stack.registry.resolveLink(link)
+	if (found == null) {
+		println("No source in parsers build " + stack.registry.parsersVersion + " handles " + host + ".")
+		return
+	}
+	val descriptor = stack.registry.descriptorFor(found.sourceName)
+	println(host + " -> " + (descriptor?.title ?: found.sourceName) + "  [" + found.sourceName + "]")
+	if (descriptor?.isBroken == true) println("  flagged broken upstream")
+	val manga = found.manga
+	if (manga == null) {
+		println("  the site itself, not a particular title")
+	} else {
+		println("  manga: " + manga.title)
+		println("         " + manga.publicUrl)
+	}
+}
+
 private suspend fun pages(
 	stack: SourceStack,
 	sourceName: String,
@@ -630,13 +659,16 @@ private fun reportFailure(failure: SourceFailure) {
 			)
 			System.err.println("  Capability: " + failure.capability)
 			if (failure.capability.requiresBrowser) {
-				System.err.println("  This source needs the optional browser component.")
-				System.err.println("  It is not built yet; it lands in Milestone 8. Roughly 20 of")
-				System.err.println("  1360 sources need it. The rest work without it.")
+				// Pointed at the flag rather than at a milestone. This used to say the component
+				// "lands in Milestone 8", which stayed true for exactly as long as it was not built
+				// and then became the one line in the CLI telling people a working feature was
+				// missing.
+				System.err.println("  This source needs the optional browser component. Run the")
+				System.err.println("  same command again with --browser to download it (about")
+				System.err.println("  200MB, once) and use it. Roughly 20 of 1360 sources need it.")
 			} else {
-				System.err.println("  This one is covered by the bundled script engine, which also")
-				System.err.println("  lands in Milestone 8. Until then this source cannot run its")
-				System.err.println("  anti-bot fallback path.")
+				System.err.println("  The bundled script engine should cover this, so seeing it")
+				System.err.println("  means the engine failed to start -- a bug worth reporting.")
 			}
 		}
 

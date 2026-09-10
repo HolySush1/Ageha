@@ -3,14 +3,20 @@ package app.ageha.feature.explore
 import app.ageha.core.data.LocaleOption
 import app.ageha.core.data.SourceListing
 import app.ageha.core.data.SourceRepository
+import app.ageha.core.source.ResolvedLink
+import app.ageha.core.source.SiteLinks
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Which slice of the catalogue the source picker is showing. */
 enum class SourceFilter(val label: String) {
@@ -103,6 +109,18 @@ data class ExploreUiState(
  *   filters outlive the window: re-hiding adult sources on every launch would be a setting that
  *   does not stay set, and re-showing them would be worse.
  */
+/**
+ * How long a link lookup in the Add site dialog may take.
+ *
+ * Generous, because a manga link can mean a details request through the browser tier -- Comix
+ * answers in tens of seconds, not milliseconds -- while a front page resolves almost at once. Cancel
+ * is always on screen, so a long wait is never a trap.
+ *
+ * Top level and internal rather than in the companion, which is private: the timeout test needs
+ * this exact figure, and a copy of it in the test would be a number free to drift.
+ */
+internal const val ADD_SITE_TIMEOUT_MS = 60_000L
+
 class ExploreViewModel(
 	private val sources: SourceRepository,
 	private val scope: CoroutineScope,
@@ -112,6 +130,21 @@ class ExploreViewModel(
 	private val onFiltersChanged: (hideBroken: Boolean, showAdult: Boolean, locale: String?) -> Unit =
 		{ _, _, _ -> },
 ) {
+
+	private val _addSite = MutableStateFlow<AddSiteState>(AddSiteState.Closed)
+
+	/**
+	 * The Add site dialog.
+	 *
+	 * Its own flow rather than a field on [state], and for a measurable reason: [state] is a
+	 * `combine` that re-runs a search over all ~1,360 sources whenever any input changes. Putting
+	 * the dialog's text in there would repeat that search on every character of a pasted URL, for
+	 * a dialog that shares nothing with the list behind it.
+	 */
+	val addSite: StateFlow<AddSiteState> = _addSite.asStateFlow()
+
+	/** The lookup in flight, so a new link or a closed dialog can stop it. */
+	private var resolving: Job? = null
 
 	private val query = MutableStateFlow("")
 	private val filters = MutableStateFlow(
@@ -225,6 +258,96 @@ class ExploreViewModel(
 	fun setEnabled(name: String, enabled: Boolean) {
 		scope.launch { sources.setEnabled(name, enabled) }
 	}
+
+	fun openAddSite() {
+		_addSite.value = AddSiteState.Open()
+	}
+
+	fun closeAddSite() {
+		resolving?.cancel()
+		_addSite.value = AddSiteState.Closed
+	}
+
+	/**
+	 * The text changed.
+	 *
+	 * Any answer on screen belonged to the previous text, so it goes: "comix.to → Comix" left
+	 * showing under a field that now reads something else is a result for a question nobody is
+	 * asking any more, and its Open button would open the wrong thing.
+	 */
+	fun setAddSiteInput(text: String) {
+		val open = _addSite.value as? AddSiteState.Open ?: return
+		if (text == open.input) return
+		resolving?.cancel()
+		_addSite.value = open.copy(input = text, status = AddSiteStatus.Idle)
+	}
+
+	fun findSite() {
+		val open = _addSite.value as? AddSiteState.Open ?: return
+		val link = SiteLinks.normalise(open.input)
+		if (link == null) {
+			_addSite.value = open.copy(status = AddSiteStatus.NotALink)
+			return
+		}
+		val host = SiteLinks.hostOf(link)
+		resolving?.cancel()
+		_addSite.value = open.copy(status = AddSiteStatus.Resolving(host))
+		resolving = scope.launch {
+			val status = try {
+				// Wrapped so a timeout can be told apart from an honest "no source": both would
+				// otherwise arrive as null, and they mean opposite things to the person waiting.
+				val answer = withTimeoutOrNull(ADD_SITE_TIMEOUT_MS) { Answer(sources.resolveLink(link)) }
+				val resolved = answer?.link
+				when {
+					answer == null -> AddSiteStatus.Failed(
+						host,
+						"it took longer than ${ADD_SITE_TIMEOUT_MS / 1000} seconds to answer.",
+					)
+
+					resolved == null -> AddSiteStatus.NotFound(host, sources.parsersVersion)
+
+					else -> sources.descriptor(resolved.sourceName)
+						?.let { AddSiteStatus.Found(host, it, resolved.manga) }
+						?: AddSiteStatus.NotFound(host, sources.parsersVersion)
+				}
+			} catch (e: CancellationException) {
+				// Cancelled because the text changed or the dialog closed. Writing a status now
+				// would resurrect a lookup the person has already moved on from.
+				throw e
+			} catch (e: Exception) {
+				AddSiteStatus.Failed(host, e.message ?: e::class.simpleName.orEmpty())
+			}
+			// Applied only if the dialog is still open on the same link. Cancellation covers the
+			// common case; this covers the one where the answer lands in the same instant the
+			// text changes, which cancellation alone can lose the race to.
+			_addSite.update { current ->
+				if (current is AddSiteState.Open && SiteLinks.normalise(current.input) == link) {
+					current.copy(status = status)
+				} else {
+					current
+				}
+			}
+		}
+	}
+
+	/**
+	 * Take the found source: switch it on, close the dialog, and say where to go.
+	 *
+	 * Switched on without asking, because pasting a site's link *is* the asking. A source that was
+	 * opened from a link and then vanished from the Enabled list the moment the user looked away
+	 * would read as the link not having worked.
+	 *
+	 * @return what was found, for the caller to navigate to; null when nothing was.
+	 */
+	fun acceptFound(): AddSiteStatus.Found? {
+		val found = (_addSite.value as? AddSiteState.Open)?.status as? AddSiteStatus.Found ?: return null
+		setEnabled(found.source.name, true)
+		closeAddSite()
+		return found
+	}
+
+	/** Distinguishes "the resolver answered null" from "the resolver never answered". */
+	private class Answer(val link: ResolvedLink?)
 
 	/**
 	 * Turn on the default English sources.

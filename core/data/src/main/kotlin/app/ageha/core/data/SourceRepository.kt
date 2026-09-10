@@ -6,6 +6,7 @@ import app.ageha.core.database.entity.MangaSourceEntity
 import app.ageha.core.model.AgehaContentType
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.source.MangaSourceRegistry
+import app.ageha.core.source.ResolvedLink
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -71,6 +72,15 @@ class SourceRepository(
 			compareByDescending<SourceListing> { it.isPinned }.thenByDescending { it.lastUsedAt },
 		)
 	}
+
+	/**
+	 * Which source handles [url] -- already normalised by `SiteLinks` -- and the manga it names.
+	 *
+	 * Null when no source in the loaded parsers build handles the site. A pass-through, and kept
+	 * here rather than called on the registry from the screen so that the view model depends on
+	 * one repository for everything about sources, as it already does for enabling them.
+	 */
+	suspend fun resolveLink(url: String): ResolvedLink? = registry.resolveLink(url)
 
 	suspend fun setEnabled(name: String, enabled: Boolean) {
 		val existing = sources.find(name)

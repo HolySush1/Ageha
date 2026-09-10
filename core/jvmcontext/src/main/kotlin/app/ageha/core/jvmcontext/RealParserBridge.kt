@@ -7,6 +7,8 @@ import app.ageha.core.network.PersistentCookieJar
 import okhttp3.OkHttpClient
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.source.ParserBridge
+import app.ageha.core.source.ResolvedLink
+import kotlinx.coroutines.CancellationException
 import org.koitharu.kotatsu.parsers.MangaParser
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.model.MangaSource
@@ -127,6 +129,41 @@ class RealParserBridge(
 		}
 	}
 
+	/**
+	 * Match [url] against every source in this build, using the parsers library's own resolver.
+	 *
+	 * Upstream's `LinkResolver` rather than a host lookup of Ageha's own, and the reason is
+	 * mirrors: each parser declares several domains through `ConfigKey.Domain`, sites move between
+	 * them constantly, and the resolver already knows every one. A table built here would be a
+	 * second copy of that knowledge, out of date by the next parsers update.
+	 *
+	 * Every step is allowed to come up empty. A front page is not a manga page, so `getManga`
+	 * failing there is the expected outcome and still yields the source on its own.
+	 */
+	override suspend fun resolveLink(url: String): ResolvedLink? {
+		// newLinkResolver parses the string itself and throws on one it cannot read -- "not a
+		// link" is an answer for the caller to show, not an exception for it to catch.
+		val resolver = catchingParserFailure { context.newLinkResolver(url) }.getOrNull() ?: return null
+		val source = quietly { resolver.getSource() } ?: return null
+		// A resolver result this bridge cannot open would send the user somewhere that fails. The
+		// two lists come from the same enum, so this should never trip; if it ever does, saying
+		// "no source handles this" is better than a dead end.
+		if (source.name !in descriptors) return null
+
+		val manga = quietly { resolver.getManga() }?.let { found ->
+			// The resolver sometimes knows *which* manga a link names without knowing its title,
+			// and returns a placeholder called "Unknown manga". Showing that in a dialog reads as a
+			// bug, and the details request that fixes it is the one opening the manga would make
+			// a moment later anyway. If it fails, the placeholder is still a working link.
+			if (found.title == RESOLVER_STUB_TITLE) {
+				quietly { parserFor(source.name).getDetails(found) } ?: found
+			} else {
+				found
+			}
+		}
+		return ResolvedLink(sourceName = source.name, manga = manga?.let(ParserModelMapper::manga))
+	}
+
 	override fun close() {
 		parsers.clear()
 		clients.clear()
@@ -166,6 +203,25 @@ class RealParserBridge(
 		Result.failure(e)
 	}
 
+	/**
+	 * [catchingParserFailure] for suspending work: null on an ordinary failure.
+	 *
+	 * A separate helper because the original catches every `Exception`, and in a coroutine that
+	 * includes `CancellationException`. The self-check never suspends, so it never mattered
+	 * there; here it would. The dialog puts a timeout on link resolution, and a resolver that
+	 * swallowed the cancellation would keep the user staring at a spinner after the timeout had
+	 * already fired. Linkage errors still propagate, for the reason [catchingParserFailure] gives.
+	 */
+	private inline fun <T> quietly(block: () -> T): T? = try {
+		block()
+	} catch (e: CancellationException) {
+		throw e
+	} catch (e: LinkageError) {
+		throw e
+	} catch (e: Exception) {
+		null
+	}
+
 	companion object {
 
 		/** Where the loader looks for this class. Asserted by the compatibility gate. */
@@ -173,5 +229,16 @@ class RealParserBridge(
 
 		/** Fraction of a self-check sample allowed to fail before a build is rejected. */
 		private const val SELF_CHECK_TOLERANCE = 0.2
+
+		/**
+		 * The placeholder title upstream's `LinkResolver` gives a manga it located but could not
+		 * name.
+		 *
+		 * Copied rather than referenced: upstream declares it `STUB_TITLE` inside a *private*
+		 * companion object, so Kotlin refuses the reference even though the JVM field is public.
+		 * If upstream ever changes the text, the only consequence is that the dialog shows the
+		 * placeholder instead of fetching the real title -- the link itself still opens.
+		 */
+		private const val RESOLVER_STUB_TITLE = "Unknown manga"
 	}
 }

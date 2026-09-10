@@ -65,4 +65,21 @@ interface ParserBridge : AutoCloseable {
 	 * @return a human-readable description of what failed, or null if the build looks sound.
 	 */
 	fun selfCheck(sampleSize: Int): String?
+
+	/**
+	 * Which source handles [url], and which manga it points at if it points at one.
+	 *
+	 * Null when no source in this build handles the site -- an ordinary answer, not a failure, and
+	 * the one most pasted links from outside the library will get.
+	 *
+	 * ## Why this has a body
+	 *
+	 * The default is not a convenience. The bridge implementation is loaded from a jar extracted
+	 * into the user's cache, and that jar can be older than the application calling it -- the
+	 * defect 0.3.2's freshness check exists to repair, which does not yet reach a build downloaded
+	 * by the update engine. An abstract method here would turn that staleness into
+	 * `AbstractMethodError` the first time anyone pasted a link. With a body, a stale bridge
+	 * inherits "no source handles this", which is wrong but survivable.
+	 */
+	suspend fun resolveLink(url: String): ResolvedLink? = null
 }

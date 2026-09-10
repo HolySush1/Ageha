@@ -3,6 +3,14 @@ package app.ageha.desktop
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.ImageComposeScene
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import app.ageha.core.model.AgehaContentType
+import app.ageha.core.model.SourceDescriptor
+import app.ageha.feature.explore.AddSiteStatus
+import app.ageha.feature.explore.AddSiteState
+import app.ageha.feature.explore.AddSiteDialog
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.Density
@@ -84,6 +92,7 @@ fun main(args: Array<String>) {
 		renderSettingsPanels(app, outDir)
 		renderCollapsedRail(app, outDir)
 		renderSearchAll(app, outDir)
+		renderAddSite(outDir)
 		renderContinueHero(app, outDir)
 		renderReader(app, outDir)
 		renderDetails(app, outDir)
@@ -283,6 +292,59 @@ private fun renderCollapsedRail(app: AgehaApplication, outDir: File) {
  * anybody's server. That is the intended behaviour on a machine that has never been configured,
  * and rendering it proves the screen handles it.
  */
+/**
+ * The Add site dialog, in each state that says something different.
+ *
+ * Drawn on its own rather than through the shell: the dialog's state lives in the explore view
+ * model, which the shell creates privately, and reaching into it from here would mean a test hook
+ * in production code. The states are the ones worth looking at -- a found site, a found manga, a
+ * site no source reads, and text that is not a link -- because those are the four sentences the
+ * dialog exists to get right.
+ */
+private fun renderAddSite(outDir: File) {
+	val comix = SourceDescriptor(
+		name = "COMIX",
+		title = "Comix",
+		locale = "en",
+		contentType = AgehaContentType.MANGA,
+		isBroken = false,
+	)
+	val scenes = listOf(
+		"found" to AddSiteState.Open("https://comix.to/", AddSiteStatus.Found("comix.to", comix, manga = null)),
+		"not-found" to AddSiteState.Open(
+			"https://example.com",
+			AddSiteStatus.NotFound("example.com", "434030d481"),
+		),
+		"not-a-link" to AddSiteState.Open("not a link", AddSiteStatus.NotALink),
+		"resolving" to AddSiteState.Open("https://comix.to/", AddSiteStatus.Resolving("comix.to")),
+	)
+	for ((name, state) in scenes) {
+		val scene = ImageComposeScene(width = 900, height = 560, density = Density(1f)) {
+			AgehaTheme(mode = AgehaThemeMode.EMBER) {
+				Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+					AddSiteDialog(
+						state = state,
+						onInput = {},
+						onFind = {},
+						onOpenSource = {},
+						onOpenManga = {},
+						onRequestUpstream = {},
+						onDismiss = {},
+					)
+				}
+			}
+		}
+		try {
+			File(outDir, "shell-add-site-$name.png").writeBytes(
+				checkNotNull(settle(scene).encodeToData(EncodedImageFormat.PNG)).bytes,
+			)
+			println("wrote shell-add-site-$name.png")
+		} finally {
+			scene.close()
+		}
+	}
+}
+
 private fun renderSearchAll(app: AgehaApplication, outDir: File) {
 	val navigator = Navigator().apply { searchAllSources("berserk", subject = "Berserk") }
 	val scene = ImageComposeScene(width = 1280, height = 860, density = Density(1f)) {

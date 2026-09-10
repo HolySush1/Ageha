@@ -1,5 +1,6 @@
 package app.ageha.core.parsers
 
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -84,5 +85,78 @@ class BundledBridgeFreshnessTest {
 			installation.parsersJarFor(version).lastModified(),
 			"an installation that already matches the bundled build must not be re-extracted",
 		)
+	}
+
+	/**
+	 * A downloaded build that looks exactly like one accepted under a previous release: installed,
+	 * locked, active -- and carrying that release's bridge rather than this one's.
+	 */
+	private fun downloadedWithStaleBridge(installation: ParsersInstallation, bundled: String): String {
+		val downloaded = "downloaded-test"
+		installation.directoryFor(bundled).copyRecursively(installation.directoryFor(downloaded))
+		val bridge = installation.bridgeJarFor(downloaded)
+		bridge.writeBytes(bridge.readBytes() + "the previous release's bridge".toByteArray())
+		installation.writeLock(downloaded)
+		installation.activate(downloaded)
+		return downloaded
+	}
+
+	@Test
+	@DisplayName("a downloaded build's stale bridge is replaced at launch, and the build stays active")
+	fun downloadedBuildGetsCurrentBridge(@TempDir dir: File) {
+		val installation = installationIn(dir)
+		val bundled = BundledParsers.ensureExtracted(installation)
+		val downloaded = downloadedWithStaleBridge(installation, bundled)
+
+		val stack = Ageha.createSourceStack(
+			parsersDir = File(dir, "parsers"),
+			cookieFile = File(dir, "cookies.json"),
+		)
+		try {
+			assertEquals(
+				downloaded,
+				stack.registry.parsersVersion,
+				"a build that passes the gate with the new bridge must stay the one in use",
+			)
+			assertArrayEquals(
+				installation.bridgeJarFor(bundled).readBytes(),
+				installation.bridgeJarFor(downloaded).readBytes(),
+				"the downloaded build must now carry this release's bridge",
+			)
+			assertInstanceOf(
+				LockVerification.Verified::class.java,
+				installation.verify(downloaded),
+				"the refreshed build must be relocked, or the next launch steps over it",
+			)
+		} finally {
+			runBlocking { stack.close() }
+		}
+	}
+
+	@Test
+	@DisplayName("a downloaded build the current bridge cannot vouch for is stepped over")
+	fun unvouchedDownloadedBuildFallsBack(@TempDir dir: File) {
+		val installation = installationIn(dir)
+		val bundled = BundledParsers.ensureExtracted(installation)
+		val downloaded = downloadedWithStaleBridge(installation, bundled)
+		// A parsers jar the gate cannot load at all, relocked so that the lock check alone would
+		// happily let it through -- which isolates the gate as the thing that has to refuse it.
+		installation.parsersJarFor(downloaded).writeText("not a jar")
+		installation.writeLock(downloaded)
+
+		val stack = Ageha.createSourceStack(
+			parsersDir = File(dir, "parsers"),
+			cookieFile = File(dir, "cookies.json"),
+		)
+		try {
+			assertEquals(
+				bundled,
+				stack.registry.parsersVersion,
+				"a build that fails the gate with the new bridge must give way to the bundled one, " +
+					"not crash the launch",
+			)
+		} finally {
+			runBlocking { stack.close() }
+		}
 	}
 }

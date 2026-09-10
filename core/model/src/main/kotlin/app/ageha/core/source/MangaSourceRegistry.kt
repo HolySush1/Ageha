@@ -35,4 +35,12 @@ interface MangaSourceRegistry {
 
 	/** Identifies the parsers build behind this registry, for diagnostics and the update engine. */
 	val parsersVersion: String
+
+	/**
+	 * Which source handles [url], and the manga it names if it names one. Null when none does.
+	 *
+	 * A body here as well, so the test doubles implementing this interface need not all learn
+	 * about links. The one real implementation overrides it and asks the bridge.
+	 */
+	suspend fun resolveLink(url: String): ResolvedLink? = null
 }

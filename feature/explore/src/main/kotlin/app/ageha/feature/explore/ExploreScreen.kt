@@ -117,6 +117,13 @@ fun SourcePickerScreen(
 	onSetEnabled: (String, Boolean) -> Unit,
 	onEnableDefaults: () -> Unit,
 	modifier: Modifier = Modifier,
+	/**
+	 * Open the Add site dialog: paste a link, find the source that reads it. See `AddSiteDialog`.
+	 *
+	 * Null draws no button, rather than one that opens nothing -- the rule the failure panel's
+	 * remedy buttons taught, the hard way, one screen over.
+	 */
+	onAddSite: (() -> Unit)? = null,
 	searchFocus: FocusRequester = remember { FocusRequester() },
 ) {
 	var filtersOpen by remember { mutableStateOf(false) }
@@ -137,6 +144,7 @@ fun SourcePickerScreen(
 					activeFilters = activeFilters,
 					onToggleFilters = { filtersOpen = !filtersOpen },
 					onEnableDefaults = onEnableDefaults,
+					onAddSite = onAddSite,
 				)
 				TabRow(state, onFilter)
 			}
@@ -224,6 +232,7 @@ private fun SearchRow(
 	activeFilters: Int,
 	onToggleFilters: () -> Unit,
 	onEnableDefaults: () -> Unit,
+	onAddSite: (() -> Unit)?,
 ) {
 	val skin = AgehaTheme.skin
 	Row(
@@ -281,9 +290,41 @@ private fun SearchRow(
 		if (state.defaultsOff > 0) {
 			DefaultSourcesButton(state.defaultsOff, onEnableDefaults)
 		}
+		onAddSite?.let { AddSiteButton(it) }
 		FiltersButton(filtersOpen, activeFilters, onToggleFilters)
 	}
 }
+
+/**
+ * "Add site", beside Filters and dressed like it.
+ *
+ * Outlined, not filled, by this screen's own rule: the one filled control turns sources on, and
+ * this one only opens a question. Nothing changes until the dialog finds a source and someone
+ * chooses to open it -- so it wears the same ghost as the other controls that change nothing.
+ */
+@Composable
+private fun AddSiteButton(onClick: () -> Unit) {
+	val shape = MaterialTheme.shapes.large
+	Row(
+		Modifier
+			.height(FIELD_HEIGHT)
+			.clip(shape)
+			.border(1.dp, AgehaTheme.skin.line, shape)
+			.clickable(role = Role.Button, onClick = onClick)
+			.testTag(ADD_SITE_BUTTON_TAG)
+			.padding(horizontal = AgehaSpacing.lg),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Text(
+			"Add site",
+			style = MaterialTheme.typography.labelMedium,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		)
+	}
+}
+
+/** The Sources screen's Add site button, for tests. */
+const val ADD_SITE_BUTTON_TAG = "add-site-button"
 
 /** The 50dp button beside the field, with the handoff's accent pill counting active filters. */
 @Composable

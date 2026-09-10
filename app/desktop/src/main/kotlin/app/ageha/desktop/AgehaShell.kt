@@ -97,7 +97,10 @@ import app.ageha.feature.downloads.DownloadsScreen
 import app.ageha.feature.explore.SourcePickerScreen
 import app.ageha.core.data.ResumePoint
 import app.ageha.core.designsystem.FailureCopy
+import app.ageha.feature.explore.AddSiteDialog
+import app.ageha.feature.explore.AddSiteState
 import app.ageha.feature.explore.GlobalSearchScreen
+import app.ageha.feature.explore.PARSERS_UPSTREAM_ISSUES
 import app.ageha.feature.explore.GlobalSearchViewModel
 import app.ageha.feature.library.ContinueScreen
 import app.ageha.feature.library.ContinueViewModel
@@ -727,8 +730,33 @@ fun AgehaShell(
 						onShowAdult = exploreViewModel::setShowAdult,
 						onSetEnabled = exploreViewModel::setEnabled,
 						onEnableDefaults = exploreViewModel::enableDefaults,
+						onAddSite = exploreViewModel::openAddSite,
 						searchFocus = searchFocus,
 					)
+					// Rendered here rather than inside the screen, beside the other overlays the
+					// shell owns, so SourcePickerScreen gains one optional button handler instead
+					// of the dialog's seven. Scoped to this branch, so it cannot surface anywhere
+					// the button that opens it does not exist.
+					val addSite by exploreViewModel.addSite.collectAsState()
+					(addSite as? AddSiteState.Open)?.let { open ->
+						AddSiteDialog(
+							state = open,
+							onInput = exploreViewModel::setAddSiteInput,
+							onFind = exploreViewModel::findSite,
+							onOpenSource = {
+								exploreViewModel.acceptFound()?.let { navigator.openSource(it.source.name) }
+							},
+							onOpenManga = {
+								exploreViewModel.acceptFound()?.let { found ->
+									// A manga link whose title vanished between Find and Open still
+									// has a site to go to; landing on nothing would be worse.
+									found.manga?.let(navigator::openManga) ?: navigator.openSource(found.source.name)
+								}
+							},
+							onRequestUpstream = { remedies.openLink(PARSERS_UPSTREAM_ISSUES) },
+							onDismiss = exploreViewModel::closeAddSite,
+						)
+					}
 				}
 
 				is Destination.Browse -> {

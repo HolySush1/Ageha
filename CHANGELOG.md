@@ -4,6 +4,33 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Add a site by pasting its link.** Sources → **Add site** takes a link to a manga site, or to a
+  manga on one, and finds which of Ageha's ~1,360 sources reads it -- mirror domains included,
+  because the matching is upstream's own `LinkResolver` rather than a table kept here. Opening it
+  lands on that source, or straight on the manga for a manga link, and switches the source on.
+  Verified end to end on comix.to: resolves to the Comix source, and with the browser component
+  it searches, lists chapters and loads page images.
+
+  It does not teach Ageha new sites, and says so. Every source is a parser from the
+  kotatsu-parsers-redo project (CLAUDE.md rule 2), and no parser can read an arbitrary site. A
+  link no source handles gets a plain answer and a link to request that site upstream, where a
+  parser would reach every installation with the next parser update.
+- `agehacli resolve <url>`: the same question from a terminal.
+
+### Fixed
+
+- **Downloaded parser builds kept the previous release's bridge.** 0.3.2 refreshed only the
+  bundled build's copy, so anyone who had accepted a parser update still loaded an older bridge --
+  failing as `NoSuchMethodError` inside browser-tier sources, and, with link resolution added,
+  answering "no source reads this site" for sites Ageha does have. At launch a downloaded build is
+  now re-gated against the current bridge and given it, or stepped over for the bundled build if
+  it cannot take it.
+- The CLI told people the browser component "lands in Milestone 8". It points at `--browser`.
+
 ## [0.3.2] - 2026-09-09
 
 ### Added
