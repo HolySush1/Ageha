@@ -23,7 +23,7 @@ package app.ageha.core.model
 object AgehaVersion {
 
 	/** Human-readable, and what a git tag says. Compared numerically by the update check. */
-	const val NAME = "0.3.2"
+	const val NAME = "0.3.3"
 
 	/**
 	 * Monotonic integer, for the two wire formats that demand one.
@@ -32,7 +32,7 @@ object AgehaVersion {
 	 * say — and then being stuck with it the first time a version part exceeds whatever width was
 	 * assumed. It is one number, bumped once per release, next to the one it accompanies.
 	 */
-	const val CODE = 5
+	const val CODE = 6
 
 	/** `owner/repo`, matching `app.vcs-url` in `conveyor.conf`. */
 	const val REPO = "HolySush1/Ageha"
