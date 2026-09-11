@@ -1,5 +1,6 @@
 package app.ageha.core.js
 
+import app.ageha.core.model.BrowserCookie
 import app.ageha.core.model.JsCapability
 
 /**
@@ -71,12 +72,23 @@ interface JsRuntime {
 	): List<InterceptedHttpRequest>
 
 	/**
-	 * Show the user a browser window at [url] so they can clear a challenge or sign in, and
-	 * return once they are done. Cookies land in the shared jar.
+	 * Get a real browser past a check at [url] -- a Cloudflare interstitial, a captcha, a sign-in
+	 * -- showing it to the user when it will not clear on its own, and return the cookies that
+	 * earned it.
 	 *
+	 * The cookies come back rather than being stored here because the browser's cookie store is
+	 * not the HTTP client's (see `BrowserCookie`). The caller hands them to the jar; until it does,
+	 * the check has been passed for the browser alone.
+	 *
+	 * [userAgent] is the one the cookies will be presented with afterwards. Cloudflare binds a
+	 * clearance to the user agent that earned it, so a backend that solved the check as anything
+	 * else would be handing back a cookie the site will refuse.
+	 *
+	 * @return the cookies for [url] once the page is through, or null when it never got there --
+	 *   the user closed the window, the site refused outright, or time ran out.
 	 * @throws JsUnavailableException if [JsCapability.INTERACTIVE_BROWSER] is not in [capabilities].
 	 */
-	suspend fun openInteractive(url: String, userAgent: String?): Boolean
+	suspend fun openInteractive(url: String, userAgent: String?): List<BrowserCookie>?
 
 	/**
 	 * The user-agent this backend really presents, when it drives a real browser.

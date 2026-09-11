@@ -3,27 +3,49 @@ package app.ageha.core.browser
 import app.ageha.core.js.InterceptedHttpRequest
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.js.JsUnavailableException
+import app.ageha.core.js.refuseJsCapability
+import app.ageha.core.model.BrowserCookie
 import app.ageha.core.model.JsCapability
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import org.cef.CefApp
 import org.cef.CefClient
 import org.cef.browser.CefBrowser
+import org.cef.browser.CefDevToolsClient
 import org.cef.browser.CefFrame
-import org.cef.browser.CefMessageRouter
-import org.cef.callback.CefQueryCallback
 import org.cef.handler.CefLifeSpanHandlerAdapter
 import org.cef.handler.CefLoadHandler
 import org.cef.handler.CefLoadHandlerAdapter
-import org.cef.handler.CefMessageRouterHandlerAdapter
 import org.cef.handler.CefRequestHandlerAdapter
 import org.cef.handler.CefResourceRequestHandlerAdapter
 import org.cef.misc.BoolRef
 import org.cef.network.CefRequest
+import java.awt.BorderLayout
 import java.awt.Window
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
+import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.swing.JFrame
 import javax.swing.SwingUtilities
@@ -67,18 +89,19 @@ class JcefJsRuntime(
 	private val lock = Mutex()
 
 	/**
-	 * Everything but [JsCapability.PLAIN_SCRIPT], and only once CEF is actually running.
+	 * Everything but [JsCapability.PLAIN_SCRIPT], once Chromium is installed -- started or not.
 	 *
-	 * Computed on every read rather than stored, because the answer changes mid-session: this is
-	 * what the UI asks before offering a source, and it has to start saying yes the moment an
-	 * install finishes rather than at the next launch.
+	 * "Installed" rather than "running" is the fix for the install that did nothing. This used to
+	 * answer from whether CEF had been initialised *in this process*, and nothing initialised it at
+	 * launch, so from the second session on every browser source was refused while the component
+	 * sat on disk. Chromium is now started on the first call that needs it (see [withBrowser]),
+	 * which also keeps its seconds of startup off the ~1,340 sources that never do.
+	 *
+	 * Computed on every read rather than stored, because the answer changes mid-session: an install
+	 * finishing has to take effect immediately, not at the next launch.
 	 */
 	override val capabilities: Set<JsCapability>
-		get() = if (component.appOrNull() == null) {
-			emptySet()
-		} else {
-			JsCapability.entries.filter { it.requiresBrowser }.toSet()
-		}
+		get() = if (component.appOrNull() != null || component.isInstalledOnDisk()) BROWSER_TIERS else emptySet()
 
 	/**
 	 * Null, deliberately, rather than a hardcoded Chrome string.
@@ -87,7 +110,8 @@ class JcefJsRuntime(
 	 * from the Chromium it was built against, and a literal here would drift from it on every
 	 * dependency bump -- producing exactly the mismatch between claimed and observed browser that
 	 * this field exists to prevent. Callers fall back to a plausible desktop UA, which is what
-	 * they must do anyway while the component is not installed.
+	 * they must do anyway while the component is not installed. [openInteractive] takes the
+	 * caller's user agent instead, for the same reason.
 	 */
 	override val browserUserAgent: String? = null
 
@@ -100,13 +124,30 @@ class JcefJsRuntime(
 	override suspend fun evaluate(script: String): String? =
 		throw JsUnavailableException(JsCapability.PLAIN_SCRIPT)
 
+	/**
+	 * Load the page and keep asking [script] until it has an answer, as Android does.
+	 *
+	 * This is upstream's `WebViewExecutor.evaluateJs`, followed step by step, because parsers are
+	 * written against it and nothing else. Ageha's first version evaluated once, at load end, and
+	 * that was wrong in two ways that each returned nothing from a working page:
+	 *
+	 *  - **Parsers poll.** Their scripts return `null` to mean "not rendered yet, ask again" --
+	 *    ComicK's says so in a comment -- and upstream asks again every second until the timeout.
+	 *    One question at load end catches a single-page app before it has drawn anything.
+	 *  - **The answer is the script's completion value.** `evaluateJavascript` hands back whatever
+	 *    the script's last expression evaluated to, so `(() => {...})();` answers with what the
+	 *    arrow function returns. Ageha pasted scripts into a function body, where that same line
+	 *    evaluates and discards its value, and every IIFE-shaped script answered `null`.
+	 *
+	 * Running out of time answers `null` rather than throwing, as upstream does: parsers treat a
+	 * null as "the page had nothing" and carry on, which is what they are written to do.
+	 */
 	override suspend fun evaluateInPage(
 		baseUrl: String,
 		script: String,
 		timeoutMillis: Long,
-	): String? = withBrowser(JsCapability.PAGE_CONTEXT, baseUrl, timeoutMillis) { session ->
-		session.navigate(pageScript = null)
-		session.evaluate(script)
+	): String? = withBrowser(JsCapability.PAGE_CONTEXT, baseUrl, timeoutMillis + GRACE_MILLIS) { session ->
+		session.evaluateUntilAnswered(script, timeoutMillis)
 	}
 
 	override suspend fun interceptRequests(
@@ -124,22 +165,30 @@ class JcefJsRuntime(
 		// is an ordinary outcome rather than a failure -- the answer is "these are the requests
 		// that happened" -- so the inner wait returns what it has instead of throwing, and this
 		// outer bound exists only to guarantee a wedged browser still gets torn down.
-		timeoutMillis + CAPTURE_GRACE_MILLIS,
+		timeoutMillis + GRACE_MILLIS,
 	) { session ->
 		session.captureUpTo(maxRequests, pageScript, urlPattern, timeoutMillis)
 	}
 
 	/**
-	 * Not built yet, and refusing rather than pretending.
+	 * Get past a check at [url], in a window the user can see if it will not clear on its own.
 	 *
-	 * Everything above runs a browser nobody sees. This one is a browser the *user* drives, which
-	 * means a real window, input routing, and a lifetime tied to a screen rather than to a call --
-	 * a different problem, and the fiddliest part of JCEF. Until it lands, a source that demands
-	 * an interactive challenge gets the same honest refusal it got before the component existed,
-	 * which `SourceFailureMapper` already turns into readable copy.
+	 * Upstream's `tryResolveCaptcha`, adapted: load the page, watch it with upstream's own
+	 * [CF_STATE_JS] until it has shown the real page three polls running, then hand back the
+	 * cookies. Most Cloudflare checks clear by themselves in a real browser within a few seconds,
+	 * so the window starts where no one can see it and comes on screen only once it has been stuck
+	 * for [REVEAL_AFTER_MILLIS] -- by which point the check is one that wants a person, usually a
+	 * box to tick. Closing the window gives up.
 	 */
-	override suspend fun openInteractive(url: String, userAgent: String?): Boolean =
-		throw JsUnavailableException(JsCapability.INTERACTIVE_BROWSER)
+	override suspend fun openInteractive(url: String, userAgent: String?): List<BrowserCookie>? =
+		withBrowser(
+			JsCapability.INTERACTIVE_BROWSER,
+			url,
+			CHECK_TIMEOUT_MILLIS + GRACE_MILLIS,
+			interactive = true,
+		) { session ->
+			session.passCheck(userAgent, CHECK_TIMEOUT_MILLIS)
+		}
 
 	override suspend fun close() {
 		// The CefApp deliberately outlives this object -- see BrowserComponent, which explains why
@@ -150,6 +199,9 @@ class JcefJsRuntime(
 	/**
 	 * Run [block] against a freshly created browser, and destroy it afterwards whatever happens.
 	 *
+	 * Starts Chromium first when it is installed but not yet running -- the normal state for the
+	 * first browser call of every session after the one that installed it.
+	 *
 	 * The `finally` is the half that matters. An undisposed browser keeps a renderer process
 	 * alive, and a parser timing out is exactly the case that would leak one -- so a source that
 	 * fails repeatedly would pile up Chromium processes until the machine ran out of them.
@@ -158,11 +210,15 @@ class JcefJsRuntime(
 		capability: JsCapability,
 		url: String,
 		timeoutMillis: Long,
+		interactive: Boolean = false,
 		block: suspend (BrowserSession) -> T,
 	): T {
-		val app = component.appOrNull() ?: throw JsUnavailableException(capability)
+		// Refused through the recorder when Chromium will not start, so the reason survives a
+		// parser that swallows it. The panel then offers the install, whose own failure notice
+		// carries the reason Chromium would not start.
+		val app = running() ?: refuseJsCapability(capability)
 		return lock.withLock {
-			val session = BrowserSession(app.createClient(), url, viewportWidth, viewportHeight)
+			val session = BrowserSession(app.createClient(), url, viewportWidth, viewportHeight, interactive)
 			try {
 				withTimeout(timeoutMillis) { block(session) }
 			} catch (timeout: TimeoutCancellationException) {
@@ -172,15 +228,101 @@ class JcefJsRuntime(
 			}
 		}
 	}
+
+	private suspend fun running(): CefApp? =
+		component.appOrNull() ?: if (component.start()) component.appOrNull() else null
 }
 
 /**
  * How much longer than the caller's deadline a browser is given before it is killed outright.
  *
- * Only ever reached when something is genuinely stuck: the inner wait already honours the caller's
- * timeout and returns normally at it.
+ * Only ever reached when something is genuinely stuck: the inner waits already honour the caller's
+ * timeout and return normally at it.
  */
-private const val CAPTURE_GRACE_MILLIS = 5_000L
+private const val GRACE_MILLIS = 5_000L
+
+/** How often a page is asked again. Upstream's `WebViewExecutor` figure. */
+private const val POLL_INTERVAL_MILLIS = 1_000L
+
+/** How often a check page is inspected. Upstream's `CHALLENGE_POLL_INTERVAL_MS`. */
+private const val CHECK_POLL_MILLIS = 700L
+
+/**
+ * How many polls in a row a check page must look finished, or refused, before it is believed.
+ *
+ * Upstream's `REQUIRED_STABLE_PASSES`, and for upstream's reason: managed challenges pass through
+ * several stages, some of which look like a finished page for a moment, and taking the first
+ * glimpse destroys the browser before Cloudflare has issued the clearance.
+ */
+private const val STABLE_POLLS = 3
+
+/** How long a check is left to clear by itself before its window is shown to the user. */
+private const val REVEAL_AFTER_MILLIS = 6_000L
+
+/** How long anyone is given to get through a check, window shown or not. */
+private const val CHECK_TIMEOUT_MILLIS = 90_000L
+
+/** How long a DevTools call that should answer at once is waited for. */
+private const val CONTROL_CALL_MILLIS = 5_000L
+
+/**
+ * `-Dageha.browser.trace` prints what the browser tier sees, step by step, to stderr.
+ *
+ * Off by default and cheap when off. It exists because every failure in this tier so far has
+ * looked the same from outside -- a source that returned nothing -- and each one was found only by
+ * watching what the page was actually doing.
+ */
+private val TRACING: Boolean = System.getProperty("ageha.browser.trace") != null
+
+/**
+ * How often, while tracing, the expression in `AGEHA_BROWSER_PROBE` is evaluated in a page being
+ * captured from -- a window onto a page script's progress, which otherwise shows only its result.
+ */
+private const val PROBE_INTERVAL_MILLIS = 2_000L
+
+private fun trace(message: String) {
+	if (TRACING) System.err.println("[browser] $message")
+}
+
+private val BROWSER_TIERS: Set<JsCapability> = JsCapability.entries.filter { it.requiresBrowser }.toSet()
+
+/**
+ * Where a check page stands: `"ok"`, `"error"` or `"wait"`.
+ *
+ * Copied verbatim from upstream Kotatsu-Redo's `CloudFlareDetection.kt` (GPL-3.0, as is Ageha).
+ * Its judgement of what a finished Cloudflare page looks like is tuned against the real thing in
+ * several languages, and a home-grown version would have to relearn each of those cases in
+ * production.
+ */
+private const val CF_STATE_JS = """
+	(function(){
+		try {
+			var href = (document.location && document.location.href) || '';
+			if (href === '' || href === 'about:blank') return 'wait';
+			if (document.readyState !== 'interactive' && document.readyState !== 'complete') return 'wait';
+			var t = (document.title || '').toLowerCase();
+			if (t.indexOf('attention required') !== -1 || t.indexOf('access denied') !== -1) return 'error';
+			if (t.indexOf('just a moment') !== -1 || t.indexOf('un instant') !== -1 ||
+				t.indexOf('einen moment') !== -1 || t.indexOf('un momento') !== -1 ||
+				t.indexOf('один момент') !== -1) return 'wait';
+			var challengeNodes = document.querySelectorAll(
+				'#challenge-running, #challenge-stage, #cf-challenge-running, ' +
+				'.cf-browser-verification, #turnstile-wrapper, #cf-please-wait'
+			);
+			for (var i = 0; i < challengeNodes.length; i++) {
+				var node = challengeNodes[i];
+				var style = window.getComputedStyle(node);
+				if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+				var rect = node.getBoundingClientRect();
+				if (rect.width > 0 && rect.height > 0) return 'wait';
+			}
+			var body = document.body;
+			if (!body) return 'wait';
+			if (body.children.length === 0 && (body.textContent || '').trim().length === 0) return 'wait';
+			return 'ok';
+		} catch (e) { return 'wait'; }
+	})()
+"""
 
 /** A page load or script that did not finish inside the timeout the parser asked for. */
 class BrowserTimeoutException(
@@ -207,6 +349,8 @@ private class BrowserSession(
 	private val url: String,
 	viewportWidth: Int,
 	viewportHeight: Int,
+	/** A check the user may have to pass by hand: a window with a title, that can be shown. */
+	private val interactive: Boolean,
 ) {
 
 	/**
@@ -217,15 +361,27 @@ private class BrowserSession(
 	 * a browser sitting on `about:blank`. Waiting for this is what turns that into a page load.
 	 */
 	private val created = CompletableDeferred<Unit>()
+
+	/**
+	 * Completed when the requested page has started to replace the parking page.
+	 *
+	 * Asking a script anything before this would ask `about:blank`, and a script as ordinary as
+	 * "return the document's HTML" answers there with a perfectly good empty document.
+	 */
+	private val committed = CompletableDeferred<Unit>()
 	private val loaded = CompletableDeferred<Unit>()
 	private val captured = CopyOnWriteArrayList<InterceptedHttpRequest>()
 	private val enough = CompletableDeferred<Unit>()
-	private val result = CompletableDeferred<String?>()
-	private val router: CefMessageRouter = CefMessageRouter.create()
+
+	/** Completed when the user closes an interactive session's window: they have given up. */
+	private val closedByUser = CompletableDeferred<Unit>()
 	private val browser: CefBrowser
 
 	/** The off-screen window Chromium paints into. See the note where it is built. */
 	private val host: JFrame
+
+	/** The site an evaluation is confined to. See [isSameSite]. */
+	private val originalHost: String? = runCatching { URI(url).host }.getOrNull()
 
 	@Volatile
 	private var limit: Int = Int.MAX_VALUE
@@ -237,29 +393,14 @@ private class BrowserSession(
 	@Volatile
 	private var wanted: Regex? = null
 
-	init {
-		// `window.cefQuery` is CEF's own JS-to-Java channel. It is why the injected script needs
-		// no polling and no network round trip: the value arrives here the instant the parser's
-		// promise resolves.
-		router.addHandler(
-			object : CefMessageRouterHandlerAdapter() {
-				override fun onQuery(
-					browser: CefBrowser?,
-					frame: CefFrame?,
-					queryId: Long,
-					request: String?,
-					persistent: Boolean,
-					callback: CefQueryCallback?,
-				): Boolean {
-					result.complete(request)
-					callback?.success("")
-					return true
-				}
-			},
-			true,
-		)
-		client.addMessageRouter(router)
+	/** Cancel main-frame navigations that leave [originalHost]. Evaluations only. */
+	@Volatile
+	private var sameSiteOnly: Boolean = false
 
+	@Volatile
+	private var devTools: CefDevToolsClient? = null
+
+	init {
 		client.addLifeSpanHandler(
 			object : CefLifeSpanHandlerAdapter() {
 				override fun onAfterCreated(browser: CefBrowser?) {
@@ -271,7 +412,13 @@ private class BrowserSession(
 		client.addLoadHandler(
 			object : CefLoadHandlerAdapter() {
 				override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
-					if (frame.isRealMainFrame()) loaded.complete(Unit)
+					if (!frame.isRealMainFrame()) return
+					trace("loaded ($httpStatusCode): ${frame?.url?.take(160)}")
+					loaded.complete(Unit)
+					// Again at load end, as upstream injects on both page-started and page-finished.
+					// Page scripts are written to be idempotent for exactly this, and a payload that
+					// only turns up once the document is complete is caught by this second copy.
+					pageScript?.let { frame?.executeJavaScript(it, url, 0) }
 				}
 
 				override fun onLoadError(
@@ -291,10 +438,11 @@ private class BrowserSession(
 					// order to hand back its result is a cancellation by construction. Both arrive
 					// as ERR_ABORTED on the main frame.
 					if (errorCode == CefLoadHandler.ErrorCode.ERR_ABORTED) return
-					if (frame.isRealMainFrame() && failedUrl == url) {
-						loaded.completeExceptionally(
-							BrowserLoadException(url, "$errorCode: ${errorText.orEmpty()}"),
-						)
+					if (frame?.isMain == true && failedUrl == url) {
+						val failure = BrowserLoadException(url, "$errorCode: ${errorText.orEmpty()}")
+						// Both, so a wait for the page to *start* learns it never will.
+						committed.completeExceptionally(failure)
+						loaded.completeExceptionally(failure)
 					}
 				}
 
@@ -303,11 +451,7 @@ private class BrowserSession(
 					frame: CefFrame?,
 					transitionType: CefRequest.TransitionType?,
 				) {
-					// Injected at load *start*, before the site's own scripts run. A parser's page
-					// script exists to hook something the page is about to do -- wrap `fetch`, stub
-					// a global -- and injecting it after load would be too late for all of them.
-					val script = pageScript ?: return
-					if (frame.isRealMainFrame()) frame?.executeJavaScript(script, url, 0)
+					if (frame.isRealMainFrame()) committed.complete(Unit)
 				}
 			},
 		)
@@ -331,6 +475,7 @@ private class BrowserSession(
 					isRedirect: Boolean,
 				): Boolean {
 					val target = request?.url ?: return false
+					trace("navigate ${if (frame?.isMain == true) "main" else "sub"}: ${target.take(160)}")
 					// Only the caller's own pattern is treated as a signal and stopped. Everything
 					// else is the site doing its job and is allowed through.
 					//
@@ -339,12 +484,15 @@ private class BrowserSession(
 					// modern sources outright. ALLMANGA is a single-page app: it routes itself
 					// after the first load, and blocking that left a page whose bundles had all
 					// downloaded and which then never requested a single thing from its own API.
-					// The symptom was a parser reporting that its data never arrived, which reads
-					// exactly like a dead source and was entirely self-inflicted.
-					val pattern = wanted ?: return false
-					if (!pattern.containsMatchIn(target)) return false
-					record(request)
-					return true
+					val pattern = wanted
+					if (pattern != null && pattern.containsMatchIn(target)) {
+						record(request)
+						return true
+					}
+					// An evaluation stays on the site it was pointed at, as upstream's does. What
+					// leaves it is an ad's pop-under or a redirect to a parked domain, and following
+					// one replaces the page the parser is waiting on with one it knows nothing about.
+					return sameSiteOnly && frame?.isMain == true && !isSameSite(target)
 				}
 
 				override fun getResourceRequestHandler(
@@ -394,22 +542,54 @@ private class BrowserSession(
 		// no stack trace, no navigation followed, and every capture came back empty after the
 		// parser's full 45-second timeout.
 		//
-		// So: undecorated, unfocusable, sized to the viewport, and moved far outside any plausible
-		// desktop. Nothing appears on screen, no taskbar entry is created, and Chromium is
+		// So: sized to the viewport and moved far outside any plausible desktop. A utility window,
+		// so no taskbar entry appears while it is there. Nothing appears on screen, and Chromium is
 		// satisfied that it has somewhere to paint.
-		host = JFrame().apply {
-			isUndecorated = true
-			// Focusable windows steal keystrokes from the application while a source is loading,
-			// which for a browser the user cannot see would be indistinguishable from the app
-			// hanging.
-			focusableWindowState = false
+		host = JFrame(if (interactive) "Checking ${originalHost ?: url} - Ageha" else "").apply {
+			// An interactive session may have to be shown, and a window cannot gain a title bar
+			// once it exists -- so it is decorated from the start and simply kept out of sight.
+			isUndecorated = !interactive
+			// Hidden browsers must not take keystrokes from the application while a source loads,
+			// which for a window the user cannot see would look like the app hanging. A check the
+			// user may have to click through must be able to take them, but not by itself: it is
+			// focused only when it is actually shown.
+			focusableWindowState = interactive
+			isAutoRequestFocus = false
 			type = Window.Type.UTILITY
+			defaultCloseOperation = JFrame.DO_NOTHING_ON_CLOSE
 			setSize(viewportWidth, viewportHeight)
 			setLocation(OFFSCREEN_X, OFFSCREEN_Y)
-			add(browser.uiComponent)
+			contentPane.add(browser.uiComponent, BorderLayout.CENTER)
+			if (interactive) {
+				addWindowListener(
+					object : WindowAdapter() {
+						override fun windowClosing(e: WindowEvent?) {
+							closedByUser.complete(Unit)
+						}
+					},
+				)
+			}
 			isVisible = true
 		}
 		browser.createImmediately()
+	}
+
+	/**
+	 * Wait for the native browser, then make it take the size of its window.
+	 */
+	private suspend fun awaitCreated() {
+		created.await()
+		val fitted = CompletableDeferred<Unit>()
+		SwingUtilities.invokeLater {
+			runCatching {
+				host.setSize(host.width, host.height + 1)
+				host.validate()
+				host.setSize(host.width, host.height - 1)
+				host.validate()
+			}
+			fitted.complete(Unit)
+		}
+		fitted.await()
 	}
 
 	/**
@@ -418,13 +598,24 @@ private class BrowserSession(
 	 * Every session starts on `about:blank` -- see `createBrowser` -- and that blank page fires a
 	 * full set of load events of its own. Without this, the very first `onLoadEnd` resolves the
 	 * load before the real navigation has begun, and the caller is handed the empty result of a
-	 * page it never asked for. That is the same defect as creating the browser on the target url,
-	 * one layer further down, and it produced identical symptoms: an instant return and nothing
-	 * captured.
+	 * page it never asked for.
 	 */
 	private fun CefFrame?.isRealMainFrame(): Boolean {
 		val frame = this ?: return false
 		return frame.isMain && frame.url != BLANK
+	}
+
+	/**
+	 * Whether [target] is on the site this session was opened for.
+	 *
+	 * Upstream's rule exactly -- the target's host *contains* the original -- so that `www.` and
+	 * other subdomains of the same site stay reachable. Anything without a host (`about:`, `data:`)
+	 * is let through, as upstream lets it through.
+	 */
+	private fun isSameSite(target: String): Boolean {
+		val host = runCatching { URI(target).host }.getOrNull() ?: return true
+		val origin = originalHost ?: return true
+		return host.contains(origin, ignoreCase = true)
 	}
 
 	private fun record(request: CefRequest) {
@@ -449,36 +640,216 @@ private class BrowserSession(
 	}
 
 	/**
-	 * Go to the page, with [pageScript] injected at load start, and wait for it to finish.
+	 * Load the page, then ask [script] at load end and every second after, until it answers.
 	 *
-	 * Separate from construction so that everything the load depends on is in place before it
-	 * begins -- see the note on `createBrowser` for what happens when it is not.
+	 * The answer is the script's value JSON-encoded, which the [JsRuntime] contract requires:
+	 * parsers strip the encoding themselves, matching Android's `evaluateJavascript`, and handing
+	 * them a raw string breaks them quietly rather than loudly. Like upstream, `"null"` and blank
+	 * are not answers, and time running out is `null`.
 	 */
-	suspend fun navigate(pageScript: String?) {
-		this.pageScript = pageScript
-		created.await()
+	suspend fun evaluateUntilAnswered(script: String, timeoutMillis: Long): String? {
+		sameSiteOnly = true
+		awaitCreated()
 		browser.loadURL(url)
-		loaded.await()
+		return withTimeoutOrNull(timeoutMillis) {
+			committed.await()
+			var sawLoad = false
+			var answer: String? = null
+			while (answer == null) {
+				// The first ask is at load end or a second after the page started, whichever comes
+				// first -- upstream asks on both -- and every second from then on.
+				if (sawLoad) {
+					delay(POLL_INTERVAL_MILLIS)
+				} else {
+					sawLoad = withTimeoutOrNull(POLL_INTERVAL_MILLIS) { loaded.await() } != null
+				}
+				answer = evaluateOnce(script)?.toString()?.takeUnless { it == "null" || it.isBlank() }
+			}
+			answer
+		}
 	}
 
 	/**
-	 * Evaluate [script] in the loaded page and await whatever it returns, promise included.
+	 * Load the check page and wait until it is through, then read the cookies it earned.
 	 *
-	 * The value comes back JSON-encoded, which the [JsRuntime] contract requires: parsers run a
-	 * local `decodeWebViewString()` over it to match Android's `WebView.evaluateJavascript`, and
-	 * handing them a raw string breaks them quietly rather than loudly.
+	 * [userAgent] is applied before the page loads, because the clearance Cloudflare issues is only
+	 * honoured for the user agent that earned it -- and the cookies are about to be presented by
+	 * OkHttp, not by this browser.
 	 */
-	suspend fun evaluate(script: String): String? {
-		browser.mainFrame?.executeJavaScript(bridge(script), url, 0)
-		return result.await()
+	suspend fun passCheck(userAgent: String?, timeoutMillis: Long): List<BrowserCookie>? {
+		awaitCreated()
+		val started = System.currentTimeMillis()
+		userAgent?.let { presentAs(it) }
+		trace("loading $url for a check")
+		browser.loadURL(url)
+		var shown = false
+		return withTimeoutOrNull(timeoutMillis) {
+			var passes = 0
+			var refusals = 0
+			while (passes < STABLE_POLLS && refusals < STABLE_POLLS && !closedByUser.isCompleted) {
+				delay(CHECK_POLL_MILLIS)
+				val state = (evaluateOnce(CF_STATE_JS, CONTROL_CALL_MILLIS) as? JsonPrimitive)?.contentOrNull
+				trace("check state at ${System.currentTimeMillis() - started}ms: $state")
+				when (state) {
+					"ok" -> {
+						passes++
+						refusals = 0
+					}
+
+					// An outright refusal ("Access denied") does not change by waiting, so it ends
+					// the attempt instead of holding a window open for the full timeout.
+					"error" -> {
+						refusals++
+						passes = 0
+					}
+
+					else -> {
+						passes = 0
+						refusals = 0
+					}
+				}
+				if (!shown && System.currentTimeMillis() - started >= REVEAL_AFTER_MILLIS) {
+					reveal()
+					shown = true
+				}
+			}
+			if (passes >= STABLE_POLLS) cookies() else null
+		}
+	}
+
+	/**
+	 * Evaluate [expression] in the page as a script, and return its value.
+	 *
+	 * Through the DevTools protocol's `Runtime.evaluate`, not `executeJavaScript`, which cannot
+	 * return anything. Two things make it the right channel rather than just a working one:
+	 *
+	 *  - It evaluates a *script* and returns its completion value, which is exactly what
+	 *    `evaluateJavascript` does on Android. Getting the same from `executeJavaScript` would mean
+	 *    `eval`, and the pages that most need a browser are the ones behind a Content Security
+	 *    Policy that forbids it -- comick.live's check page sends one.
+	 *  - `awaitPromise` lets a script that answers with a promise be awaited rather than handed
+	 *    back as `{}`.
+	 *
+	 * Null when the script threw, produced `undefined`, or could not be returned by value -- the
+	 * cases Android reports as `"null"` -- and when the page had no context to evaluate in, which
+	 * mid-navigation it briefly does not.
+	 */
+	private suspend fun evaluateOnce(expression: String, timeoutMillis: Long? = null): JsonElement? {
+		val reply = devToolsCall(
+			"Runtime.evaluate",
+			buildJsonObject {
+				put("expression", expression)
+				put("returnByValue", true)
+				put("awaitPromise", true)
+			},
+			timeoutMillis,
+		) ?: return null
+		val root = runCatching { Json.parseToJsonElement(reply).jsonObject }.getOrNull() ?: return null
+		if (root.containsKey("exceptionDetails")) return null
+		return runCatching { root["result"]?.jsonObject?.get("value") }.getOrNull()
+	}
+
+	/**
+	 * Present [userAgent], with the client hints a real Chrome of that version would send.
+	 *
+	 * Only when it differs from Chromium's own, because an override without hints is itself a tell:
+	 * a browser that claims one version in its user agent and another in `Sec-CH-UA` is what bot
+	 * detection is built to notice.
+	 */
+	private suspend fun presentAs(userAgent: String) {
+		// Asked of the page rather than through `Browser.getVersion`, which a page's DevTools
+		// session in CEF accepts and never answers -- it held the first version of this for the
+		// whole check timeout.
+		val own = (evaluateOnce("navigator.userAgent", CONTROL_CALL_MILLIS) as? JsonPrimitive)?.contentOrNull
+		trace("own user agent: $own; presenting: $userAgent")
+		if (own == userAgent) return
+		val major = CHROME_MAJOR.find(userAgent)?.groupValues?.get(1)
+		devToolsCall(
+			"Emulation.setUserAgentOverride",
+			buildJsonObject {
+				put("userAgent", userAgent)
+				if (major != null && userAgent.contains("Windows")) {
+					putJsonObject("userAgentMetadata") {
+						putJsonArray("brands") {
+							addJsonObject { put("brand", "Chromium"); put("version", major) }
+							addJsonObject { put("brand", "Google Chrome"); put("version", major) }
+							addJsonObject { put("brand", "Not.A/Brand"); put("version", "99") }
+						}
+						put("fullVersion", "$major.0.0.0")
+						put("platform", "Windows")
+						put("platformVersion", "10.0.0")
+						put("architecture", "x86")
+						put("bitness", "64")
+						put("model", "")
+						put("mobile", false)
+					}
+				}
+			},
+			timeoutMillis = CONTROL_CALL_MILLIS,
+		)
+	}
+
+	/** Bring an interactive session's window to where the user can see it, and give it focus. */
+	private fun reveal() {
+		SwingUtilities.invokeLater {
+			host.setLocationRelativeTo(null)
+			host.toFront()
+			host.requestFocus()
+		}
+	}
+
+	/**
+	 * The cookies Chromium would send to [url] -- HttpOnly ones included, since `cf_clearance` is
+	 * one -- or an empty list when it has none.
+	 *
+	 * Read through DevTools' `Network.getCookies`, the same channel every evaluation already uses.
+	 * `CefCookieManager.visitUrlCookies` was the obvious API and it reported nothing at all for a
+	 * page that had just been handed its clearance -- a passed check with no cookie to show for it,
+	 * which from OkHttp's side is indistinguishable from a failed one.
+	 */
+	private suspend fun cookies(): List<BrowserCookie> {
+		val reply = devToolsCall(
+			"Network.getCookies",
+			buildJsonObject { putJsonArray("urls") { add(JsonPrimitive(url)) } },
+			timeoutMillis = CONTROL_CALL_MILLIS,
+		) ?: return emptyList<BrowserCookie>().also { trace("no answer to Network.getCookies") }
+		val cookies = runCatching {
+			Json.parseToJsonElement(reply).jsonObject["cookies"]?.jsonArray.orEmpty().mapNotNull { element ->
+				element.jsonObject.toBrowserCookie()
+			}
+		}.getOrDefault(emptyList())
+		trace("cookies for $url: ${cookies.joinToString { it.name }}")
+		return cookies
+	}
+
+	/**
+	 * One DevTools method call, answered or null.
+	 *
+	 * [timeoutMillis] bounds calls that should answer at once. It is not applied to evaluations by
+	 * default, because a parser's script is allowed to answer with a promise that takes a while --
+	 * those are bounded by the caller's own deadline instead.
+	 */
+	private suspend fun devToolsCall(
+		method: String,
+		params: JsonObject,
+		timeoutMillis: Long? = null,
+	): String? = try {
+		val tools = devTools ?: browser.devToolsClient.also { devTools = it }
+		val reply = tools.executeDevToolsMethod(method, params.toString())
+		if (timeoutMillis == null) reply.await() else withTimeoutOrNull(timeoutMillis) { reply.await() }
+	} catch (e: CancellationException) {
+		throw e
+	} catch (e: Exception) {
+		// DevTools answers "no context" with an error rather than a value while a page is between
+		// documents. That is "not yet", the same as a script answering null.
+		null
 	}
 
 	/**
 	 * Load the page with [pageScript] injected, and return the requests it made.
 	 *
-	 * Returns as soon as [max] requests have been seen, and otherwise when the page finishes
-	 * loading -- whichever happens first. Always waiting for the load to end would spend a
-	 * parser's entire timeout on a page whose interesting request fired in the first 200ms.
+	 * Returns as soon as [max] requests have been seen, and otherwise when the caller's timeout
+	 * runs out -- see the note inside on why load end is not a completion signal.
 	 */
 	suspend fun captureUpTo(
 		max: Int,
@@ -489,7 +860,22 @@ private class BrowserSession(
 		limit = max.takeIf { it > 0 } ?: Int.MAX_VALUE
 		this.pageScript = pageScript
 		wanted = urlPattern
-		created.await()
+		awaitCreated()
+		// Registered to run in every new document *before any of the site's own scripts*, which is
+		// what a page script needs: it exists to hook something the page is about to do -- ALLMANGA's
+		// wraps `JSON.parse` to catch the chapter list the site decrypts -- and a hook installed a
+		// moment late misses the one call it was there for. `executeJavaScript` at load start was
+		// that moment late: it is asynchronous, and it raced the site's bundles. Android gets the
+		// same guarantee from document-start injection; this is Chromium's own form of it, and it
+		// also covers the real page arriving after a challenge or a redirect, which is a new document.
+		pageScript?.let { script ->
+			val registered = devToolsCall(
+				"Page.addScriptToEvaluateOnNewDocument",
+				buildJsonObject { put("source", script) },
+				timeoutMillis = CONTROL_CALL_MILLIS,
+			)
+			trace("page script registered for new documents: ${registered ?: "no answer"}")
+		}
 		browser.loadURL(url)
 		// Waits for the requests, not for the page.
 		//
@@ -503,16 +889,27 @@ private class BrowserSession(
 		// So the only completion signal is having what was asked for, bounded by the caller's
 		// timeout. Running out of it returns the matches so far rather than throwing: a parser
 		// that asked for one request and got none will say so far better than this class can.
-		withTimeoutOrNull(timeoutMillis) { enough.await() }
+		withTimeoutOrNull(timeoutMillis) {
+			val probe = if (TRACING) System.getenv("AGEHA_BROWSER_PROBE") else null
+			if (probe == null) {
+				enough.await()
+			} else {
+				// Diagnostic only: what the page looks like while the capture waits.
+				while (!enough.isCompleted) {
+					delay(PROBE_INTERVAL_MILLIS)
+					trace("probe: ${evaluateOnce(probe, CONTROL_CALL_MILLIS)}")
+				}
+			}
+		}
 		return captured.toList()
 	}
 
 	fun dispose() {
+		runCatching { devTools?.close() }
 		runCatching { browser.close(true) }
 		// Disposed on the AWT thread, because Swing requires it and because a window leaked here
 		// is a window leaked per page load.
 		runCatching { SwingUtilities.invokeLater { host.dispose() } }
-		runCatching { router.dispose() }
 		runCatching { client.dispose() }
 	}
 
@@ -531,25 +928,31 @@ private class BrowserSession(
 		const val OFFSCREEN_X = -32000
 		const val OFFSCREEN_Y = -32000
 
-		/**
-		 * Wraps a parser's script so its result -- a value or a promise -- comes back through
-		 * `cefQuery` JSON-encoded, and so a throw arrives as a null rather than as silence.
-		 *
-		 * Silence is the failure worth designing against: without the catch, a script that threw
-		 * would leave the caller waiting out its whole timeout for a value that was never coming,
-		 * and report a slow site rather than a broken script.
-		 */
-		fun bridge(script: String): String = buildString {
-			append("(function(){")
-			append("function send(v){try{window.cefQuery({request:JSON.stringify(v===undefined?null:v),")
-			append("onSuccess:function(){},onFailure:function(){}});}catch(e){}}")
-			append("try{var out=(function(){")
-			append(script)
-			append("})();")
-			append("if(out&&typeof out.then==='function'){out.then(send,function(){send(null);});}")
-			append("else{send(out);}")
-			append("}catch(e){send(null);}")
-			append("})();")
-		}
+		val CHROME_MAJOR = Regex("""Chrome/(\d+)""")
 	}
+}
+
+/**
+ * A DevTools `Network.Cookie`, as Ageha's own type.
+ *
+ * DevTools gives expiry in *seconds* since the epoch, as a double, with `session: true` (and an
+ * expiry of -1) for a session cookie. Taking the seconds for milliseconds would expire every
+ * clearance in 1970 and the jar would throw it away on the next read.
+ */
+private fun JsonObject.toBrowserCookie(): BrowserCookie? {
+	fun text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull
+	fun flag(key: String) = (this[key] as? JsonPrimitive)?.booleanOrNull == true
+	val name = text("name") ?: return null
+	val domain = text("domain") ?: return null
+	val session = flag("session")
+	val expiresSeconds = (this["expires"] as? JsonPrimitive)?.doubleOrNull
+	return BrowserCookie(
+		name = name,
+		value = text("value").orEmpty(),
+		domain = domain,
+		path = text("path") ?: "/",
+		secure = flag("secure"),
+		httpOnly = flag("httpOnly"),
+		expiresAtMillis = if (session || expiresSeconds == null || expiresSeconds <= 0) null else (expiresSeconds * 1000).toLong(),
+	)
 }

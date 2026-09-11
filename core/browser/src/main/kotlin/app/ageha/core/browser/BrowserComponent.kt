@@ -102,6 +102,25 @@ class BrowserComponent(
 	fun isInstalledOnDisk(): Boolean = File(installDir, "install.lock").isFile
 
 	/**
+	 * Start Chromium from what is already on disk, downloading nothing.
+	 *
+	 * Installing happens once; starting has to happen on every launch, and for two releases
+	 * nothing did it. [state] begins each session `Absent` and [install] was the only path that
+	 * initialised CEF, so after the first restart every browser source went back to "needs the
+	 * browser component" while 200MB of Chromium sat unused on disk. Pressing Install then started
+	 * it for that session only. That is how the button came to look as if it did nothing.
+	 *
+	 * Returns false, without touching the network, when nothing has been installed. Whether to
+	 * spend 200MB of someone's bandwidth is their call, made through [install], never a side effect
+	 * of a source asking.
+	 */
+	suspend fun start(): Boolean {
+		if (app != null) return true
+		if (!isInstalledOnDisk()) return false
+		return install() is BrowserInstallState.Ready
+	}
+
+	/**
 	 * Download and unpack the natives if needed, then initialise CEF.
 	 *
 	 * Safe to call when already installed: jcefmaven skips straight to initialising, so this
@@ -146,6 +165,20 @@ class BrowserComponent(
 				// both, Chromium has no way to compose a frame at all, and pages that wait on
 				// paint or on an intersection observer never finish loading.
 				builder.addJcefArgs("--disable-gpu")
+				// Keep pages in a window nobody can see running at full speed.
+				//
+				// Every browser here lives in a window parked off-screen (see JcefJsRuntime), and on
+				// Windows Chromium works out for itself that such a window is occluded. It then
+				// treats the page as hidden: animation frames stop, timers are throttled to once a
+				// minute, and the renderer is deprioritised. A site that renders its results from a
+				// requestAnimationFrame or a timer -- which is most single-page apps -- never gets
+				// round to it, and the parser waiting for them sees an empty page until it times out.
+				builder.addJcefArgs(
+					"--disable-features=CalculateNativeWinOcclusion",
+					"--disable-backgrounding-occluded-windows",
+					"--disable-renderer-backgrounding",
+					"--disable-background-timer-throttling",
+				)
 				builder.build()
 			}.fold(
 				onSuccess = { built ->

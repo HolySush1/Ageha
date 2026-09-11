@@ -1,5 +1,6 @@
 package app.ageha.core.js
 
+import app.ageha.core.model.BrowserCookie
 import app.ageha.core.model.JsCapability
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -128,7 +129,7 @@ class RhinoJsRuntime(
 		urlPattern: Regex?,
 	): List<InterceptedHttpRequest> = refuseJsCapability(JsCapability.REQUEST_INTERCEPTION)
 
-	override suspend fun openInteractive(url: String, userAgent: String?): Boolean =
+	override suspend fun openInteractive(url: String, userAgent: String?): List<BrowserCookie>? =
 		refuseJsCapability(JsCapability.INTERACTIVE_BROWSER)
 
 	override suspend fun close() = Unit

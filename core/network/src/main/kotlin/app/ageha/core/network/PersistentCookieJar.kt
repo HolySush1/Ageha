@@ -1,10 +1,12 @@
 package app.ageha.core.network
 
+import app.ageha.core.model.BrowserCookie
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
@@ -71,6 +73,24 @@ class PersistentCookieJar(
 			dirty = true
 		}
 		persist()
+	}
+
+	/**
+	 * Take the cookies a real browser earned at [url], so that OkHttp's next request carries them.
+	 *
+	 * This is what makes clearing a Cloudflare check in the browser component worth anything.
+	 * Android gets it for free, because the WebView's cookie store *is* the app's; Ageha's browser
+	 * keeps its own, and a `cf_clearance` left there lets the browser in and nothing else. A check
+	 * passed and then thrown away looks, from the user's side, exactly like one that failed.
+	 *
+	 * @return how many were accepted -- a cookie Chromium reports with an unusable domain is dropped
+	 *   rather than guessed at.
+	 */
+	fun saveBrowserCookies(url: String, cookies: List<BrowserCookie>): Int {
+		val target = url.toHttpUrlOrNull() ?: return 0
+		val converted = cookies.mapNotNull { it.toOkHttpCookie() }
+		saveFromResponse(target, converted)
+		return converted.size
 	}
 
 	/** Drop everything for one host. Used by "clear cookies for this source" in settings. */
@@ -184,3 +204,25 @@ class PersistentCookieJar(
 		val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 	}
 }
+
+/**
+ * Chromium's view of a cookie, rebuilt as OkHttp's, or null when it cannot be.
+ *
+ * Built field by field for the reason [PersistentCookieJar] gives for its own storage: the string
+ * form loses the host-only flag. Chromium marks a cookie that covers subdomains with a leading dot
+ * and a host-only one without, and that is the only place the difference is recorded.
+ */
+private fun BrowserCookie.toOkHttpCookie(): Cookie? = runCatching {
+	Cookie.Builder()
+		.name(name)
+		.value(value)
+		.path(path.ifEmpty { "/" })
+		.apply {
+			val bare = domain.removePrefix(".")
+			if (domain.startsWith(".")) domain(bare) else hostOnlyDomain(bare)
+			expiresAtMillis?.let(::expiresAt)
+			if (secure) secure()
+			if (httpOnly) httpOnly()
+		}
+		.build()
+}.getOrNull()

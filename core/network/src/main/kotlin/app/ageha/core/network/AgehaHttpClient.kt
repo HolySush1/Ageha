@@ -8,9 +8,21 @@ import java.util.concurrent.TimeUnit
 
 /** User-agent strings. Kept here so the whole app tells one story about what it is. */
 object UserAgents {
+	/**
+	 * Exactly the user agent the bundled Chromium presents, down to the zeroed minor versions.
+	 *
+	 * Not a cosmetic choice. A Cloudflare clearance is bound to the user agent that earned it, and
+	 * the browser component earns clearances that OkHttp then presents -- so the two must say the
+	 * same thing. The obvious alternative, telling Chromium to claim whatever this string says,
+	 * was tried and fails: an engine claiming an older version than it is fails Cloudflare's check
+	 * outright, where the same engine telling the truth passes it in two seconds.
+	 *
+	 * `BrowserUserAgentTest` fails the build when a JCEF bump moves Chromium's major version away
+	 * from the one written here.
+	 */
 	const val CHROME_DESKTOP =
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-			"Chrome/135.0.0.0 Safari/537.36"
+			"Chrome/146.0.0.0 Safari/537.36"
 	const val FIREFOX_DESKTOP =
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
 }

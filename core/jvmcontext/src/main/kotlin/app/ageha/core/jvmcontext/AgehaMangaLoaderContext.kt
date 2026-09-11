@@ -80,6 +80,11 @@ class AgehaMangaLoaderContext(
 		// Added last so it runs innermost of the application interceptors: the parser should see
 		// headers the common interceptors have already set.
 		.addInterceptor(ParserDispatchInterceptor(parserForSource))
+		// Inside even the parser's interceptor, so it sees the request as it will actually go out
+		// -- the user agent is what a clearance is bound to -- and answers before the parser can
+		// swallow a Cloudflare page and take a fallback that returns nothing. A no-op without the
+		// browser component.
+		.addInterceptor(CloudflareClearanceInterceptor(jsRuntime, cookieJar))
 		.build()
 
 	override fun getConfig(source: MangaSource): MangaSourceConfig = configStore.configFor(source)

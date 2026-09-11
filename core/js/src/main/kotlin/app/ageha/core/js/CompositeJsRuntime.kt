@@ -1,5 +1,6 @@
 package app.ageha.core.js
 
+import app.ageha.core.model.BrowserCookie
 import app.ageha.core.model.JsCapability
 
 /**
@@ -57,7 +58,7 @@ class CompositeJsRuntime(
 	): List<InterceptedHttpRequest> = pick(JsCapability.REQUEST_INTERCEPTION)
 		.interceptRequests(pageUrl, filterScript, pageScript, maxRequests, timeoutMillis, urlPattern)
 
-	override suspend fun openInteractive(url: String, userAgent: String?): Boolean =
+	override suspend fun openInteractive(url: String, userAgent: String?): List<BrowserCookie>? =
 		pick(JsCapability.INTERACTIVE_BROWSER).openInteractive(url, userAgent)
 
 	override suspend fun close() {
@@ -66,15 +67,19 @@ class CompositeJsRuntime(
 	}
 
 	/**
-	 * The cheapest backend that claims [capability], or a throw that names what is missing.
+	 * The cheapest backend that claims [capability], or a refusal that names what is missing.
 	 *
-	 * Throwing here rather than delegating blindly is what keeps the failure legible: the
+	 * Refusing here rather than delegating blindly is what keeps the failure legible: the
 	 * exception carries the capability, which is what `SourceFailureMapper` turns into "this
 	 * source needs the browser component" rather than a stack trace about a null page.
+	 *
+	 * Through [refuseJsCapability], not a bare throw. Parsers routinely swallow what their anti-bot
+	 * fallback throws, and a refusal that leaves no breadcrumb is then reported as whatever vaguer
+	 * thing the parser tripped over next -- the one failure this layer exists to name correctly.
 	 */
-	private fun pick(capability: JsCapability): JsRuntime = when {
+	private suspend fun pick(capability: JsCapability): JsRuntime = when {
 		capability in script.capabilities -> script
 		browser != null && capability in browser.capabilities -> browser
-		else -> throw JsUnavailableException(capability)
+		else -> refuseJsCapability(capability)
 	}
 }
