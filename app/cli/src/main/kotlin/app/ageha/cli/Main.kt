@@ -20,6 +20,7 @@ import app.ageha.core.database.AgehaDatabaseFactory
 import app.ageha.core.network.AgehaHttpClient
 import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
+import app.ageha.core.network.UserAgents
 import app.ageha.core.browser.BrowserComponent
 import app.ageha.core.browser.BrowserInstallState
 import app.ageha.core.browser.JcefJsRuntime
@@ -115,7 +116,7 @@ fun main(args: Array<String>) {
 			when (val command = args[0]) {
 				"sources" -> listSources(stack, args.getOrNull(1))
 				"defaults" -> defaults(stack, apply = args.contains("--apply"))
-				"parsers" -> parsers(stack, args.getOrNull(1))
+				"parsers" -> parsers(stack, args.getOrNull(1), args.getOrNull(2))
 				"import" -> requireArgs(args, 2) { importBackup(args[1]) }
 				"export" -> exportBackup(args.getOrNull(1))
 				"sync" -> sync(stack, args.getOrNull(1), args.drop(2))
@@ -146,6 +147,40 @@ fun main(args: Array<String>) {
 					)
 					println("" + captured.size + " request(s) matched")
 					captured.forEach { println("  " + it.method + " " + it.url) }
+				}
+
+				// The page tier exactly as a parser meets it: load the url, ask the script until it
+				// answers or time runs out, print the JSON-encoded answer. For checking what a
+				// source's script sees without going through the source.
+				"eval" -> requireArgs(args, 3) {
+					val answer = jsRuntimeForCli.evaluateInPage(
+						baseUrl = args[1],
+						script = args[2],
+						timeoutMillis = flag(args, "--timeout")?.toLongOrNull() ?: 20_000L,
+					)
+					when {
+						answer == null -> println("(no answer)")
+						answer.length > EVAL_PRINT_LIMIT ->
+							println(answer.take(EVAL_PRINT_LIMIT) + "… (" + answer.length + " chars)")
+						else -> println(answer)
+					}
+				}
+
+				// A check passed in the browser, as the Cloudflare interceptor passes it: which cookies
+				// came back, and how long it took. Names only -- a clearance cookie is a credential.
+				"clear" -> requireArgs(args, 2) {
+					val started = System.currentTimeMillis()
+					val cookies = jsRuntimeForCli.openInteractive(
+						url = args[1],
+						userAgent = flag(args, "--ua") ?: UserAgents.CHROME_DESKTOP,
+					)
+					val took = (System.currentTimeMillis() - started) / 1000
+					if (cookies == null) {
+						println("Not cleared after " + took + "s")
+					} else {
+						println("Cleared in " + took + "s, " + cookies.size + " cookie(s):")
+						cookies.forEach { println("  " + it.name + "  domain=" + it.domain) }
+					}
 				}
 
 				"resolve" -> requireArgs(args, 2) { resolve(stack, args[1]) }
@@ -445,7 +480,7 @@ private suspend fun sync(stack: SourceStack, command: String?, args: List<String
  * to see which build is live, what was refused and why, is what makes that legible rather than
  * mysterious.
  */
-private suspend fun parsers(stack: SourceStack, command: String?) {
+private suspend fun parsers(stack: SourceStack, command: String?, version: String?) {
 	val installation = stack.installation
 	val state = installation.read()
 
@@ -503,9 +538,22 @@ private suspend fun parsers(stack: SourceStack, command: String?) {
 			}
 		}
 
+		// What 'check' tells you to run once a build has passed the gate. It was suggested for a
+		// release before it existed, which left a downloaded, verified build with no way in.
+		"activate" -> {
+			val target = version ?: error("Say which build: parsers activate <version>")
+			val cookieJar = PersistentCookieJar(File(AgehaPaths.dataDir, "update-cookies.json"))
+			ParsersUpdateService(
+				httpClient = AgehaHttpClient.build(cookieJar),
+				installation = installation,
+				cookieJar = cookieJar,
+			).activate(target)
+			println("Activated " + target + ". It loads on next start.")
+		}
+
 		else -> {
 			System.err.println("Unknown parsers command: " + command)
-			System.err.println("Try: parsers [status|check|rollback]")
+			System.err.println("Try: parsers [status|check|activate <version>|rollback]")
 			exitProcess(2)
 		}
 	}
@@ -729,6 +777,13 @@ private fun printUsage() {
 		  pages   <SOURCE> <query> [n]  page image urls for the first chapter of result n
 		  smoke   [--sample n] [--seed s]
 		                                exercise a random sample of sources end to end
+		  resolve <link>                which source reads a pasted site or manga link
+		  intercept <url> <pattern> --browser
+		                                requests a page makes that match the pattern
+		  eval    <url> <script> --browser [--timeout ms]
+		                                a script's answer in the loaded page, as a parser gets it
+		  clear   <url> --browser [--ua agent]
+		                                pass a Cloudflare check in the browser; lists cookie names
 
 		SOURCE is a source name from 'sources', for example MANGADEX.
 
@@ -736,6 +791,9 @@ private fun printUsage() {
 		""".trimIndent(),
 	)
 }
+
+/** How much of an `eval` answer is printed. A page's whole HTML is tens of thousands of characters. */
+private const val EVAL_PRINT_LIMIT = 2_000
 
 /** Reads `--name value` from the argument list. The CLI has too few options to need a parser. */
 private fun flag(args: Array<String>, name: String): String? {
