@@ -33,8 +33,11 @@ import app.ageha.core.parsers.ParsersUpdateService
 import app.ageha.core.parsers.UpdateOutcome
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.parsers.SourceStack
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.io.File
 import java.io.PrintStream
 import kotlin.system.exitProcess
@@ -661,13 +664,30 @@ private suspend fun pages(
 
 	// Resolving a page url is a second request on many sources. A handful is enough to prove the
 	// chain end to end without hammering the host.
-	pages.take(3).forEach { page ->
-		println("  " + client.pageUrl(page))
-	}
+	val urls = pages.take(3).map { client.pageUrl(it) }
+	urls.forEach { println("  " + it) }
 	if (pages.size > 3) {
 		println("  ... " + (pages.size - 3) + " more")
 	}
+
+	// The last link of the chain: the image itself, fetched as the reader fetches it -- same client,
+	// same per-source headers. A url that resolves perfectly and an image the CDN refuses print
+	// identically until something asks for the bytes. ComicK's did exactly that: three good urls
+	// here, and a 403 on every one in the reader.
+	urls.firstOrNull()?.let { println("First image: " + fetchImage(stack, client, it)) }
 }
+
+private suspend fun fetchImage(stack: SourceStack, client: MangaSourceClient, url: String): String =
+	withContext(Dispatchers.IO) {
+		val request = Request.Builder()
+			.url(url)
+			.apply { client.imageRequestHeaders().forEach { (name, value) -> header(name, value) } }
+			.build()
+		stack.httpClient.newCall(request).execute().use { response ->
+			"HTTP " + response.code + ", " + (response.header("Content-Type") ?: "no content type") +
+				", " + response.body.bytes().size + " bytes"
+		}
+	}
 
 /**
  * Search, then take the [index]-th result.
