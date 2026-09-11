@@ -4,6 +4,52 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.4] - 2026-09-11
+
+### Fixed
+
+- **"Install browser component" now actually fixes the source that asked for it.** Several faults
+  added up to an install that looked fake:
+  - Chromium was only ever started by the install button, so after any restart every browser
+    source said it needed the component again. It now starts on first use from what is on disk.
+  - The failure panel never retried after the install finished. It does now, and pressing the
+    button again retries instead of doing nothing.
+  - The hidden browser rendered pages in a **14x14 pixel** viewport. Sites saw a bot, single-page
+    apps never loaded their data, and Cloudflare checks never cleared. Pages now get 1280x800.
+  - Page scripts ran once, at load end, and lost their value when written as `(() => {...})()`.
+    They now run the way Android's WebView runs them: asked again every second until they answer,
+    returning the script's own value.
+  - Chromium is told not to treat the hidden window as occluded or backgrounded, so it does not
+    throttle the timers and animation frames pages render with.
+- **Cloudflare checks are passed in the browser component, and the cookie is kept.** A request
+  that hits Cloudflare's interstitial is cleared in Chromium -- hidden, and shown only if it wants a
+  click -- and retried with the clearance, as the Android app does. This is what makes ComicK search
+  work: verified on comick.live, where search now returns results in a few seconds.
+- **Ageha's user agent matches the bundled Chromium (Chrome 146).** A clearance only counts for the
+  user agent that earned it, and a Chromium claiming an older Chrome fails the check outright. A
+  test now fails the build if a JCEF update moves them apart.
+- **Parser updates could not be downloaded at all.** The updater fetched `androidx.collection` from
+  Maven Central, where AndroidX has never been published, so every check ended in "could not fetch
+  collection-jvm". It now uses Google's repository for AndroidX, and upstream fixes reach installed
+  copies again.
+- **The first parser update could not be rolled back.** The bundled build was not recorded as the
+  build to return to. It is now.
+- "Pass the check" replaces "Open in browser" for Cloudflare, captcha and sign-in failures. A check
+  passed in your own browser leaves its cookies there, where Ageha never sees them.
+- A missing browser tier is reported even when the parser swallows the refusal.
+
+### Added
+
+- `agehacli eval`, `agehacli clear`, and `agehacli parsers activate` -- the last one was already
+  suggested by `parsers check`, and did not exist. `-Dageha.browser.trace` prints what the browser
+  tier sees.
+
+### Known issues
+
+- ALLMANGA still fails. Its site now loads its chapter pages in Ageha's browser (the reader shows
+  them), but it decrypts them through a new path that neither the bundled parser nor upstream's
+  latest one hooks. The fix belongs upstream.
+
 ## [0.3.3] - 2026-09-11
 
 ### Added
