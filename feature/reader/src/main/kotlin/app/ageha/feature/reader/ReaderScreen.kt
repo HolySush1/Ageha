@@ -89,6 +89,11 @@ import app.ageha.core.model.PageScale
 import app.ageha.core.model.ReaderMode
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
+import coil3.network.HttpException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.URI
+import java.net.UnknownHostException
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -618,20 +623,31 @@ private fun ReaderPageImage(
 ) {
 	val failure = page.failure
 	val url = page.resolvedUrl
+	// What Coil reported when the image itself would not load. Keyed on the url, so a page whose url
+	// changes is judged afresh rather than inheriting the old one's failure.
+	var imageFailure by remember(url) { mutableStateOf<Throwable?>(null) }
+	val failedImage = imageFailure
 	when {
-		failure != null -> Box(modifier, Alignment.Center) {
-			// One page failing is not the chapter failing. A placeholder keeps the page count and
-			// the reading position honest rather than silently renumbering everything after it.
-			Text(
-				"Page ${page.index + 1} could not be loaded",
-				style = AgehaTextStyles.metadata,
-				color = chrome.subdued,
-			)
-		}
+		// The url never resolved. That belongs to the view model, so there is no retry from here.
+		failure != null -> PageFailure(page.index, reason = null, chrome = chrome, modifier = modifier)
 
 		url == null -> Box(modifier, Alignment.Center) {
 			CircularProgressIndicator(Modifier.size(28.dp), color = chrome.subdued)
 		}
+
+		// The url resolved and the image did not arrive. This used to draw nothing at all -- no
+		// spinner, no message -- so a source whose every image was refused opened to an empty
+		// reader that looked like it had never loaded. ComicK's did exactly that.
+		failedImage != null -> PageFailure(
+			page.index,
+			reason = imageFailureReason(failedImage, url),
+			chrome = chrome,
+			modifier = modifier,
+			// Clearing the failure is the whole retry: it brings the image below back into
+			// composition, which is a new request. Coil caches only images that loaded, so there
+			// is no stored failure for it to find.
+			onRetry = { imageFailure = null },
+		)
 
 		else -> AsyncImage(
 			// `readerRequest`, not `request`: pages are decoded at the source's own resolution, so
@@ -651,8 +667,65 @@ private fun ReaderPageImage(
 			// difference nobody can see on a page that is already being drawn near 1:1.
 			filterQuality = FilterQuality.Medium,
 			onSuccess = { onDecoded(it.result.image.width, it.result.image.height) },
+			onError = { imageFailure = it.result.throwable },
 			modifier = modifier,
 		)
+	}
+}
+
+/**
+ * A page that did not arrive, drawn in the space the page would have taken.
+ *
+ * One page failing is not the chapter failing. A placeholder keeps the page count and the reading
+ * position honest rather than silently renumbering everything after it.
+ */
+@Composable
+private fun PageFailure(
+	index: Int,
+	reason: String?,
+	chrome: ReaderChrome,
+	modifier: Modifier,
+	onRetry: (() -> Unit)? = null,
+) {
+	Column(
+		modifier,
+		verticalArrangement = Arrangement.spacedBy(AgehaSpacing.sm, Alignment.CenterVertically),
+		horizontalAlignment = Alignment.CenterHorizontally,
+	) {
+		Text("Page ${index + 1} could not be loaded", style = AgehaTextStyles.metadata, color = chrome.subdued)
+		if (reason != null) {
+			Text(reason, style = AgehaTextStyles.monoMeta, color = chrome.subdued)
+		}
+		if (onRetry != null) {
+			// The chapter bar's button, not a Material one: a `TextButton` inks itself in the theme's
+			// primary, and nothing brand-coloured is allowed on this screen.
+			ChapterButton(
+				label = "Retry",
+				chrome = chrome,
+				enabled = true,
+				accessibleName = "Retry page ${index + 1}",
+				tag = PAGE_RETRY_TAG,
+				glyph = ChapterGlyph.NONE,
+				onClick = onRetry,
+			)
+		}
+	}
+}
+
+/**
+ * Why a page image failed, in a line short enough to sit under the page, or null for no line.
+ *
+ * The status code and the host are the two facts that make a failure diagnosable at a glance. "HTTP
+ * 403 from cdn1.comicknew.pictures" says a server refused, and which one; without it, a refused image
+ * and a slow one look the same.
+ */
+internal fun imageFailureReason(error: Throwable, url: String): String? {
+	val host = runCatching { URI(url).host }.getOrNull()
+	return when (error) {
+		is HttpException -> "HTTP " + error.response.code + (host?.let { " from $it" } ?: "")
+		is SocketTimeoutException -> "Timed out" + (host?.let { " waiting for $it" } ?: "")
+		is UnknownHostException, is ConnectException -> "Could not reach " + (host ?: "the server")
+		else -> null
 	}
 }
 
@@ -1084,8 +1157,8 @@ private fun StatusDivider(chrome: ReaderChrome) {
 	Box(Modifier.width(1.dp).height(22.dp).background(chrome.subdued.copy(alpha = 0.35f)))
 }
 
-/** Which mark a [ChapterButton] draws beside its label. */
-private enum class ChapterGlyph { CARET, LIST }
+/** Which mark a [ChapterButton] draws beside its label. [NONE] is for a page's Retry. */
+private enum class ChapterGlyph { CARET, LIST, NONE }
 
 /**
  * One chapter-navigation button.
@@ -1398,3 +1471,4 @@ const val PAGE_COUNTER_TAG = "page-counter"
 const val PREV_CHAPTER_TAG = "reader-prev-chapter"
 const val NEXT_CHAPTER_TAG = "reader-next-chapter"
 const val CHAPTER_LIST_TAG = "reader-chapter-list"
+const val PAGE_RETRY_TAG = "reader-page-retry"
