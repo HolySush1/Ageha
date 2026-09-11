@@ -96,12 +96,14 @@ class ParsersInstallation(
 	 */
 	fun activate(version: String) {
 		val current = read()
-		write(
-			current.copy(
-				activeVersion = version,
-				lastKnownGoodVersion = current.activeVersion ?: current.lastKnownGoodVersion,
-			),
-		)
+		// With nothing explicitly active, what is running is the bundled build -- it is what every
+		// installation starts on, and it is always extracted. Recording null here instead left the
+		// first update anyone took with no way back: rollback found no target and did nothing. That
+		// went unnoticed only because no update could be downloaded at the time.
+		val outgoing = current.activeVersion
+			?: current.lastKnownGoodVersion
+			?: BundledParsers.VERSION.takeIf { it != version }
+		write(current.copy(activeVersion = version, lastKnownGoodVersion = outgoing))
 	}
 
 	/**

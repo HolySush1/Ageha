@@ -120,6 +120,44 @@ class ParsersUpdateServiceTest {
 		assertEquals(BundledParsers.VERSION, state.lastKnownGoodVersion)
 	}
 
+	/**
+	 * The first update a fresh installation takes. Nothing has been activated explicitly -- the
+	 * bundled build runs by default -- and the test above hides that by activating it first. Without
+	 * this, the first update anyone took could not be rolled back.
+	 */
+	@Test
+	@DisplayName("a fresh installation's first update can be rolled back to the bundled build")
+	fun firstUpdateRollsBackToBundled(@TempDir dir: File) {
+		val (service, installation) = service(dir)
+		val newer = "0000000009"
+		installation.directoryFor(BundledParsers.VERSION).copyRecursively(installation.directoryFor(newer))
+
+		service.activate(newer)
+
+		assertEquals(BundledParsers.VERSION, installation.rollBack())
+		assertEquals(BundledParsers.VERSION, installation.read().activeVersion)
+	}
+
+	/**
+	 * The mistake that kept every upstream fix out of installed copies: AndroidX looked for on Maven
+	 * Central, where it has never been published. The live test below could not catch it -- it
+	 * rightly accepts a failed check as one of the answers a given day can produce.
+	 */
+	@Test
+	@DisplayName("AndroidX is fetched from Google's repository, everything else from Maven Central")
+	fun dependenciesComeFromTheRepositoryThatHasThem() {
+		val collection = mavenUrls("androidx.collection", "collection-jvm", "1.5.0")
+		assertTrue(collection.first().startsWith("https://dl.google.com/android/maven2/androidx/collection/"), collection.first())
+		assertTrue(collection.first().endsWith("/collection-jvm/1.5.0/collection-jvm-1.5.0.jar"), collection.first())
+
+		val json = mavenUrls("org.json", "json", "20240303")
+		assertTrue(json.first().startsWith("https://repo1.maven.org/maven2/org/json/json/"), json.first())
+
+		// Both are always offered, so a library moving between repositories costs a retry, not an update.
+		assertEquals(2, collection.size)
+		assertEquals(2, json.size)
+	}
+
 	@Test
 	@Tag("network")
 	@DisplayName("resolves the real upstream HEAD and reports a usable outcome")

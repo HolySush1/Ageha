@@ -87,9 +87,7 @@ class ParsersUpdateService(
 
 			val libs = File(staging, ParsersInstallation.LIBS_DIR).apply { mkdirs() }
 			for (dependency in readChildDependencies(version)) {
-				val failure = runCatching {
-					download(dependency.url, File(libs, dependency.fileName), dependency.url + ".sha1")
-				}.exceptionOrNull()
+				val failure = fetchFromAnyRepository(dependency, File(libs, dependency.fileName))
 				if (failure != null) {
 					return@withContext UpdateOutcome.CheckFailed(
 						"could not fetch " + dependency.fileName + ": " + failure.message,
@@ -283,15 +281,27 @@ class ParsersUpdateService(
 		"https://jitpack.io/com/github/" + REPO + "/" + version + "/" +
 			ARTIFACT + "-" + version + "." + extension
 
+	/**
+	 * Fetch [dependency] from the first repository that has it, or say why none did.
+	 *
+	 * Tried in turn rather than from one fixed repository, because the parsers' dependencies do not
+	 * all live in one. See [mavenUrls].
+	 */
+	private fun fetchFromAnyRepository(dependency: RemoteArtifact, target: File): Throwable? {
+		var last: Throwable? = null
+		for (url in dependency.urls) {
+			last = runCatching { download(url, target, "$url.sha1") }.exceptionOrNull() ?: return null
+		}
+		return last
+	}
+
 	private data class RemoteArtifact(
 		val group: String,
 		val artifact: String,
 		val version: String,
 	) {
 		val fileName get() = artifact + "-" + version + ".jar"
-		val url: String
-			get() = "https://repo1.maven.org/maven2/" + group.replace('.', '/') + "/" +
-				artifact + "/" + version + "/" + fileName
+		val urls: List<String> get() = mavenUrls(group, artifact, version)
 	}
 
 	private companion object {
@@ -317,4 +327,27 @@ class ParsersUpdateService(
 		const val MAX_POLL_INTERVAL_MILLIS = 30_000L
 		const val MAX_POLLS = 12
 	}
+}
+
+private const val MAVEN_CENTRAL = "https://repo1.maven.org/maven2/"
+private const val GOOGLE_MAVEN = "https://dl.google.com/android/maven2/"
+
+/**
+ * Where a parsers dependency can be downloaded from, most likely repository first.
+ *
+ * AndroidX is published to Google's repository and nowhere else, and the parsers library depends
+ * on `androidx.collection`. Fetching everything from Maven Central -- which is what this did --
+ * answered 404 for that jar, so the update check ended in "could not fetch collection-jvm" and no
+ * upstream fix could reach an installed Ageha: ALLMANGA's rewritten parser among them.
+ * The live test that should have caught it accepts a failed check as a legitimate answer, which on
+ * a given day it is; the repository choice is therefore pinned by a test of its own.
+ *
+ * Both repositories are always listed, so a library that moves between them costs a 404 and a
+ * retry rather than an update.
+ */
+internal fun mavenUrls(group: String, artifact: String, version: String): List<String> {
+	val path = group.replace('.', '/') + "/" + artifact + "/" + version + "/" + artifact + "-" + version + ".jar"
+	val google = group == "androidx" || group.startsWith("androidx.") || group.startsWith("com.google.android")
+	val order = if (google) listOf(GOOGLE_MAVEN, MAVEN_CENTRAL) else listOf(MAVEN_CENTRAL, GOOGLE_MAVEN)
+	return order.map { it + path }
 }
