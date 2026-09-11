@@ -9,9 +9,11 @@ import app.ageha.core.model.AgehaPage
 import app.ageha.core.model.AgehaSortOrder
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.model.SourceFailure
+import app.ageha.core.network.HttpHeaders
 import app.ageha.core.source.MangaSourceClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Headers
 import org.koitharu.kotatsu.parsers.MangaParser
 import org.koitharu.kotatsu.parsers.model.ContentRating
 import org.koitharu.kotatsu.parsers.model.Manga
@@ -20,6 +22,7 @@ import org.koitharu.kotatsu.parsers.model.MangaPage
 import org.koitharu.kotatsu.parsers.model.MangaState
 import org.koitharu.kotatsu.parsers.model.MangaTag
 import org.koitharu.kotatsu.parsers.model.RATING_UNKNOWN
+import java.net.IDN
 
 /**
  * One source, seen through Ageha's types.
@@ -124,8 +127,10 @@ internal class ParserMangaSourceClient(
 		}
 	}
 
-	override fun imageRequestHeaders(): Map<String, String> =
-		parser.getRequestHeaders().toMultimap().mapValues { (_, values) -> values.first() }
+	override fun imageRequestHeaders(): Map<String, String> {
+		val p = parser
+		return imageHeaders(p.getRequestHeaders(), p.domain)
+	}
 
 	private suspend fun ensureTagsLoaded(parser: MangaParser) {
 		if (knownTags.isEmpty()) {
@@ -182,6 +187,36 @@ internal class ParserMangaSourceClient(
 			source = parser.source,
 		)
 }
+
+/**
+ * The headers an image request needs: the parser's own, plus a `Referer` naming the *source*.
+ *
+ * The Referer has to be the source's domain, not the image's host. The Android app fills it in
+ * exactly this way -- its `CommonHeadersInterceptor` merges the parser's headers, then adds
+ * `https://<domain>/` if they carry no Referer -- and a browser does the same from the page the
+ * image sits on. Leaving it to `:core:network`'s interceptor, which sees only the request, gave a
+ * CDN its own hostname as the Referer, and a CDN that serves images only to its own site refuses
+ * that exactly as it refuses no Referer at all. ComicK's does: every page came back as a Cloudflare
+ * 403 and the reader showed nothing.
+ *
+ * A parser that sets its own Referer keeps it; it knows something about its site that this does not.
+ */
+internal fun imageHeaders(parserHeaders: Headers, domain: String): Map<String, String> {
+	val headers = parserHeaders.toMultimap().mapValuesTo(LinkedHashMap()) { (_, values) -> values.first() }
+	if (headers.keys.none { it.equals(HttpHeaders.REFERER, ignoreCase = true) }) {
+		sourceReferer(domain)?.let { headers[HttpHeaders.REFERER] = it }
+	}
+	return headers
+}
+
+/**
+ * `https://<domain>/`, in ASCII. OkHttp rejects a header value outside it, and a source's domain
+ * can be internationalised. Nothing rather than a malformed Referer if the domain will not convert.
+ */
+private fun sourceReferer(domain: String): String? =
+	runCatching { IDN.toASCII(domain) }.getOrNull()
+		?.takeIf { it.isNotBlank() }
+		?.let { "https://$it/" }
 
 /**
  * A small synchronised LRU. Not worth a dependency, and the access pattern here is trivial:
