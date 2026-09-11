@@ -3,7 +3,6 @@ package app.ageha.core.jvmcontext
 import app.ageha.core.js.JsAttemptRecorder
 import app.ageha.core.js.JsUnavailableException
 import app.ageha.core.model.BrowserActionRequiredException
-import app.ageha.core.model.JsCapability
 import app.ageha.core.model.SourceFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -68,14 +67,15 @@ private fun classify(
 		return SourceFailure.MissingJsRuntime(sourceName, (it as JsUnavailableException).capability, error)
 	}
 
-	// 3. The parser asked for a human with a browser.
+	// 3. The parser asked for a human with a browser -- a Cloudflare page, a captcha, a sign-in.
+	//
+	// All of them are a challenge at a url, because the remedy is the same: open that url in the
+	// browser component, let the person through, keep the cookies. This used to report the
+	// non-Cloudflare kind as a missing browser component, which offered an install -- and once the
+	// component was installed, offered it again, because installing never was what the site wanted.
 	unwrap(error) { it is BrowserActionRequiredException }?.let {
 		val e = it as BrowserActionRequiredException
-		return if (e.isCloudflare) {
-			SourceFailure.ChallengeRequired(sourceName, e.url, error)
-		} else {
-			SourceFailure.MissingJsRuntime(sourceName, JsCapability.INTERACTIVE_BROWSER, error)
-		}
+		return SourceFailure.ChallengeRequired(sourceName, e.url, error)
 	}
 
 	// 4. Parser-library exceptions, which are the well-behaved case.

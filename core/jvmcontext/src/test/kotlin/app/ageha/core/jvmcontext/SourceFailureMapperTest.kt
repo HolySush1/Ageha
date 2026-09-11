@@ -92,18 +92,24 @@ class SourceFailureMapperTest {
 		assertEquals("https://example.org/", challenge.url)
 	}
 
+	/**
+	 * A sign-in or captcha is a check at a url, like a Cloudflare page -- not a missing component.
+	 *
+	 * Reported as a missing browser component, it offered an install; with the component installed,
+	 * it offered the install again, because an install was never what the site asked for. The url
+	 * is what the remedy needs: it is where the browser window has to open.
+	 */
 	@Test
-	@DisplayName("a non-Cloudflare browser hand-off asks for the browser component")
-	fun interactiveBrowserIsAMissingRuntime() = runTest {
+	@DisplayName("a non-Cloudflare browser hand-off is a check to pass at its url")
+	fun interactiveBrowserIsAChallenge() = runTest {
 		val failure = assertThrows<SourceFailure> {
 			runSourceCall(source) {
 				throw BrowserActionRequiredException(source, "https://example.org/login", isCloudflare = false)
 			}
 		}
 
-		val missing = assertInstanceOf(SourceFailure.MissingJsRuntime::class.java, failure)
-		assertEquals(JsCapability.INTERACTIVE_BROWSER, missing.capability)
-		assertTrue(missing.capability.requiresBrowser)
+		val challenge = assertInstanceOf(SourceFailure.ChallengeRequired::class.java, failure)
+		assertEquals("https://example.org/login", challenge.url)
 	}
 
 	@Test

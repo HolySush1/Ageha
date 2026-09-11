@@ -39,8 +39,18 @@ data class FailureCopy(
 		/** Install the optional browser component. */
 		INSTALL_BROWSER,
 
-		/** Open the source in a real browser so the user can clear a challenge themselves. */
+		/** Open the source in the user's own browser. */
 		OPEN_IN_BROWSER,
+
+		/**
+		 * Open the page in Ageha's browser window so the user can get past a check -- a Cloudflare
+		 * page, a captcha, a sign-in -- and keep the cookies that earns.
+		 *
+		 * Not [OPEN_IN_BROWSER], which is what these used to offer: a check passed in the user's
+		 * own browser leaves its cookies there, where Ageha never sees them, so the source fails
+		 * exactly as before and the button looks as if it did nothing.
+		 */
+		CLEAR_CHECK,
 
 		/** Sign in to the source. */
 		SIGN_IN,
@@ -103,17 +113,19 @@ fun describe(failure: SourceFailure): FailureCopy = when (failure) {
 	is SourceFailure.Blocked -> FailureCopy(
 		headline = "${failure.sourceName} refused the request",
 		detail = "The site answered with HTTP ${failure.statusCode}. This is usually bot " +
-			"protection rather than an outage -- opening it in a browser once often clears it.",
+			"protection rather than an outage. Ageha can open the site in its own browser window " +
+			"so you can get past it, and tries again once you are through.",
 		canRetry = false,
-		remedy = FailureCopy.Remedy.OPEN_IN_BROWSER,
+		remedy = FailureCopy.Remedy.CLEAR_CHECK,
 	)
 
 	is SourceFailure.ChallengeRequired -> FailureCopy(
-		headline = "${failure.sourceName} wants a challenge solved",
-		detail = "The site is showing an anti-bot interstitial. Opening it in a browser and " +
-			"passing the check will let Ageha through afterwards.",
+		headline = "${failure.sourceName} wants a check passed",
+		detail = "The site is showing an anti-bot page, a captcha or a sign-in that only a real " +
+			"browser can get past. Ageha opens it in its own browser window; the window closes by " +
+			"itself once you are through, and the source is tried again.",
 		canRetry = false,
-		remedy = FailureCopy.Remedy.OPEN_IN_BROWSER,
+		remedy = FailureCopy.Remedy.CLEAR_CHECK,
 	)
 
 	is SourceFailure.AuthRequired -> FailureCopy(
@@ -246,6 +258,7 @@ fun SourceFailureNotice(
 private fun remedyLabel(remedy: FailureCopy.Remedy): String = when (remedy) {
 	FailureCopy.Remedy.INSTALL_BROWSER -> "Install browser component"
 	FailureCopy.Remedy.OPEN_IN_BROWSER -> "Open in browser"
+	FailureCopy.Remedy.CLEAR_CHECK -> "Pass the check"
 	FailureCopy.Remedy.SIGN_IN -> "Sign in"
 	FailureCopy.Remedy.REPORT -> "Report this"
 }

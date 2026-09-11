@@ -247,7 +247,13 @@ fun AgehaShell(
 	// shell rather than one per screen: "Install browser component" must mean the same thing, and
 	// run the same single install, whether it is pressed from browse, details or the reader.
 	val remedies = remember(application) {
-		Remedies(browser = application.browser, notices = application.notices, scope = scope)
+		Remedies(
+			browser = application.browser,
+			jsRuntime = application.jsRuntime,
+			cookieJar = application.sourceStack.cookieJar,
+			notices = application.notices,
+			scope = scope,
+		)
 	}
 	// Read once here and passed down, so that every failure panel on screen relabels its button
 	// together while one shared download runs.
@@ -777,7 +783,14 @@ fun AgehaShell(
 							onFindElsewhere = { manga ->
 								navigator.searchAllSources(manga.title, subject = manga.title)
 							},
-							onRemedy = { remedies.handle(it, state.manga.firstOrNull()?.publicUrl) },
+							onRemedy = {
+								remedies.handle(
+									it,
+									state.manga.firstOrNull()?.publicUrl,
+									failure = state.failure,
+									retry = browseViewModel::retry,
+								)
+							},
 							remedyProgress = remedyProgress,
 							searchFocus = searchFocus,
 						)
@@ -872,7 +885,14 @@ fun AgehaShell(
 						onHideChrome = { readerViewModel.setChromeVisible(false) },
 						preloadPages = preferences.preloadPages,
 						imageLoader = application.imageLoader,
-						onRemedy = { remedies.handle(it, destination.manga.publicUrl) },
+						onRemedy = {
+							remedies.handle(
+								it,
+								destination.manga.publicUrl,
+								failure = state.failure,
+								retry = readerViewModel::retry,
+							)
+						},
 						remedyProgress = remedyProgress,
 					)
 				}
@@ -921,7 +941,12 @@ fun AgehaShell(
 								navigator.searchAllSources(title, subject = title)
 							},
 							onRemedy = {
-								remedies.handle(it, state.manga?.publicUrl ?: destination.manga.publicUrl)
+								remedies.handle(
+									it,
+									state.manga?.publicUrl ?: destination.manga.publicUrl,
+									failure = state.failure,
+									retry = detailsViewModel::retry,
+								)
 							},
 							remedyProgress = remedyProgress,
 						)
