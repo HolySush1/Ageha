@@ -28,7 +28,7 @@ subprojects {
 	apply(plugin = "org.jetbrains.kotlin.jvm")
 
 	group = "app.ageha"
-	version = "0.3.4"
+	version = "0.3.5"
 
 	extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>("kotlin") {
 		jvmToolchain(21)

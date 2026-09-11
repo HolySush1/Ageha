@@ -4,6 +4,32 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.5] - 2026-09-11
+
+### Fixed
+
+- **ComicK chapters opened to an empty reader.** Every page image was refused. ComicK serves its
+  pages from a separate CDN that answers only to a `Referer` naming the site, `https://comick.live/`,
+  and Ageha sent the CDN's own address instead -- which Cloudflare blocks exactly as it blocks no
+  Referer at all. Image requests now carry `https://<source domain>/` whenever the parser sets no
+  Referer of its own, which is what the Android app sends. Not specific to ComicK: it applies to
+  covers, pages and downloads for every source whose parser leaves the Referer unset.
+- **A page that will not load says so, and can be retried.** It used to draw nothing at all -- no
+  spinner, no message -- which is why a source with every image refused looked like it had never
+  loaded. The page's space now says it failed and why (the status and the server, such as
+  "HTTP 403 from cdn1.comicknew.pictures", or a timeout or an unreachable host), with a Retry
+  button that asks for the image again.
+
+### Changed
+
+- `agehacli pages` fetches the first page image the way the reader does and prints the answer. It
+  used to stop at the url, which is why it reported ComicK healthy while the reader showed nothing.
+
+### Known issues
+
+- A page whose *address* could not be worked out -- a rarer failure than its image not loading, on
+  sources that need a request per page to find the image -- still shows its message with no Retry.
+
 ## [0.3.4] - 2026-09-11
 
 ### Fixed
