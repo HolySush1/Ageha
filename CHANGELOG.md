@@ -4,6 +4,65 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.8] - 2026-09-13
+
+### Fixed
+
+- **"This source failed unexpectedly. Send report" was hiding the commonest failure there is.**
+  240 of the bundled parsers read their answers through `org.json`, and Ageha had no case for a JSON
+  error at all -- it extends `Exception` rather than `IOException`, so it fell past every branch of
+  the classifier into the catch-all. Any source that renamed a field, or answered an API call with
+  an HTML error page instead of JSON, produced that screen. Both halves of it were wrong: the
+  failure is entirely expected, and there was nothing on your side to report. It now reads
+  **"returned something unexpected"**, which says the site changed shape and a parsers update is
+  what fixes it. A chapter number that will not parse out of scraped text is reported the same way.
+- **A failure Ageha genuinely cannot classify now names itself.** The panel used to say "No further
+  detail was available" whenever the underlying error carried no message, which is the one case
+  where you most need something to go on.
+- **A page image that would not load often said nothing at all.** The line under it was only written
+  for three recognised failures and left blank for everything else -- so a refused image, a corrupt
+  one and a format this build cannot read were indistinguishable, and so was a bug report about
+  them. Every failure now gets a line: the status and the server, a timeout, an unreachable host,
+  or failing those the error's own name. It also reads the *cause chain*, since Coil wraps what the
+  network threw, so a buried `HTTP 403` was being missed entirely.
+- **The Retry button on a failed page could not change anything.** It cleared a flag and rebuilt an
+  identical request, so a failure that was not transient came straight back in milliseconds -- and a
+  truncated body cached under a `200` would have failed for ever. Retries are now counted, bypass
+  both caches on read, and carry their own cache key.
+- **A rate-limited page was given up on immediately.** A `429` carrying no `Retry-After` was treated
+  as permanent, and that is the commonest shape of it: a host with a *concurrency* cap rather than a
+  quota has nothing to put in that header. ComicK's CDN serves ten simultaneous requests and refuses
+  the rest that way, so a reader opening a chapter lost every page past the tenth to a limit that had
+  already cleared by the time it was told. Measured on a sixteen-page chapter: **10 of 16 pages
+  before, 16 of 16 after.** One refusal now also slows the whole host briefly, so the rest of the
+  chapter does not arrive at the same closed door.
+- **Page images now ask for what the Android app asks for.** Its page requests carry
+  `Accept: image/webp,image/png;q=0.9,image/jpeg,*/*;q=0.8` and Ageha sent no `Accept` header at
+  all. A CDN is entitled to vary its answer on that, and several serve WebP only when asked.
+- **A bot check is no longer attempted with an identity that cannot be true.** Several parsers
+  hard-code a desktop User-Agent -- one ships `X11; Linux x86_64 ... Chrome/114` -- and 0.3.7 began
+  honouring those, correctly, for ordinary requests. Presented to a *challenge* it is fatal: the
+  platform, the browser's own version report and the graphics renderer all say Windows Chromium 146,
+  and that contradiction is precisely the signature anti-bot checks look for, so the check fails and
+  reloads for ever. An agent that disagrees with the engine is realigned before the check, and
+  whichever agent earned the clearance is then used for every request to that host -- a clearance is
+  bound to the identity that earned it. This mirrors the Android app's own fix.
+- **"Clear cookies for this source" left some behind** -- it matched the domain exactly, so a site
+  whose sign-in lives on `www.` and whose clearance lives on the bare domain kept half its cookies.
+
+### Changed
+
+- Page images are throttled at the same interval as everything else again. 0.3.7 lowered it to a
+  fifth on the argument that a reader legitimately wants twenty images at once; nothing had
+  established that was safe, and the cost of being wrong lands on the person reading.
+- Cookies reach disk at most every two seconds rather than on every response that sets one. A
+  forty-page chapter on a site that re-issues a cookie per request meant forty full rewrites of the
+  jar, each on the thread waiting for an image.
+- `agehacli` gained the three commands that found most of the above: `browse <SOURCE>` (a source's
+  own front page, the screen the app opens on, which was previously impossible to test),
+  `chapter <SOURCE> <query>` (every page image at once, as the reader fetches them, which is what
+  exposed the `429`), and `--browser-lazy` (start Chromium on first use, the way the app does).
+
 ## [0.3.7] - 2026-09-12
 
 ### Fixed
