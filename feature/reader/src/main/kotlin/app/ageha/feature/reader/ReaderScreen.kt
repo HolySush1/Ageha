@@ -626,6 +626,12 @@ private fun ReaderPageImage(
 	// What Coil reported when the image itself would not load. Keyed on the url, so a page whose url
 	// changes is judged afresh rather than inheriting the old one's failure.
 	var imageFailure by remember(url) { mutableStateOf<Throwable?>(null) }
+	// Counted, not just cleared. Clearing the failure alone brings the same request back into
+	// composition, and for a failure that is not transient -- a 403, a body that will not decode --
+	// that fails again in milliseconds and reads as a button that does nothing. The count makes
+	// each attempt a distinct request that bypasses the caches, so a retry can actually differ
+	// from the attempt before it.
+	var retryAttempt by remember(url) { mutableStateOf(0) }
 	val failedImage = imageFailure
 	when {
 		// The url never resolved. That belongs to the view model, so there is no retry from here.
@@ -643,17 +649,17 @@ private fun ReaderPageImage(
 			reason = imageFailureReason(failedImage, url),
 			chrome = chrome,
 			modifier = modifier,
-			// Clearing the failure is the whole retry: it brings the image below back into
-			// composition, which is a new request. Coil caches only images that loaded, so there
-			// is no stored failure for it to find.
-			onRetry = { imageFailure = null },
+			onRetry = {
+				retryAttempt++
+				imageFailure = null
+			},
 		)
 
 		else -> AsyncImage(
 			// `readerRequest`, not `request`: pages are decoded at the source's own resolution, so
 			// that zooming reveals detail instead of magnifying a viewport-sized raster. See
 			// `AgehaImages.readerRequest` for why the default does the wrong thing here.
-			model = AgehaImages.readerRequest(url, headers),
+			model = AgehaImages.readerRequest(url, headers, retryAttempt),
 			contentDescription = "Page ${page.index + 1}",
 			contentScale = contentScale,
 			// The other half of that fix, and `Medium` rather than `High` for a measured reason.
@@ -719,15 +725,45 @@ private fun PageFailure(
  * 403 from cdn1.comicknew.pictures" says a server refused, and which one; without it, a refused image
  * and a slow one look the same.
  */
-internal fun imageFailureReason(error: Throwable, url: String): String? {
+internal fun imageFailureReason(error: Throwable, url: String): String {
 	val host = runCatching { URI(url).host }.getOrNull()
-	return when (error) {
-		is HttpException -> "HTTP " + error.response.code + (host?.let { " from $it" } ?: "")
-		is SocketTimeoutException -> "Timed out" + (host?.let { " waiting for $it" } ?: "")
-		is UnknownHostException, is ConnectException -> "Could not reach " + (host ?: "the server")
-		else -> null
+	// Every branch answers. This used to end in `else -> null`, and null draws no line at all --
+	// so a page whose failure was not one of the three recognised kinds showed "Page 40 could not
+	// be loaded" and nothing else, above a Retry that would fail the same way every time. That is
+	// the one state where a reader cannot tell a refused image from a corrupt one from a codec
+	// this build cannot read, and it is the state a bug report arrives in.
+	val cause = generateSequence(error) { if (it.cause === it) null else it.cause }
+		.take(MAX_CAUSE_DEPTH)
+	return when {
+		cause.any { it is HttpException } -> {
+			val status = cause.filterIsInstance<HttpException>().first().response.code
+			"HTTP " + status + (host?.let { " from $it" } ?: "")
+		}
+
+		cause.any { it is SocketTimeoutException } ->
+			"Timed out" + (host?.let { " waiting for $it" } ?: "")
+
+		cause.any { it is UnknownHostException || it is ConnectException } ->
+			"Could not reach " + (host ?: "the server")
+
+		else -> {
+			// Everything else, named rather than hidden. Coil 3.4 has no decode exception of its
+			// own, so a page that downloaded but would not decode -- an error page served with an
+			// image content type, a format Skia does not read, or a page still scrambled because
+			// its parser never got to descramble it -- arrives here as whatever the decoder threw.
+			// Its class and message are exactly what makes those three tellable apart.
+			val named = error::class.simpleName ?: "Failed"
+			val detail = error.message?.takeIf { it.isNotBlank() && it.length <= MAX_DETAIL_CHARS }
+			if (detail != null) named + ": " + detail else named
+		}
 	}
 }
+
+/** A cause chain is followed this far. Deep enough for Coil wrapping OkHttp wrapping a socket. */
+private const val MAX_CAUSE_DEPTH = 8
+
+/** Long enough for a real message, short enough to sit on one line under a page. */
+private const val MAX_DETAIL_CHARS = 120
 
 /**
  * The image half of "Preload next pages".

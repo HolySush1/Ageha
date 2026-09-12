@@ -128,10 +128,35 @@ object AgehaImages {
 	 * change. Covers deliberately keep [request]: a grid of hundreds of full-resolution decodes
 	 * would be pure waste, and nobody zooms a cover.
 	 */
-	fun readerRequest(url: String, headers: Map<String, String>): ImageRequest =
+	fun readerRequest(
+		url: String,
+		headers: Map<String, String>,
+		/**
+		 * How many times the reader has been asked to try this page again.
+		 *
+		 * Two jobs, and neither is cosmetic. It makes the request unequal to the one that failed,
+		 * so Coil treats a retry as new work rather than as the same request it has already seen;
+		 * and above zero it stops the caches being *read*, which is what makes a retry able to
+		 * change the answer at all. A truncated body or an error page that got written into the
+		 * disk cache under a 200 would otherwise be re-read and re-fail for ever, which is exactly
+		 * how a Retry button comes to look as though it does nothing.
+		 *
+		 * Writing is left on, so a retry that succeeds replaces the bad entry.
+		 */
+		retryAttempt: Int = 0,
+	): ImageRequest =
 		ImageRequest.Builder(PlatformContext.INSTANCE)
 			.data(url)
 			.httpHeaders(headers.toNetworkHeaders())
+			.apply {
+				if (retryAttempt > 0) {
+					memoryCachePolicy(CachePolicy.WRITE_ONLY)
+					diskCachePolicy(CachePolicy.WRITE_ONLY)
+					// Part of the cache key, so the in-flight request this replaces is not
+					// deduplicated against it.
+					memoryCacheKey(url + "#retry=" + retryAttempt)
+				}
+			}
 			.size(Size.ORIGINAL)
 			// INEXACT with an original size is belt and braces: it forbids scaling *up* as well,
 			// so a small page can never be decoded into a larger bitmap than the source.
