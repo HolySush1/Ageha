@@ -3,6 +3,7 @@ package app.ageha.core.jvmcontext
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.JsCapability
 import app.ageha.core.network.PersistentCookieJar
+import app.ageha.core.network.UserAgents
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -67,6 +68,15 @@ internal class CloudflareClearanceInterceptor(
 	 */
 	private val coolingUntil = ConcurrentHashMap<String, Long>()
 
+	/**
+	 * Which User-Agent earned the clearance for each host.
+	 *
+	 * A clearance is bound to the agent that earned it, so this is not bookkeeping -- present a
+	 * different one and the cookie buys nothing. Upstream keeps the same fact per source in
+	 * `SourceSettings.cloudFlareUserAgent`.
+	 */
+	private val clearedWith = ConcurrentHashMap<String, String>()
+
 	override fun intercept(chain: Interceptor.Chain): Response {
 		val request = chain.request()
 		val response = chain.proceed(request)
@@ -77,7 +87,7 @@ internal class CloudflareClearanceInterceptor(
 
 		val before = clearanceFor(url)
 		val cleared = try {
-			runBlocking { clear(chain, url, request.header(USER_AGENT), before) }
+			runBlocking { clear(chain, url, engineAlignedUserAgent(request.header(USER_AGENT)), before) }
 		} catch (e: CancellationException) {
 			// The call this was for was cancelled -- the user navigated away. OkHttp lets nothing
 			// but an IOException out of an interceptor.
@@ -87,7 +97,10 @@ internal class CloudflareClearanceInterceptor(
 		if (!cleared) return response
 
 		response.close()
-		val retried = chain.proceed(request)
+		// Asked again as whoever earned the clearance, which is not necessarily who asked the
+		// first time: a clearance is bound to a User-Agent, so a request that still presents a
+		// parser's own agent would be handed back the interstitial it just paid to get past.
+		val retried = chain.proceed(withClearingUserAgent(request))
 		// Cleared in the browser and still refused here means the site wants more than the cookie
 		// -- a TLS fingerprint OkHttp cannot present. Trying again for every request would only
 		// reopen the browser for the same answer.
@@ -129,6 +142,49 @@ internal class CloudflareClearanceInterceptor(
 		}
 	}
 
+	/**
+	 * The agent to present to the browser: the caller's, unless it contradicts the engine.
+	 *
+	 * Ported from the Android app's `CloudFlareActivity.alignUserAgentWithEngine`, whose comment is
+	 * the clearest statement of the problem anywhere in either project: several parsers hard-code a
+	 * desktop User-Agent as their `ConfigKey.UserAgent` default -- HotComics ships
+	 * `X11; Linux x86_64 ... Chrome/114` -- and pushing that onto the solver makes everything the
+	 * challenge actually measures contradict it. `navigator.userAgentData`, the platform, the touch
+	 * points, the WebGL renderer: all of them report the real engine. That contradiction is the
+	 * signature anti-bot checks exist to catch, so the challenge fails, reloads with a fresh ray id,
+	 * and the solver loops until it times out no matter how long it is given.
+	 *
+	 * Ageha was accidentally immune until 0.3.7, because `CommonHeadersInterceptor` ran above the
+	 * parser and its own agent won every collision. Putting the parser's headers back in front --
+	 * correct in every other respect, and what 0.3.7 fixed -- handed the parser's agent to the
+	 * browser and made Ageha vulnerable to exactly this. So the alignment comes across too.
+	 *
+	 * Ageha needs no equivalent of upstream's `SourceSettings.cloudFlareUserAgent` *store*: its
+	 * engine is the bundled Chromium and [UserAgents.CHROME_DESKTOP] is pinned to it by a
+	 * build-failing test, so the honest agent is a constant rather than something to discover per
+	 * device. What does have to be remembered is which agent cleared which host, so the retry and
+	 * everything after it keep presenting that same identity.
+	 */
+	private fun engineAlignedUserAgent(requested: String?): String {
+		val engine = jsRuntime.browserUserAgent ?: UserAgents.CHROME_DESKTOP
+		if (requested == null) return engine
+		// Only a genuine contradiction is overridden. An agent that already names this platform and
+		// this Chrome major is left exactly as the parser wrote it, down to its own spelling.
+		val platformAgrees = requested.contains(WINDOWS_TOKEN)
+		val majorAgrees = chromeMajor(requested) == chromeMajor(engine)
+		return if (platformAgrees && majorAgrees) requested else engine
+	}
+
+	private fun chromeMajor(userAgent: String): String? =
+		CHROME_MAJOR.find(userAgent)?.groupValues?.getOrNull(1)
+
+	/** The request, presenting whichever agent actually cleared this host. */
+	private fun withClearingUserAgent(request: okhttp3.Request): okhttp3.Request {
+		val presented = clearedWith[request.url.host] ?: return request
+		if (request.header(USER_AGENT) == presented) return request
+		return request.newBuilder().header(USER_AGENT, presented).build()
+	}
+
 	private suspend fun passInBrowser(url: HttpUrl, userAgent: String?): Boolean {
 		val cookies = try {
 			jsRuntime.openInteractive(url.toString(), userAgent)
@@ -140,7 +196,13 @@ internal class CloudflareClearanceInterceptor(
 			null
 		}
 		val saved = cookies?.let { cookieJar.saveBrowserCookies(url.toString(), it) } ?: 0
-		if (saved == 0) coolingUntil[url.host] = clock() + COOLDOWN_MILLIS
+		if (saved == 0) {
+			coolingUntil[url.host] = clock() + COOLDOWN_MILLIS
+		} else if (userAgent != null) {
+			// Remembered for the same reason upstream writes cloudFlareUserAgent: the cookie is
+			// worth nothing presented by anybody else.
+			clearedWith[url.host] = userAgent
+		}
 		return saved > 0
 	}
 
@@ -153,6 +215,10 @@ internal class CloudflareClearanceInterceptor(
 		const val USER_AGENT = "User-Agent"
 		const val CLEARANCE_COOKIE = "cf_clearance"
 		const val COOLDOWN_MILLIS = 30_000L
+
+		/** A Windows agent, which is the only platform Ageha ships (CLAUDE.md 9). */
+		const val WINDOWS_TOKEN = "Windows NT"
+		val CHROME_MAJOR = Regex("""Chrome/(\d+)""")
 		const val CANCEL_POLL_MILLIS = 250L
 
 		/**

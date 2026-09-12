@@ -5,6 +5,7 @@ import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.BrowserCookie
 import app.ageha.core.model.JsCapability
 import app.ageha.core.network.PersistentCookieJar
+import app.ageha.core.network.UserAgents
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import okhttp3.Interceptor
@@ -15,6 +16,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
@@ -86,9 +88,15 @@ class CloudflareClearanceInterceptorTest {
 	private class FakeSite(private val jar: PersistentCookieJar, private val stubborn: Boolean = false) : Interceptor {
 		val served = AtomicInteger()
 
+		/** The agent of the most recent request, for checking what the retry presented. */
+		@Volatile
+		var lastUserAgent: String? = null
+			private set
+
 		override fun intercept(chain: Interceptor.Chain): Response {
 			served.incrementAndGet()
 			val request = chain.request()
+			lastUserAgent = request.header("User-Agent")
 			val cleared = !stubborn && jar.loadForRequest(request.url).any { it.name == "cf_clearance" }
 			val builder = Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
 			return if (cleared) {
@@ -119,14 +127,63 @@ class CloudflareClearanceInterceptorTest {
 		val browser = FakeBrowser()
 		val site = FakeSite(jar)
 
-		client(browser, jar, site).get("Chrome/Exactly").use { response ->
+		client(browser, jar, site).get(UserAgents.CHROME_DESKTOP).use { response ->
 			assertEquals(200, response.code)
 		}
 		assertEquals(1, browser.opened.get())
 		// The clearance is bound to the user agent that earned it, so the browser must present the
-		// one the request will be retried with.
-		assertEquals("Chrome/Exactly", browser.userAgent)
+		// one the request will be retried with. An agent that already agrees with the engine about
+		// the platform and the Chrome major is presented exactly as it arrived.
+		assertEquals(UserAgents.CHROME_DESKTOP, browser.userAgent)
 		assertEquals(2, site.served.get(), "one challenged request, one retry")
+	}
+
+	/**
+	 * Ported from the Android app's `CloudFlareActivity.alignUserAgentWithEngine`.
+	 *
+	 * Several parsers hard-code a desktop User-Agent as their `ConfigKey.UserAgent` default --
+	 * HotComics ships `X11; Linux x86_64 ... Chrome/114` -- and presenting that to a challenge makes
+	 * everything the challenge measures contradict it: the platform, `navigator.userAgentData`, the
+	 * WebGL renderer all report the real engine. That contradiction is the signature anti-bot checks
+	 * look for, so the check fails and reloads for ever.
+	 *
+	 * Ageha was accidentally immune while its own headers ran above the parser's. 0.3.7 put the
+	 * parser's back in front, which was right in every other respect and opened this up.
+	 */
+	@Test
+	@DisplayName("an agent that contradicts the engine is realigned before the check is attempted")
+	fun contradictoryAgentIsRealigned(@TempDir dir: File) {
+		val jar = jar(dir)
+		val browser = FakeBrowser()
+		val site = FakeSite(jar)
+
+		val parserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+			"(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+		client(browser, jar, site).get(parserAgent).use { response ->
+			assertEquals(200, response.code)
+		}
+
+		assertEquals(
+			UserAgents.CHROME_DESKTOP,
+			browser.userAgent,
+			"a Linux Chrome 114 cannot be presented by a Windows Chrome 146 engine",
+		)
+		assertNotEquals(parserAgent, browser.userAgent)
+	}
+
+	@Test
+	@DisplayName("the retry presents whichever agent earned the clearance, not the one that asked")
+	fun retryPresentsTheClearingAgent(@TempDir dir: File) {
+		val jar = jar(dir)
+		val browser = FakeBrowser()
+		val site = FakeSite(jar)
+
+		val parserAgent = "Mozilla/5.0 (X11; Linux x86_64) Chrome/114.0.0.0 Safari/537.36"
+		client(browser, jar, site).get(parserAgent).use { it.body.string() }
+
+		// A cookie is worth nothing presented by anybody else, so the retry has to carry the agent
+		// the browser actually used rather than the one the parser wrote.
+		assertEquals(UserAgents.CHROME_DESKTOP, site.lastUserAgent)
 	}
 
 	@Test
