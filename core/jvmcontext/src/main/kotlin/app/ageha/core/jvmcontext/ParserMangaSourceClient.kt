@@ -214,6 +214,10 @@ internal fun imageHeaders(parserHeaders: Headers, domain: String, sourceName: St
 	if (sourceName.isNotBlank()) {
 		headers[HttpHeaders.SOURCE_NAME] = sourceName
 	}
+	// What the Android app asks for on a page image. A parser that stated its own Accept keeps it.
+	if (headers.keys.none { it.equals(HttpHeaders.ACCEPT, ignoreCase = true) }) {
+		headers[HttpHeaders.ACCEPT] = HttpHeaders.IMAGE_ACCEPT
+	}
 	return headers
 }
 

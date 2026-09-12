@@ -65,9 +65,20 @@ class RateLimitInterceptorTest {
 		response.close()
 	}
 
+	/**
+	 * The regression this file previously enshrined.
+	 *
+	 * A bare 429 with no `Retry-After` used to be handed straight back as a failure, and that is
+	 * the commonest shape of the header in the wild: a host with a *concurrency* cap rather than a
+	 * rate quota has nothing meaningful to put in it. ComicK's CDN serves ten simultaneous requests
+	 * and refuses the eleventh that way -- so a reader opening a sixteen-page chapter lost six
+	 * pages to a limit that had already cleared by the time it was told about it, and the page's
+	 * Retry button fired straight back into the same saturated burst. Measured: 10 of 16 pages
+	 * before, 16 of 16 after.
+	 */
 	@Test
-	@DisplayName("a 429 without Retry-After is returned rather than retried blindly")
-	fun doesNotRetryWithoutRetryAfter() {
+	@DisplayName("a 429 with no Retry-After is backed off and retried, not given up on")
+	fun retriesWithoutRetryAfter() {
 		val clock = FakeClock()
 		val interceptor = RateLimitInterceptor(
 			minIntervalMillis = 0L,
@@ -76,9 +87,65 @@ class RateLimitInterceptorTest {
 		)
 
 		val chain = FakeChain(request("https://example.org/a"), code = 429)
-		interceptor.intercept(chain).close()
+		val response = interceptor.intercept(chain)
 
-		assertEquals(1, chain.calls)
+		assertEquals(2, chain.calls, "a bare 429 should be retried")
+		assertEquals(200, response.code, "the retry's answer is what the caller gets")
+		assertTrue(clock.slept > 0L, "the retry should have waited first, not hammered")
+		response.close()
+	}
+
+	/**
+	 * One refusal has to slow the whole host, not just the request that met it.
+	 *
+	 * The rest of a chapter's images are already in flight behind the first refusal, and letting
+	 * them arrive at the same closed door turns one 429 into a chapter of them.
+	 */
+	@Test
+	@DisplayName("a 429 pushes out the next request to that host as well")
+	fun backoffAppliesToTheWholeHost() {
+		// A sleeper that records without advancing the clock, which is the only way to model what
+		// actually happens: the other fifteen images of the chapter are *already in flight* when
+		// the first one is refused, so they arrive while the backoff is still pending rather than
+		// after it has elapsed. A clock that advances on sleep would have the first request consume
+		// its own backoff and let the next one straight through, which is not the situation.
+		var slept = 0L
+		val interceptor = RateLimitInterceptor(
+			minIntervalMillis = 0L,
+			sleeper = { slept += it },
+			clock = { 0L },
+		)
+
+		interceptor.intercept(FakeChain(request("https://example.org/a"), code = 429)).close()
+		val duringRetry = slept
+
+		// A second request to the same host, arriving inside the backoff window.
+		interceptor.intercept(FakeChain(request("https://example.org/b"), code = 200)).close()
+
+		assertTrue(
+			slept > duringRetry,
+			"a request arriving while a host is backing off should wait too, not sail past",
+		)
+	}
+
+	@Test
+	@DisplayName("a host that keeps refusing is given up on rather than retried for ever")
+	fun stopsAfterMaxRetries() {
+		val clock = FakeClock()
+		val interceptor = RateLimitInterceptor(
+			minIntervalMillis = 0L,
+			maxRetries = 2,
+			sleeper = clock::advance,
+			clock = clock::now,
+		)
+
+		// Refuses every time, unlike FakeChain, so the retry budget is what ends the loop.
+		val chain = StubbornChain(request("https://example.org/a"))
+		val response = interceptor.intercept(chain)
+
+		assertEquals(3, chain.calls, "one attempt plus two retries")
+		assertEquals(429, response.code, "the caller is told, rather than waiting for ever")
+		response.close()
 	}
 
 	/**
@@ -143,8 +210,37 @@ class RateLimitInterceptorTest {
 		}
 	}
 
+	/** Like [FakeChain], but never relents -- for proving the retry budget is finite. */
+	private class StubbornChain(private val request: Request) : Interceptor.Chain {
+
+		var calls = 0
+			private set
+
+		override fun request(): Request = request
+
+		override fun proceed(request: Request): Response {
+			calls++
+			return Response.Builder()
+				.request(request)
+				.protocol(Protocol.HTTP_1_1)
+				.code(429)
+				.message("test")
+				.body("".toResponseBody(null))
+				.build()
+		}
+
+		override fun connection() = null
+		override fun call() = throw UnsupportedOperationException()
+		override fun connectTimeoutMillis() = 0
+		override fun withConnectTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+		override fun readTimeoutMillis() = 0
+		override fun withReadTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+		override fun writeTimeoutMillis() = 0
+		override fun withWriteTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+	}
+
 	/**
-	 * Enough of [Interceptor.Chain] to drive the interceptor. Only [request] and [proceed] are
+	 * Enough of [Interceptor.Chain] to drive the interceptor. Only `request` and `proceed` are
 	 * reachable from the code under test; the rest exist to satisfy the interface.
 	 */
 	private class FakeChain(

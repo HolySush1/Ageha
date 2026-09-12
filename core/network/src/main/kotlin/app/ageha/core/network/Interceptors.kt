@@ -10,7 +10,18 @@ object HttpHeaders {
 	const val USER_AGENT = "User-Agent"
 	const val REFERER = "Referer"
 	const val ACCEPT_LANGUAGE = "Accept-Language"
+	const val ACCEPT = "Accept"
 	const val RETRY_AFTER = "Retry-After"
+
+	/**
+	 * What the Android app asks for on a page image, character for character.
+	 *
+	 * Its `PageLoader.createPageRequest` sets exactly this, and Ageha sent no Accept at all -- the
+	 * constant was here, unused, and I deleted it as dead before finding out upstream uses it on
+	 * the one request type that matters most. A CDN is entitled to vary its answer on Accept, and
+	 * several serve WebP only when asked, so sending nothing is not a neutral choice.
+	 */
+	const val IMAGE_ACCEPT = "image/webp,image/png;q=0.9,image/jpeg,*/*;q=0.8"
 
 	/**
 	 * Ageha's own marker naming the source a request belongs to. Never sent to a site.
@@ -76,19 +87,20 @@ class CommonHeadersInterceptor(
 class RateLimitInterceptor(
 	private val minIntervalMillis: Long = DEFAULT_MIN_INTERVAL_MS,
 	/**
-	 * The floor for page and cover images, which is lower than [minIntervalMillis] on purpose.
+	 * The floor for page and cover images. The same as [minIntervalMillis] by default.
 	 *
-	 * The general floor exists so a burst of parser calls does not look like a scraper. Images are
-	 * different in kind: a reader opening a chapter legitimately wants twenty of them at once, and
-	 * a browser fetching a page of a comic behaves exactly the same way -- so the general floor
-	 * serialises the one path where the delay is directly visible, at 250ms a page, while
-	 * [throttle] holds a thread asleep for each one.
+	 * It was briefly 50ms, on the argument that a reader opening a chapter legitimately wants
+	 * twenty images at once and the general floor serialises the one delay a person can feel. That
+	 * argument is still true and it is not worth the risk: 0.3.7 shipped it, page loads started
+	 * failing in the field, and a floor five times lower is the obvious suspect -- a source that
+	 * answers four requests a second happily may well refuse twenty. Nothing established that 50ms
+	 * was safe, and the cost of being wrong lands on the person reading, not on us.
 	 *
-	 * Not zero. A floor of some kind is still what keeps Ageha from hammering one host, and a
-	 * source's images are frequently on the same host as its pages.
+	 * Kept as a parameter rather than deleted so the experiment can be re-run against a source
+	 * that has actually been measured, one host at a time.
 	 */
-	private val imageIntervalMillis: Long = DEFAULT_IMAGE_INTERVAL_MS,
-	private val maxRetries: Int = 2,
+	private val imageIntervalMillis: Long = DEFAULT_MIN_INTERVAL_MS,
+	private val maxRetries: Int = DEFAULT_MAX_RETRIES,
 	private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
 	private val clock: () -> Long = System::currentTimeMillis,
 ) : Interceptor {
@@ -112,15 +124,31 @@ class RateLimitInterceptor(
 			if (response.code !in RETRYABLE_CODES || attempt >= maxRetries) {
 				return response
 			}
-			val retryAfter = response.header(HttpHeaders.RETRY_AFTER)?.toRetryAfterMillis()
-			if (retryAfter == null) {
-				return response
-			}
+
+			// A 429 without Retry-After used to be given up on immediately, and that is the single
+			// most common shape of the header in the wild -- a host with a *concurrency* cap rather
+			// than a rate quota has nothing sensible to put in it. ComicK's CDN is exactly that:
+			// it serves ten simultaneous requests and refuses the eleventh with a bare 429, and the
+			// same url asked again a moment later returns 200. So a reader opening a sixteen-page
+			// chapter lost six pages to a limit it had already cleared by the time it was told, and
+			// the Retry button fired straight back into the same saturated burst.
+			//
+			// Retry-After is still honoured where it is sent; where it is not, back off on our own
+			// and double each time.
+			val backoff = response.header(HttpHeaders.RETRY_AFTER)?.toRetryAfterMillis()
+				?: backoffFor(attempt)
 			response.close()
-			nextAllowedAt[host] = clock() + retryAfter
+			// Push the whole host out, not just this request. The rest of the burst is already in
+			// flight behind this one, and letting it arrive at the same closed door would turn one
+			// refusal into a chapter of them. Every waiting request now queues behind the backoff.
+			nextAllowedAt[host] = maxOf(nextAllowedAt[host] ?: 0L, clock() + backoff)
 			attempt++
 		}
 	}
+
+	/** Doubling, from [INITIAL_BACKOFF_MS], capped so a hostile server cannot pin a thread. */
+	private fun backoffFor(attempt: Int): Long =
+		(INITIAL_BACKOFF_MS shl attempt.coerceAtMost(MAX_BACKOFF_SHIFT)).coerceAtMost(MAX_BACKOFF_MS)
 
 	private fun throttle(host: String, intervalMillis: Long) {
 		val now = clock()
@@ -146,7 +174,19 @@ class RateLimitInterceptor(
 
 	private companion object {
 		const val DEFAULT_MIN_INTERVAL_MS = 250L
-		const val DEFAULT_IMAGE_INTERVAL_MS = 50L
+
+		/**
+		 * Three retries, because the failure this exists for clears almost immediately.
+		 *
+		 * A concurrency cap is not a quota: the refused request is competing with Ageha's own
+		 * other requests, and those finish in the time the first backoff takes.
+		 */
+		const val DEFAULT_MAX_RETRIES = 3
+		const val INITIAL_BACKOFF_MS = 400L
+		const val MAX_BACKOFF_MS = 4_000L
+
+		/** Guards the shift itself, so a raised [DEFAULT_MAX_RETRIES] cannot overflow it. */
+		const val MAX_BACKOFF_SHIFT = 8
 		const val MAX_RETRY_AFTER_SECONDS = 30L
 		val RETRYABLE_CODES = setOf(429, 503)
 	}
