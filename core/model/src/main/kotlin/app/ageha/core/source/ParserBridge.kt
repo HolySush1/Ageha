@@ -82,4 +82,29 @@ interface ParserBridge : AutoCloseable {
 	 * inherits "no source handles this", which is wrong but survivable.
 	 */
 	suspend fun resolveLink(url: String): ResolvedLink? = null
+
+	/**
+	 * Resolve [url] as [sourceName] would, rather than as the library's own resolver chose.
+	 *
+	 * For the multi-language families. When one domain is served by a source per language, the
+	 * person picks which language they want, and a link that named a manga has to be asked again as
+	 * that source -- otherwise "Open manga" opens the title in the language they just declined.
+	 *
+	 * Null when [sourceName] cannot read the link. That is an ordinary answer, not a failure: the
+	 * caller falls back to offering the site rather than the title, which is right, because opening
+	 * the wrong title is worse than opening none. A body here for the staleness reason
+	 * [resolveLink] gives -- an older bridge inherits "cannot", which costs the re-resolve, not a
+	 * crash.
+	 */
+	suspend fun resolveLinkAs(url: String, sourceName: String): ResolvedLink? = null
+
+	/**
+	 * Build whatever [resolveLink] needs ahead of the first call, if anything.
+	 *
+	 * Finding every source that serves a domain means constructing every parser in the build, and
+	 * that cost is the same whenever it is paid -- so the dialog pays it when it opens rather than
+	 * when someone presses Find. Idempotent, and does nothing at all where there is nothing to
+	 * build.
+	 */
+	fun warmLinkIndex() = Unit
 }

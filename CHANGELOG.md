@@ -4,6 +4,30 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Adding a site by link offered one language and hid the rest.** Pasting `https://mangaball.net/`
+  answered "Manga Ball (Arabic)" on every machine and gave no way to reach the other 41 sources that
+  read the same site. The cause is upstream's link resolver, which returns the *first* source in the
+  parsers build's declaration order that serves the host -- correct for "which parser reads this
+  page", wrong as an answer to "which sources can I read this site with", and `AR` happens to be
+  declared first. The dialog now lists every source serving the pasted domain, with its language,
+  and pre-selects the one matching the Windows display language (English if that is not among them).
+  This was never specific to MangaBall: it applies to every site published in several languages.
+
+### Added
+
+- **Enable all**, in the Add site dialog, for a site served by more than one source -- for reading
+  the same site in several languages without pasting its link once per language.
+- Choosing a different language for a link that named a *manga* asks that source for the title, so
+  Open manga opens it in the language chosen rather than the one upstream happened to name. Where a
+  source cannot find the title, the dialog offers the site instead -- landing on a front page is a
+  small annoyance, opening the wrong language silently is not.
+- `agehacli resolve <url>` now also lists the other sources serving the same domain, and takes an
+  optional source name to ask the question as that source.
+
 ## [0.3.5] - 2026-09-11
 
 ### Fixed

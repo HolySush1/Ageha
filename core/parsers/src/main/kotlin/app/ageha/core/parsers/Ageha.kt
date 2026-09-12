@@ -155,6 +155,11 @@ private class BridgedSourceRegistry(
 	override val parsersVersion: String get() = bridge.parsersVersion
 
 	override suspend fun resolveLink(url: String): ResolvedLink? = bridge.resolveLink(url)
+
+	override suspend fun resolveLinkAs(url: String, sourceName: String): ResolvedLink? =
+		bridge.resolveLinkAs(url, sourceName)
+
+	override fun warmLinkIndex() = bridge.warmLinkIndex()
 }
 
 /** A constructed source stack, and the handles a host needs to shut it down cleanly. */

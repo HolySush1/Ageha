@@ -186,7 +186,9 @@ fun main(args: Array<String>) {
 					}
 				}
 
-				"resolve" -> requireArgs(args, 2) { resolve(stack, args[1]) }
+				// A second argument asks the question as that source rather than as the one the
+				// library picks, which is what the Add site dialog does once a language is chosen.
+				"resolve" -> requireArgs(args, 2) { resolve(stack, args[1], args.getOrNull(2)) }
 
 				"pages" -> requireArgs(args, 3) {
 					pages(
@@ -618,10 +620,14 @@ private suspend fun details(stack: SourceStack, sourceName: String, query: Strin
  * Exists so the resolver can be exercised without the UI -- and so "does Ageha have this site"
  * has an answer from a terminal, which is where a bug report about a missing site usually starts.
  */
-private suspend fun resolve(stack: SourceStack, input: String) {
+private suspend fun resolve(stack: SourceStack, input: String, asSource: String? = null) {
 	val link = SiteLinks.normalise(input) ?: error("'" + input + "' is not a link.")
 	val host = SiteLinks.hostOf(link)
-	val found = stack.registry.resolveLink(link)
+	val found = if (asSource == null) {
+		stack.registry.resolveLink(link)
+	} else {
+		stack.registry.resolveLinkAs(link, asSource)
+	}
 	if (found == null) {
 		println("No source in parsers build " + stack.registry.parsersVersion + " handles " + host + ".")
 		return
@@ -635,6 +641,16 @@ private suspend fun resolve(stack: SourceStack, input: String) {
 	} else {
 		println("  manga: " + manga.title)
 		println("         " + manga.publicUrl)
+	}
+	// The reason this is worth printing: upstream's resolver names the first source in the build's
+	// declaration order that serves the host, so a site publishing in 42 languages resolves to
+	// whichever sorts first and the rest are invisible from the answer above.
+	if (found.alternatives.isEmpty()) return
+	println()
+	println("  " + found.alternatives.size + " other source(s) serve " + host + ":")
+	found.alternatives.forEach { name ->
+		val other = stack.registry.descriptorFor(name)
+		println("    " + (other?.title ?: name) + "  [" + name + "]")
 	}
 }
 

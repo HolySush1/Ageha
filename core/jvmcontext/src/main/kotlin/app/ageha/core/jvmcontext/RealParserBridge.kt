@@ -4,6 +4,7 @@ import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.model.SourceFailure
 import app.ageha.core.network.PersistentCookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.source.ParserBridge
@@ -83,6 +84,49 @@ class RealParserBridge(
 
 	private val clients = ConcurrentHashMap<String, MangaSourceClient>()
 
+	/**
+	 * Which sources serve which domain: preset domain, lowercased, to source names.
+	 *
+	 * ## Why this has to be built the hard way
+	 *
+	 * `MangaParserSource` carries `title`, `locale`, `contentType` and `isBroken` and nothing else
+	 * -- no domain. A source's domains live on its *parser*, in `configKeyDomain.presetValues`, so
+	 * the only way to know who serves a host is to construct every parser and ask. That is exactly
+	 * what upstream's own resolver does; it simply stops at the first match, which is the defect
+	 * this exists to repair.
+	 *
+	 * ## Why the instances are thrown away
+	 *
+	 * Built with `context.newParserInstance` rather than [parserFor], deliberately. [parserFor]
+	 * caches, and each parser holds a web client -- keeping 1,360 of them alive so that a dialog
+	 * can list 42 would be a leak wearing a cache's clothes. The map of strings is the only thing
+	 * worth keeping, and it is built once per process.
+	 *
+	 * One parser failing to construct costs its own domains and nothing else, which matches how
+	 * [selfCheck] already treats a single broken source.
+	 */
+	private val hostIndex: Map<String, List<String>> by lazy {
+		val index = HashMap<String, MutableList<String>>()
+		for (source in MangaParserSource.entries) {
+			val presets = quietly { context.newParserInstance(source).configKeyDomain.presetValues }
+			for (domain in presets.orEmpty()) {
+				index.getOrPut(domain.lowercase()) { mutableListOf() }.add(source.name)
+			}
+		}
+		index
+	}
+
+	/**
+	 * Build the host index now, off the path of the lookup that would otherwise pay for it.
+	 *
+	 * Constructing 1,360 parsers is the one slow part of resolving a link, and it is the same work
+	 * whenever it happens -- so the dialog calls this when it opens and the scan overlaps with the
+	 * person pasting. Idempotent: the second caller finds the `lazy` already resolved.
+	 */
+	override fun warmLinkIndex() {
+		hostIndex
+	}
+
 	override fun sourceDescriptors(): List<SourceDescriptor> =
 		descriptors.values.sortedBy { it.title.lowercase() }
 
@@ -161,7 +205,46 @@ class RealParserBridge(
 				found
 			}
 		}
-		return ResolvedLink(sourceName = source.name, manga = manga?.let(ParserModelMapper::manga))
+		return ResolvedLink(
+			sourceName = source.name,
+			manga = manga?.let(ParserModelMapper::manga),
+			alternatives = alternativesFor(resolver.link, source.name),
+		)
+	}
+
+	/**
+	 * Every *other* source that serves the same site, in the build's own declaration order.
+	 *
+	 * Looked up by host and by top private domain, the same pair upstream matches against, so this
+	 * agrees with the resolver about what "serves this site" means rather than inventing a second
+	 * rule. Filtered to sources this bridge can actually open, for the reason [resolveLink] gives
+	 * about its own result: an entry that led nowhere would be worse than no entry.
+	 */
+	private fun alternativesFor(link: HttpUrl, chosen: String): List<String> =
+		listOfNotNull(link.host, link.topPrivateDomain())
+			.flatMap { hostIndex[it.lowercase()].orEmpty() }
+			.distinct()
+			.filter { it != chosen && it in descriptors }
+
+	/**
+	 * Resolve [url] as [sourceName] reads it, rather than as upstream's resolver chose.
+	 *
+	 * The link is resolved once for its *shape* -- which manga on the site it names -- and that is
+	 * then asked of the chosen source's own parser. Sibling language sources share a domain and a
+	 * URL layout, being the same site, so the relative address carries across.
+	 *
+	 * Where it does not carry across -- a site that encodes its language in the path, and they
+	 * exist -- `getDetails` fails or returns nothing, and this answers with the source and no
+	 * manga. The dialog then offers the site rather than the title, which is the right way to be
+	 * wrong: landing on a front page is a small annoyance, opening the wrong title silently is not.
+	 */
+	override suspend fun resolveLinkAs(url: String, sourceName: String): ResolvedLink? {
+		val source = sourcesByName[sourceName] ?: return null
+		if (sourceName !in descriptors) return null
+		val resolver = catchingParserFailure { context.newLinkResolver(url) }.getOrNull() ?: return null
+		val seed = quietly { resolver.getManga() } ?: return ResolvedLink(sourceName, manga = null)
+		val details = quietly { parserFor(sourceName).getDetails(seed.copy(source = source)) }
+		return ResolvedLink(sourceName, manga = details?.let(ParserModelMapper::manga))
 	}
 
 	override fun close() {

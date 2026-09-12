@@ -14,8 +14,18 @@ import app.ageha.core.model.AgehaManga
  *
  * An Ageha type rather than the parsers library's `LinkResolver`, for the reason [ParserBridge]
  * gives at length: nothing from the library may cross the classloader boundary.
+ *
+ * ## Why the constructor is @JvmOverloads
+ *
+ * This class is parent-first (`ParsersClassLoader.PARENT_FIRST_PREFIXES`), while the bridge that
+ * constructs it is deliberately child-first and loaded from a jar in the user's cache that can be
+ * *older* than the application -- the same staleness [ParserBridge.resolveLink] documents at
+ * length. A defaulted parameter on its own emits no two-argument constructor, so an older bridge
+ * calling `ResolvedLink(name, manga)` would link against nothing and throw `NoSuchMethodError` the
+ * first time anyone pasted a link. The overload keeps that call site resolving, and such a bridge
+ * simply reports no [alternatives] -- which is what Ageha did before they existed.
  */
-data class ResolvedLink(
+data class ResolvedLink @JvmOverloads constructor(
 	/**
 	 * The source that handles the link's site, by its persisted name.
 	 *
@@ -30,6 +40,19 @@ data class ResolvedLink(
 	 * without naming a manga. Those still resolve, to the source alone.
 	 */
 	val manga: AgehaManga?,
+	/**
+	 * Other sources serving the same site, by persisted name, excluding [sourceName].
+	 *
+	 * Empty is the ordinary answer -- most sites have exactly one source. It fills up for the
+	 * multi-language families, where a single domain is served by one source per language and
+	 * upstream's resolver can only ever name the first of them: `LinkResolver` walks
+	 * `MangaParserSource.entries` in declaration order and returns the first whose preset domains
+	 * contain the host. mangaball.net has 42, so 41 of them were unreachable from a pasted link.
+	 *
+	 * Left in the parsers build's own declaration order, so repeated lookups agree with each other.
+	 * Picking a sensible default among them is the caller's job, not this type's.
+	 */
+	val alternatives: List<String> = emptyList(),
 )
 
 /**

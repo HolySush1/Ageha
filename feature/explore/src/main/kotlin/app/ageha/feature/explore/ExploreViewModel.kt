@@ -3,6 +3,7 @@ package app.ageha.feature.explore
 import app.ageha.core.data.LocaleOption
 import app.ageha.core.data.SourceListing
 import app.ageha.core.data.SourceRepository
+import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.source.ResolvedLink
 import app.ageha.core.source.SiteLinks
 import kotlinx.coroutines.CancellationException
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Locale
 
 /** Which slice of the catalogue the source picker is showing. */
 enum class SourceFilter(val label: String) {
@@ -121,12 +123,46 @@ data class ExploreUiState(
  */
 internal const val ADD_SITE_TIMEOUT_MS = 60_000L
 
+/**
+ * Which of the sources serving a site to offer first.
+ *
+ * The reading language the person is most likely to want, then English, then whatever upstream's
+ * resolver named. That last fallback is what the dialog used to do for *everything*, and it is why
+ * pasting mangaball.net answered "Manga Ball (Arabic)": `LinkResolver` returns the first source in
+ * the build's declaration order that serves the host, 42 languages share that domain, and `AR`
+ * sorts first. Upstream is not wrong to pick one -- it is only wrong as a default.
+ *
+ * Matched on the primary subtag, so a `pt-BR` source answers to a `pt` machine. [systemLanguage] is
+ * passed in rather than read here so a test does not depend on the machine running it.
+ */
+internal fun preferredSource(
+	candidates: List<SourceDescriptor>,
+	resolved: String,
+	systemLanguage: String,
+): SourceDescriptor? {
+	val upstream = candidates.firstOrNull { it.name == resolved }
+	if (candidates.size <= 1) return upstream ?: candidates.firstOrNull()
+	fun language(descriptor: SourceDescriptor) =
+		descriptor.locale?.substringBefore('-')?.lowercase()
+	return candidates.firstOrNull { language(it) == systemLanguage.lowercase() }
+		?: candidates.firstOrNull { language(it) == "en" }
+		?: upstream
+		?: candidates.firstOrNull()
+}
+
 class ExploreViewModel(
 	private val sources: SourceRepository,
 	private val scope: CoroutineScope,
 	hideBroken: Boolean = true,
 	showAdult: Boolean = false,
 	locale: String? = null,
+	/**
+	 * The language to prefer when one site is served by a source per language.
+	 *
+	 * Injected, with the machine's own as the default, so a test can state the language it means
+	 * instead of inheriting whatever the machine running it happens to be set to.
+	 */
+	private val systemLanguage: String = Locale.getDefault().language,
 	private val onFiltersChanged: (hideBroken: Boolean, showAdult: Boolean, locale: String?) -> Unit =
 		{ _, _, _ -> },
 ) {
@@ -259,12 +295,26 @@ class ExploreViewModel(
 		scope.launch { sources.setEnabled(name, enabled) }
 	}
 
+	/**
+	 * What the last lookup resolved, kept because the dialog's state cannot answer for it.
+	 *
+	 * Specifically: whether the *link* named a manga. Once a re-resolve has come back empty the
+	 * status carries no manga, and without this a second change of language would read that as a
+	 * site link and never ask again.
+	 */
+	private var resolvedLink: ResolvedLink? = null
+
 	fun openAddSite() {
 		_addSite.value = AddSiteState.Open()
+		// Listing every source that serves a domain means constructing every parser in the build,
+		// which is the slow part of a lookup and the same work whenever it happens. Started here so
+		// it runs while the person is still pasting, rather than landing on the Find click.
+		scope.launch { sources.warmLinkIndex() }
 	}
 
 	fun closeAddSite() {
 		resolving?.cancel()
+		resolvedLink = null
 		_addSite.value = AddSiteState.Closed
 	}
 
@@ -279,6 +329,7 @@ class ExploreViewModel(
 		val open = _addSite.value as? AddSiteState.Open ?: return
 		if (text == open.input) return
 		resolving?.cancel()
+		resolvedLink = null
 		_addSite.value = open.copy(input = text, status = AddSiteStatus.Idle)
 	}
 
@@ -296,20 +347,11 @@ class ExploreViewModel(
 			val status = try {
 				// Wrapped so a timeout can be told apart from an honest "no source": both would
 				// otherwise arrive as null, and they mean opposite things to the person waiting.
-				val answer = withTimeoutOrNull(ADD_SITE_TIMEOUT_MS) { Answer(sources.resolveLink(link)) }
-				val resolved = answer?.link
-				when {
-					answer == null -> AddSiteStatus.Failed(
-						host,
-						"it took longer than ${ADD_SITE_TIMEOUT_MS / 1000} seconds to answer.",
-					)
-
-					resolved == null -> AddSiteStatus.NotFound(host, sources.parsersVersion)
-
-					else -> sources.descriptor(resolved.sourceName)
-						?.let { AddSiteStatus.Found(host, it, resolved.manga) }
-						?: AddSiteStatus.NotFound(host, sources.parsersVersion)
-				}
+				val answer = withTimeoutOrNull(ADD_SITE_TIMEOUT_MS) { Answer(found(host, link)) }
+				answer?.status ?: AddSiteStatus.Failed(
+					host,
+					"it took longer than ${ADD_SITE_TIMEOUT_MS / 1000} seconds to answer.",
+				)
 			} catch (e: CancellationException) {
 				// Cancelled because the text changed or the dialog closed. Writing a status now
 				// would resurrect a lookup the person has already moved on from.
@@ -346,8 +388,96 @@ class ExploreViewModel(
 		return found
 	}
 
-	/** Distinguishes "the resolver answered null" from "the resolver never answered". */
-	private class Answer(val link: ResolvedLink?)
+	/**
+	 * Resolve [link] and decide what the dialog should show for it.
+	 *
+	 * Every source serving the site is offered, not just the one upstream named. A site served by
+	 * a source per language resolves to whichever the build declares first, which for mangaball.net
+	 * is the Arabic one out of 42 -- an answer that is not wrong so much as arbitrary, and that left
+	 * the other 41 with no way in at all.
+	 */
+	private suspend fun found(host: String, link: String): AddSiteStatus {
+		val unavailable = AddSiteStatus.NotFound(host, sources.parsersVersion)
+		val resolved = sources.resolveLink(link) ?: return unavailable
+		resolvedLink = resolved
+		val upstream = sources.descriptor(resolved.sourceName) ?: return unavailable
+		val candidates = (listOf(upstream) + resolved.alternatives.mapNotNull(sources::descriptor))
+			.distinctBy { it.name }
+			.sortedBy { it.title.lowercase() }
+		val preferred = preferredSource(candidates, upstream.name, systemLanguage) ?: return unavailable
+		val manga = when {
+			resolved.manga == null -> null
+			preferred.name == upstream.name -> resolved.manga
+			// The default landed somewhere upstream did not, so the title has to be asked of that
+			// source -- otherwise Open manga opens it in the language just passed over.
+			else -> sources.resolveLinkAs(link, preferred.name)?.manga
+		}
+		return AddSiteStatus.Found(host, preferred, manga, candidates)
+	}
+
+	/**
+	 * Choose a different one of the sources serving this site.
+	 *
+	 * The selection moves at once and the list stays put, because it is a list the user is clicking
+	 * down: replacing it with a spinner would take the rows out from under the cursor. Only the
+	 * title line is uncertain for a moment, and it says so through
+	 * [AddSiteStatus.Found.reresolving].
+	 */
+	fun chooseSource(name: String) {
+		val open = _addSite.value as? AddSiteState.Open ?: return
+		val found = open.status as? AddSiteStatus.Found ?: return
+		if (name == found.source.name) return
+		val picked = found.candidates.firstOrNull { it.name == name } ?: return
+		val link = SiteLinks.normalise(open.input)
+		// A link that named the site as a whole has no title to carry across, so there is nothing
+		// to ask and no reason to touch the network.
+		if (resolvedLink?.manga == null || link == null) {
+			_addSite.value = open.copy(status = found.copy(source = picked, reresolving = false))
+			return
+		}
+		resolving?.cancel()
+		_addSite.value = open.copy(status = found.copy(source = picked, reresolving = true))
+		resolving = scope.launch {
+			val manga = try {
+				withTimeoutOrNull(ADD_SITE_TIMEOUT_MS) { sources.resolveLinkAs(link, picked.name) }?.manga
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Exception) {
+				// Offering the site is the right way to be wrong here. Landing on a front page is a
+				// small annoyance; opening a title in a language the user just declined is not.
+				null
+			}
+			_addSite.update { current ->
+				val status = (current as? AddSiteState.Open)?.status as? AddSiteStatus.Found
+				// Applied only if this is still the source on screen. Cancellation covers the
+				// ordinary case; this covers a second click landing while the first is in flight.
+				if (current is AddSiteState.Open && status?.source?.name == picked.name) {
+					current.copy(status = status.copy(manga = manga, reresolving = false))
+				} else {
+					current
+				}
+			}
+		}
+	}
+
+	/**
+	 * Switch on every source serving this site, and open the chosen one.
+	 *
+	 * For the reader who wants a site in three languages and would otherwise paste the same link
+	 * three times. Additive and individually reversible, like [enableDefaults], so it asks nothing
+	 * first.
+	 *
+	 * @return what was found, for the caller to navigate to; null when nothing was.
+	 */
+	fun enableAll(): AddSiteStatus.Found? {
+		val found = (_addSite.value as? AddSiteState.Open)?.status as? AddSiteStatus.Found ?: return null
+		found.candidates.forEach { setEnabled(it.name, true) }
+		closeAddSite()
+		return found
+	}
+
+	/** Distinguishes "the lookup reached an answer" from "the lookup never finished". */
+	private class Answer(val status: AddSiteStatus)
 
 	/**
 	 * Turn on the default English sources.

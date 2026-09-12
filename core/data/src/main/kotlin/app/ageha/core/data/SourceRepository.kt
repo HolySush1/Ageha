@@ -82,6 +82,19 @@ class SourceRepository(
 	 */
 	suspend fun resolveLink(url: String): ResolvedLink? = registry.resolveLink(url)
 
+	/**
+	 * The same question asked of one particular source, for when the user picked a source other
+	 * than the one the library's resolver named.
+	 *
+	 * Null when [sourceName] cannot read the link, which the caller shows as the site rather than
+	 * the title.
+	 */
+	suspend fun resolveLinkAs(url: String, sourceName: String): ResolvedLink? =
+		registry.resolveLinkAs(url, sourceName)
+
+	/** Let the registry prepare for a lookup, so the Add site dialog's first Find is not the slow one. */
+	fun warmLinkIndex() = registry.warmLinkIndex()
+
 	suspend fun setEnabled(name: String, enabled: Boolean) {
 		val existing = sources.find(name)
 		if (existing == null) {

@@ -43,4 +43,23 @@ interface MangaSourceRegistry {
 	 * about links. The one real implementation overrides it and asks the bridge.
 	 */
 	suspend fun resolveLink(url: String): ResolvedLink? = null
+
+	/**
+	 * Resolve [url] as [sourceName] would, for when the user picked a source other than the one
+	 * upstream's resolver named. Null when that source cannot read it.
+	 *
+	 * A body here as well, so the test doubles implementing this interface need not all learn about
+	 * links. The one real implementation overrides it and asks the bridge.
+	 */
+	suspend fun resolveLinkAs(url: String, sourceName: String): ResolvedLink? = null
+
+	/**
+	 * Build whatever [resolveLink] needs ahead of the first call, if anything.
+	 *
+	 * Finding every source that serves a domain means constructing every parser in the build, and
+	 * that cost is the same whenever it is paid -- so the dialog pays it when it opens rather than
+	 * when someone presses Find. Idempotent, and does nothing at all where there is nothing to
+	 * build.
+	 */
+	fun warmLinkIndex() = Unit
 }

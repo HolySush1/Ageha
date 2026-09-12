@@ -383,3 +383,40 @@ and is not the pure-JVM dependency the rest of the stack is:
   makes it a per-platform substitution rather than a rewrite.
 
 Neither of these blocks anything before Milestone 8.
+
+## 9. A domain does not name one source, and upstream's resolver answers as if it did
+
+Established 2026-09-12, while fixing the Add site dialog.
+
+`MangaParserSource` carries exactly four things per constant: `title`, `locale`, `contentType` and
+`isBroken`. **It carries no domain.** A source's domains live on its *parser*, in
+`configKeyDomain.presetValues`, so the only way to learn which sources serve a host is to construct
+parsers and read them. There is no cheaper public route, and no table to consult.
+
+Upstream's `LinkResolver.resolveSource` does exactly that, and stops at the first hit: it builds a
+set of `{host, topPrivateDomain}`, walks `MangaParserSource.entries` in **declaration order**,
+constructs each parser, and returns the first whose presets contain the host. That is a reasonable
+contract for "which parser reads this page" and a poor one for "which sources can I read this site
+with", because many sites are served by a whole family of sources at once:
+
+- mangaball.net is served by **42** constants, `MANGABALL_AR` through `MANGABALL_ZH`, one per
+  language, titled `Manga Ball (Arabic)`, `Manga Ball (Bulgarian)` and so on.
+- `AR` is declared first, so pasting the site answered "Manga Ball (Arabic)" on every machine, and
+  the other 41 had no route into the app at all.
+
+So Ageha keeps upstream's resolver for *which* source and *which* manga -- it knows about mirrors,
+and duplicating that would go stale -- and builds its own host index alongside it, in
+`RealParserBridge.hostIndex`, to answer the second question. Two properties of that index matter
+and are easy to get wrong:
+
+- **It must use throwaway parser instances.** `parserFor` caches, and each parser holds a web
+  client; retaining 1,360 of them so a dialog can list 42 is a leak, not a cache.
+- **It is worth warming.** The full scan is around 5 seconds cold, measured through
+  `agehacli resolve`, which is most of that command's runtime. The dialog starts it when it opens
+  so it overlaps with the user pasting.
+
+One useful empirical note for the language families: mangaball.net does **not** encode language in
+its paths -- a title is `/title-detail/<slug>-<opaque id>/` whatever language reads it -- so the
+same relative URL resolves under any sibling source. That is what makes `resolveLinkAs` viable.
+It is not guaranteed for every family, which is why a failure there falls back to offering the site
+rather than the title.

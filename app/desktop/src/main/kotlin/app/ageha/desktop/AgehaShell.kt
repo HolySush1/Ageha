@@ -749,6 +749,12 @@ fun AgehaShell(
 							state = open,
 							onInput = exploreViewModel::setAddSiteInput,
 							onFind = exploreViewModel::findSite,
+							onChooseSource = exploreViewModel::chooseSource,
+							onEnableAll = {
+								// Opens the source that was chosen, not an arbitrary one of the many
+								// just switched on -- the selection is still the one they made.
+								exploreViewModel.enableAll()?.let { navigator.openSource(it.source.name) }
+							},
 							onOpenSource = {
 								exploreViewModel.acceptFound()?.let { navigator.openSource(it.source.name) }
 							},

@@ -4,13 +4,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,10 +32,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.ageha.core.designsystem.AgehaSpacing
 import app.ageha.core.model.AgehaManga
 import app.ageha.core.model.SourceDescriptor
+import java.util.Locale
 
 /** The Add site dialog, as far as the rest of the screen is concerned. */
 sealed interface AddSiteState {
@@ -62,9 +70,30 @@ sealed interface AddSiteStatus {
 
 	data class Found(
 		val host: String,
+		/** The source chosen right now -- a sensible default until the person picks another. */
 		val source: SourceDescriptor,
 		/** Set when the link named a particular manga rather than the site as a whole. */
 		val manga: AgehaManga?,
+		/**
+		 * Every source that serves this site, [source] among them, in title order.
+		 *
+		 * Usually one. It is the multi-language families that make this a list: a single domain
+		 * served by a source per language, of which upstream's resolver can only ever name the
+		 * first in the build's declaration order. mangaball.net has 42, and until this existed the
+		 * dialog offered the Arabic one and no route to the rest.
+		 *
+		 * Defaults to just [source] so the ordinary one-source answer, and every test that writes
+		 * one, needs to say nothing about candidates at all.
+		 */
+		val candidates: List<SourceDescriptor> = listOf(source),
+		/**
+		 * Whether [manga] is being looked up again for a newly chosen source.
+		 *
+		 * Its own flag rather than a return to [Resolving], because the list must stay on screen
+		 * while it runs -- it is a list the person is clicking down, and pulling the rows out from
+		 * under the cursor to show a spinner would be the dialog fighting them.
+		 */
+		val reresolving: Boolean = false,
 	) : AddSiteStatus
 
 	data class NotFound(val host: String, val parsersVersion: String) : AddSiteStatus
@@ -109,6 +138,8 @@ fun AddSiteDialog(
 	state: AddSiteState.Open,
 	onInput: (String) -> Unit,
 	onFind: () -> Unit,
+	onChooseSource: (String) -> Unit,
+	onEnableAll: () -> Unit,
 	onOpenSource: () -> Unit,
 	onOpenManga: () -> Unit,
 	onRequestUpstream: () -> Unit,
@@ -161,7 +192,7 @@ fun AddSiteDialog(
 							}
 						},
 				)
-				AddSiteResult(status, onRequestUpstream)
+				AddSiteResult(status, onChooseSource, onRequestUpstream)
 			}
 		},
 		confirmButton = {
@@ -174,6 +205,11 @@ fun AddSiteDialog(
 		},
 		dismissButton = {
 			Row(horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.xs)) {
+				// For the reader who wants a site in more than one language and would otherwise
+				// paste the same link once per language. Only offered when there is more than one.
+				if (found != null && found.candidates.size > 1) {
+					TextButton(onClick = onEnableAll) { Text("Enable all ${found.candidates.size}") }
+				}
 				// A manga link still offers the site as a whole. Someone who pasted one chapter's
 				// address may well have meant "this site", and making them go and find the site's
 				// front page to say so would be the dialog being obtuse.
@@ -187,7 +223,11 @@ fun AddSiteDialog(
 }
 
 @Composable
-private fun AddSiteResult(status: AddSiteStatus, onRequestUpstream: () -> Unit) {
+private fun AddSiteResult(
+	status: AddSiteStatus,
+	onChooseSource: (String) -> Unit,
+	onRequestUpstream: () -> Unit,
+) {
 	val muted = MaterialTheme.colorScheme.onSurfaceVariant
 	// Stated outright rather than inherited. AlertDialog paints everything in its text slot with
 	// onSurfaceVariant, which is right for the explanation and wrong for the answer: the first
@@ -218,8 +258,26 @@ private fun AddSiteResult(status: AddSiteStatus, onRequestUpstream: () -> Unit) 
 				style = MaterialTheme.typography.titleMedium,
 				color = strong,
 			)
-			status.manga?.let { manga ->
-				Text("This link is a manga: ${manga.title}", style = body, color = strong)
+			if (status.candidates.size > 1) {
+				Text(
+					"${status.candidates.size} sources read this site -- it publishes in several " +
+						"languages. Choose the one you want:",
+					style = body,
+					color = muted,
+				)
+				SourceChoices(status, onChooseSource)
+			}
+			when {
+				status.reresolving -> Row(
+					horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+					Text("Looking for that title on ${status.source.title}…", style = body, color = muted)
+				}
+
+				status.manga != null ->
+					Text("This link is a manga: ${status.manga.title}", style = body, color = strong)
 			}
 			if (status.source.isBroken) {
 				// Said before opening rather than discovered after. A source upstream knows is
@@ -261,3 +319,75 @@ private fun AddSiteResult(status: AddSiteStatus, onRequestUpstream: () -> Unit) 
 		)
 	}
 }
+
+/** How much of the source list stands on screen before it starts scrolling. */
+private val CHOICE_LIST_MAX_HEIGHT = 220.dp
+
+/**
+ * The sources serving one site, to choose between.
+ *
+ * Radio rows rather than a dropdown, because the count is the point: "42 sources read this site" is
+ * only believable if the 42 are there to scroll through, and a closed menu showing one line looks
+ * exactly like the single answer this replaces.
+ */
+@Composable
+private fun SourceChoices(status: AddSiteStatus.Found, onChooseSource: (String) -> Unit) {
+	Column(
+		modifier = Modifier
+			.fillMaxWidth()
+			.heightIn(max = CHOICE_LIST_MAX_HEIGHT)
+			.verticalScroll(rememberScrollState()),
+	) {
+		status.candidates.forEach { candidate ->
+			val chosen = candidate.name == status.source.name
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					// Selectable on the whole row, not only the button: a 20dp circle is a small
+					// target to ask for 42 times, and the row already reads as one thing.
+					.selectable(
+						selected = chosen,
+						role = Role.RadioButton,
+						onClick = { onChooseSource(candidate.name) },
+					)
+					.padding(vertical = AgehaSpacing.xs),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(AgehaSpacing.sm),
+			) {
+				// Null, because the row owns the click. Handling it here as well would announce the
+				// row twice to a screen reader and toggle nothing extra.
+				RadioButton(selected = chosen, onClick = null)
+				Text(
+					candidate.title,
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onSurface,
+					modifier = Modifier.weight(1f),
+				)
+				// Only when the title does not already say it. Upstream names this family
+				// "Manga Ball (Arabic)", and a column repeating "Arabic" beside it is noise; other
+				// families name every language the same and need the label to be usable at all.
+				languageName(candidate.locale)
+					?.takeIf { !candidate.title.contains(it, ignoreCase = true) }
+					?.let {
+						Text(
+							it,
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					}
+			}
+		}
+	}
+}
+
+/**
+ * What language a source's tag names, or null for the multi-language sources that carry none.
+ *
+ * From the JDK rather than a table of Ageha's own, as `SourceRepository` already does for the
+ * language filter -- one place to be wrong about the name of a language is enough. The full display
+ * name, not just the language, so `pt-BR` reads as Portuguese (Brazil) rather than as a second
+ * Portuguese indistinguishable from the first.
+ */
+private fun languageName(tag: String?): String? = tag
+	?.takeIf { it.isNotBlank() }
+	?.let { Locale.forLanguageTag(it).getDisplayName(Locale.ENGLISH).ifEmpty { it.uppercase() } }

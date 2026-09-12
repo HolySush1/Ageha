@@ -309,8 +309,36 @@ private fun renderAddSite(outDir: File) {
 		contentType = AgehaContentType.MANGA,
 		isBroken = false,
 	)
+	// A site published in many languages, which is the case the picker exists for: upstream's
+	// resolver names whichever sorts first, and the rest need somewhere to be seen.
+	fun ball(code: String, language: String) = SourceDescriptor(
+		name = "MANGABALL_" + code.uppercase(),
+		title = "Manga Ball ($language)",
+		locale = code,
+		contentType = AgehaContentType.MANGA,
+		isBroken = false,
+	)
+	val family = listOf(
+		ball("ar", "Arabic"),
+		ball("de", "German"),
+		ball("en", "English"),
+		ball("es", "Spanish"),
+		ball("fr", "French"),
+		ball("ja", "Japanese"),
+	)
 	val scenes = listOf(
 		"found" to AddSiteState.Open("https://comix.to/", AddSiteStatus.Found("comix.to", comix, manga = null)),
+		"many" to AddSiteState.Open(
+			"https://mangaball.net/",
+			AddSiteStatus.Found(
+				host = "mangaball.net",
+				// English, not the Arabic one upstream would name, because the machine rendering
+				// this reads English -- which is the whole point of the change.
+				source = family.first { it.locale == "en" },
+				manga = null,
+				candidates = family,
+			),
+		),
 		"not-found" to AddSiteState.Open(
 			"https://example.com",
 			AddSiteStatus.NotFound("example.com", "434030d481"),
@@ -326,6 +354,8 @@ private fun renderAddSite(outDir: File) {
 						state = state,
 						onInput = {},
 						onFind = {},
+						onChooseSource = {},
+						onEnableAll = {},
 						onOpenSource = {},
 						onOpenManga = {},
 						onRequestUpstream = {},
