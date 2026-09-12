@@ -173,10 +173,23 @@ fun describe(failure: SourceFailure): FailureCopy = when (failure) {
 
 	is SourceFailure.Unknown -> FailureCopy(
 		headline = "${failure.sourceName} failed unexpectedly",
-		detail = failure.cause?.message ?: "No further detail was available.",
+		// Names the exception when it carries no message of its own. "No further detail was
+		// available" is true and useless: this is the one failure Ageha could not classify, so it
+		// is the one where the reader most needs something to go on -- and the kind of thing that
+		// throws without a message (an NPE, a bare IllegalStateException) is exactly the kind that
+		// left the panel blank. The type alone is enough to tell a site that changed shape from a
+		// fault in Ageha.
+		detail = failure.cause?.unknownDetail() ?: "No further detail was available.",
 		canRetry = true,
 		remedy = FailureCopy.Remedy.REPORT,
 	)
+}
+
+/** A line worth reading for an unclassified failure: its message, or failing that its type. */
+private fun Throwable.unknownDetail(): String {
+	message?.takeIf { it.isNotBlank() }?.let { return it }
+	val name = this::class.simpleName ?: return "No further detail was available."
+	return "Ageha could not classify this failure: " + name + "."
 }
 
 /**

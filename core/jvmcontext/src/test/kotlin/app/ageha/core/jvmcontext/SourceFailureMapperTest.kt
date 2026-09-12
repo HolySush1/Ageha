@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DisplayName
+import org.json.JSONException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.jsoup.HttpStatusException
@@ -182,5 +183,54 @@ class SourceFailureMapperTest {
 		}
 
 		assertEquals("parsed anyway", result)
+	}
+
+	/**
+	 * The commonest failure in the whole app, previously shown as "failed unexpectedly".
+	 *
+	 * 240 of the parsers in the bundled build read their answers through `org.json`. Almost none of
+	 * them check first, so a site that renames a field -- or answers an API call with an HTML error
+	 * page -- produces a bare `JSONException`. It extends Exception rather than IOException, so it
+	 * fell through every case in the mapper into `Unknown`, which is the screen that says the source
+	 * failed unexpectedly and offers to send a report. Both halves of that are wrong: it is entirely
+	 * expected, and there is nothing on the reader's side to report.
+	 */
+	@Test
+	@DisplayName("a JSON error is the site changing shape, not an unexpected failure")
+	fun jsonErrorIsUnparseable() = runTest {
+		val failure = assertThrows<SourceFailure> {
+			runSourceCall(source) { throw JSONException("No value for chapters") }
+		}
+		assertTrue(
+			failure is SourceFailure.Unparseable,
+			"expected Unparseable, got " + failure::class.simpleName,
+		)
+	}
+
+	@Test
+	@DisplayName("a JSON error nested behind the interceptor's re-wrap is still found")
+	fun nestedJsonErrorIsUnparseable() = runTest {
+		val failure = assertThrows<SourceFailure> {
+			runSourceCall(source) {
+				throw IOException("Parser interceptor failed", JSONException("No value for md_comics"))
+			}
+		}
+		assertTrue(
+			failure is SourceFailure.Unparseable,
+			"expected Unparseable, got " + failure::class.simpleName,
+		)
+	}
+
+	/** A chapter number scraped out of text that no longer holds one. Same cause, same answer. */
+	@Test
+	@DisplayName("a number that would not parse is the site changing shape too")
+	fun numberFormatErrorIsUnparseable() = runTest {
+		val failure = assertThrows<SourceFailure> {
+			runSourceCall(source) { throw NumberFormatException("For input string: Extra") }
+		}
+		assertTrue(
+			failure is SourceFailure.Unparseable,
+			"expected Unparseable, got " + failure::class.simpleName,
+		)
 	}
 }

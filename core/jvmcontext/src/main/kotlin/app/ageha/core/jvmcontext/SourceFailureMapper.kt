@@ -6,6 +6,7 @@ import app.ageha.core.model.BrowserActionRequiredException
 import app.ageha.core.model.SourceFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import org.json.JSONException
 import org.jsoup.HttpStatusException
 import org.koitharu.kotatsu.parsers.exception.AuthRequiredException
 import org.koitharu.kotatsu.parsers.exception.ContentUnavailableException
@@ -95,6 +96,23 @@ private fun classify(
 	}
 	unwrap(error) { it is ParseException }?.let {
 		return SourceFailure.Unparseable(sourceName, (it as ParseException).url, error)
+	}
+
+	// 4b. The same thing, arriving without upstream's wrapper.
+	//
+	// `ParseException` is what a parser throws when it *checks*. Most do not check: 240 of the
+	// parsers in the bundled build read their answers through `org.json`, and when a site changes a
+	// field or answers an API call with an HTML error page, what comes out is a bare
+	// `JSONException` -- which extends Exception, not IOException, so it fell through every case
+	// here into `Unknown`. That is the "failed unexpectedly, send a report" screen, and it is the
+	// wrong thing to show: the site did not fail unexpectedly, it returned something this parser
+	// cannot read, which is an ordinary and very common state of the scanlation web. It also sends
+	// the reader to look at their own setup, when there is nothing on their side to fix.
+	//
+	// `NumberFormatException` is here for the same reason and from the same cause: a chapter number
+	// or a page count scraped out of text that no longer holds one.
+	unwrap(error) { it is JSONException || it is NumberFormatException }?.let {
+		return SourceFailure.Unparseable(sourceName, url = null, cause = error)
 	}
 
 	// 5. An HTTP status the parser did not handle. jsoup raises these, and they are IOExceptions,
