@@ -103,10 +103,15 @@ val agehaModule = module {
 
 	single { AgehaDatabaseFactory.open(File(AgehaPaths.dataDir, "ageha.db")) }
 
-	// The image loader shares the source stack's HTTP client deliberately: one cookie jar, one
+	// The image loader shares the source stack's HTTP stack deliberately: one cookie jar, one
 	// User-Agent, one connection pool. A source that sets a cookie while listing and then checks
 	// for it while serving covers works only because these are the same client.
-	single<ImageLoader> { AgehaImages.create(get<SourceStack>().httpClient, AgehaPaths.cacheDir) }
+	//
+	// `imageHttpClient`, not `httpClient`: the second is the base client and has no parser
+	// dispatch, so every image fetched through it skipped its source's own interceptor. That is
+	// what made MANGA Plus pages arrive still encrypted and the eight tile-scrambling sources
+	// arrive scrambled. See SourceStack.imageHttpClient.
+	single<ImageLoader> { AgehaImages.create(get<SourceStack>().imageHttpClient, AgehaPaths.cacheDir) }
 
 	single { LibraryRepository(get<AgehaDatabase>()) }
 	single {
@@ -151,14 +156,16 @@ val agehaModule = module {
 		ChapterDownloader(
 			catalog = get(),
 			root = File(AgehaPaths.dataDir, "downloads"),
-			// The downloader fetches images through the *source stack's* client, so a page request
-			// carries the same cookies and User-Agent the chapter listing did. A separate client
-			// would be a separate identity to the site, and several sources gate images on it.
+			// The downloader fetches images through the source stack's *image* client, so a page
+			// request carries the same cookies and User-Agent the chapter listing did, and reaches
+			// the source's own interceptor. A separate client would be a separate identity to the
+			// site, and several sources gate images on it; the base client would additionally skip
+			// the descrambling a downloaded chapter needs just as much as the reader does.
 			fetchImage = { url, headers ->
 				val request = okhttp3.Request.Builder().url(url).apply {
 					headers.forEach { (name, value) -> header(name, value) }
 				}.build()
-				val response = get<SourceStack>().httpClient.newCall(request).execute()
+				val response = get<SourceStack>().imageHttpClient.newCall(request).execute()
 				if (response.isSuccessful) response.body.byteStream() else { response.close(); null }
 			},
 		)

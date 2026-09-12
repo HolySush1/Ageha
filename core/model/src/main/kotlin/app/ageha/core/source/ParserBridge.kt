@@ -1,6 +1,8 @@
 package app.ageha.core.source
 
 import app.ageha.core.model.SourceDescriptor
+import app.ageha.core.model.SourceSetting
+import okhttp3.OkHttpClient
 
 /**
  * The whole conversation between Ageha and a loaded parsers build.
@@ -44,6 +46,21 @@ interface ParserBridge : AutoCloseable {
 
 	/** Identifies the parsers build behind this bridge. A commit SHA -- upstream publishes no tags. */
 	val parsersVersion: String
+
+	/**
+	 * The client to use for any request Ageha makes *on a source's behalf* -- cover and page
+	 * images, and a downloading chapter's pages.
+	 *
+	 * It is the loaded build's own client, so it carries that build's parser dispatch: a request
+	 * naming its source is handed to that source's parser, which is how a source that descrambles
+	 * or decrypts its page images gets to do so. Fetching an image with any other client skips all
+	 * of that, and the source then looks broken rather than unwired.
+	 *
+	 * An `OkHttpClient` crosses the boundary safely for the reason the class comment gives: the
+	 * loader delegates `okhttp3.` to the parent, so both sides see one `Class`. The image *bytes*
+	 * still never cross it -- the caller fetches those itself, which `BridgeSurfaceTest` asserts.
+	 */
+	val imageHttpClient: OkHttpClient
 
 	/** Every source in this build, including ones upstream has flagged broken. */
 	fun sourceDescriptors(): List<SourceDescriptor>
@@ -107,4 +124,27 @@ interface ParserBridge : AutoCloseable {
 	 * build.
 	 */
 	fun warmLinkIndex() = Unit
+
+	/**
+	 * Every option [name]'s own parser declares, with the value currently in force.
+	 *
+	 * Empty for a source this build does not have -- and, because of the body, for a bridge older
+	 * than this application, for the staleness reason [resolveLink] gives. An empty list reads as
+	 * "this source has nothing to configure", which is wrong but harmless; an abstract member here
+	 * would be `AbstractMethodError` the first time anyone opened a source's settings.
+	 */
+	fun sourceSettings(name: String): List<SourceSetting> = emptyList()
+
+	/**
+	 * Set one of [name]'s options, or clear it back to the parser's default with a null [value].
+	 *
+	 * This is what makes a dead mirror survivable: 258 sources in the bundled build declare the
+	 * domains their site is reachable at, sites move between them, and until this existed the
+	 * parser's default was the only one Ageha could ever use.
+	 *
+	 * @return whether it was applied. False for an unknown source, and false from a stale bridge,
+	 *   which is the honest answer -- the caller can say the setting could not be saved rather than
+	 *   reporting success and changing nothing.
+	 */
+	fun applySourceSetting(name: String, key: String, value: String?): Boolean = false
 }

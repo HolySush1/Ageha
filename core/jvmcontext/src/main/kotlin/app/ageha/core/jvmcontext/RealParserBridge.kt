@@ -3,6 +3,8 @@ package app.ageha.core.jvmcontext
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.SourceDescriptor
 import app.ageha.core.model.SourceFailure
+import app.ageha.core.model.SourceSetting
+import app.ageha.core.network.AgehaPaths
 import app.ageha.core.network.PersistentCookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -11,8 +13,10 @@ import app.ageha.core.source.ParserBridge
 import app.ageha.core.source.ResolvedLink
 import kotlinx.coroutines.CancellationException
 import org.koitharu.kotatsu.parsers.MangaParser
+import org.koitharu.kotatsu.parsers.config.ConfigKey
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.model.MangaSource
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -50,7 +54,15 @@ class RealParserBridge(
 	override val parsersVersion: String,
 ) : ParserBridge {
 
-	private val configStore = SourceConfigStore()
+	/**
+	 * Backed by a file in the profile directory, not memory.
+	 *
+	 * The path is computed here rather than taken as a constructor parameter because this
+	 * constructor is a reflective ABI (see the class comment) and adding to it would break loading
+	 * in a way no compiler notices. `AgehaPaths` is parent-first, so both sides agree where the
+	 * profile is, and its `AGEHA_DATA_DIR` override keeps scratch runs out of the real one.
+	 */
+	private val configStore = SourceConfigStore(File(AgehaPaths.dataDir, SETTINGS_FILE_NAME))
 
 	private val context: AgehaMangaLoaderContext
 
@@ -64,9 +76,29 @@ class RealParserBridge(
 			jsRuntime = jsRuntime,
 			configStore = configStore,
 			parserForSource = ::parserForTag,
+			sourceForName = ::sourceForName,
 			baseHttpClient = baseHttpClient,
 		)
 	}
+
+	/**
+	 * The client for requests Ageha issues on a source's behalf -- page and cover images, and a
+	 * downloaded chapter's pages.
+	 *
+	 * This is the context's own client, the one carrying the parser dispatch and the Cloudflare
+	 * clearance, and it is exposed because the alternative is what Ageha actually shipped: the
+	 * image loader, the downloader and `agehacli pages` all used the *base* client, which has
+	 * neither. Every parser that does its real work in `intercept` -- MANGA Plus decrypting page
+	 * bytes, eight sources reassembling scrambled tiles through `redrawImageResponse` -- was
+	 * therefore never consulted about an image, and those sources looked dead rather than unwired.
+	 *
+	 * A different object from the base client, deliberately, but not a second connection pool or
+	 * cache: see the note on `AgehaMangaLoaderContext.baseHttpClient` for why that separation has
+	 * to exist while the compatibility gate can run a second build. The base client stays correct
+	 * for everything that is *not* source traffic -- the update service, sync, the app update
+	 * check -- which is why there are two.
+	 */
+	override val imageHttpClient: OkHttpClient get() = context.httpClient
 
 	private val descriptors: Map<String, SourceDescriptor> by lazy {
 		MangaParserSource.entries.associate { it.name to ParserModelMapper.descriptor(it) }
@@ -247,6 +279,85 @@ class RealParserBridge(
 		return ResolvedLink(sourceName, manga = details?.let(ParserModelMapper::manga))
 	}
 
+	// ---- per-source settings -----------------------------------------------------------------
+
+	/**
+	 * Every option [name]'s parser declares, with the value in force.
+	 *
+	 * Asked of the parser rather than of a table of Ageha's own, because the key set is the
+	 * parser's to define -- `onCreateConfig` is how it declares one -- and a build that introduces
+	 * a new setting must become configurable without an Ageha release. `configKeyDomain` is added
+	 * explicitly and deduplicated: it is the one key every source has, it is the one that matters
+	 * most, and not every parser remembers to declare it in `onCreateConfig`.
+	 */
+	override fun sourceSettings(name: String): List<SourceSetting> {
+		if (name !in descriptors) return emptyList()
+		val parser = quietly { parserFor(name) } ?: return emptyList()
+		val declared = LinkedHashSet<ConfigKey<*>>()
+		quietly { declared += parser.configKeyDomain }
+		quietly { parser.onCreateConfig(declared) }
+		val stored = configStore.snapshot(name)
+		return declared
+			.distinctBy { it.key }
+			.mapNotNull { key -> quietly { describe(key, stored) } }
+	}
+
+	/**
+	 * Set one option for [name], or clear it back to the parser's default with a null [value].
+	 *
+	 * The cached parser and client are dropped rather than mutated. `AbstractMangaParser.domain`
+	 * does read the config on every access, so a mirror change is live -- but a parser is free to
+	 * derive anything it likes from its domain when it is constructed, and the client above it
+	 * caches models whose ids came from the old one. Rebuilding costs one construction and removes
+	 * a whole class of "I changed the mirror and half of it still points at the old site".
+	 *
+	 * @return false if this build has no such source, in which case nothing was written.
+	 */
+	override fun applySourceSetting(name: String, key: String, value: String?): Boolean {
+		if (name !in descriptors) return false
+		configStore.put(name, key, value)
+		parsers.remove(name)
+		clients.remove(name)
+		return true
+	}
+
+	private fun describe(key: ConfigKey<*>, stored: Map<String, String>): SourceSetting {
+		val default = key.defaultValue?.toString().orEmpty()
+		val override = stored[key.key]
+		return SourceSetting(
+			key = key.key,
+			kind = when (key) {
+				is ConfigKey.Domain -> SourceSetting.Kind.DOMAIN
+				is ConfigKey.PreferredImageServer -> SourceSetting.Kind.IMAGE_SERVER
+				is ConfigKey.ShowSuspiciousContent,
+				is ConfigKey.SplitByTranslations,
+				is ConfigKey.InterceptCloudflare,
+				is ConfigKey.DisableUpdateChecking,
+				-> SourceSetting.Kind.TOGGLE
+				// Not an error. A key this release has never heard of still arrives, as text, and
+				// is still editable -- which is the whole reason the key set is the parser's.
+				else -> SourceSetting.Kind.TEXT
+			},
+			value = override ?: default,
+			isOverridden = override != null,
+			defaultValue = default,
+			presets = when (key) {
+				// Deduplicated by value: upstream's own preset arrays repeat themselves in places
+				// -- CuuTruyen lists nettrom.com twice -- and a mirror offered twice reads as a
+				// rendering fault rather than as upstream's list being untidy.
+				is ConfigKey.Domain -> key.presetValues.distinct()
+					.map { SourceSetting.Choice(it, it) }
+				// Both halves are nullable upstream. A choice with no value is not a choice, so it
+				// is dropped; one with no label is labelled by its own value, which is what a
+				// server identifier like "server2" would have read as anyway.
+				is ConfigKey.PreferredImageServer -> key.presetValues.mapNotNull { (value, label) ->
+					value?.let { SourceSetting.Choice(it, label ?: it) }
+				}
+				else -> emptyList()
+			},
+		)
+	}
+
 	override fun close() {
 		parsers.clear()
 		clients.clear()
@@ -261,6 +372,14 @@ class RealParserBridge(
 	 */
 	private fun parserForTag(source: MangaSource): MangaParser? =
 		sourcesByName[source.name]?.let { parserFor(it.name) }
+
+	/**
+	 * This build's own `MangaSource` for a source name, or null if it has no such source.
+	 *
+	 * Also on the hot path -- every image request goes through it -- and also must not throw, for
+	 * the reason [parserForTag] gives. A miss costs interception for that one request.
+	 */
+	private fun sourceForName(name: String): MangaSource? = sourcesByName[name]
 
 	private fun parserFor(name: String): MangaParser = parsers.computeIfAbsent(name) {
 		context.newParserInstance(sourcesByName.getValue(name))
@@ -323,5 +442,8 @@ class RealParserBridge(
 		 * placeholder instead of fetching the real title -- the link itself still opens.
 		 */
 		private const val RESOLVER_STUB_TITLE = "Unknown manga"
+
+		/** The per-source settings file, in the profile directory. */
+		private const val SETTINGS_FILE_NAME = "source-settings.properties"
 	}
 }

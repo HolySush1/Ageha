@@ -40,6 +40,10 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
 import java.io.PrintStream
+import kotlinx.coroutines.CancellationException
+import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.io.IOException
 import kotlin.system.exitProcess
 
 /**
@@ -199,6 +203,13 @@ fun main(args: Array<String>) {
 						chapterIndex = flag(args, "--chapter")?.toIntOrNull() ?: 0,
 					)
 				}
+				// What a source's own parser lets you change, and changing it. The mirror domain
+				// is the one that matters: when a site moves, this is the difference between a
+				// dead source and a working one.
+				"config" -> requireArgs(args, 2) {
+					sourceConfig(stack, args[1], args.getOrNull(2), args.getOrNull(3))
+				}
+
 				else -> {
 					System.err.println("Unknown command: " + command)
 					printUsage()
@@ -231,6 +242,64 @@ fun main(args: Array<String>) {
 private fun forceUtf8Console() {
 	System.setOut(PrintStream(System.out, true, Charsets.UTF_8))
 	System.setErr(PrintStream(System.err, true, Charsets.UTF_8))
+}
+
+/**
+ * Show, set or clear one source's own settings.
+ *
+ * With no [key], every option the source's parser declares is listed, with its current value, the
+ * choices it offers, and a marker on the one in force. With a [key] and a [value] the setting is
+ * written; with a [key] and `default` as the value the override is removed.
+ *
+ * This is the remedy for the commonest way a source dies. 258 sources in the bundled build declare
+ * the mirrors their site is reachable at, sites move between them constantly, and the domain a
+ * parser happens to default to is not always the one that answers.
+ */
+private fun sourceConfig(stack: SourceStack, sourceName: String, key: String?, value: String?) {
+	val descriptor = stack.registry.descriptorFor(sourceName)
+		?: error("No source named '" + sourceName + "'. Try: agehacli sources")
+
+	if (key == null) {
+		val settings = stack.registry.sourceSettings(sourceName)
+		println(descriptor.title + "  (" + descriptor.name + ")")
+		if (settings.isEmpty()) {
+			println("  nothing configurable")
+			return
+		}
+		for (setting in settings) {
+			val origin = if (setting.isOverridden) "set by you" else "parser default"
+			println("  " + setting.key + " = " + setting.value + "  [" + origin + "]")
+			if (setting.presets.size > 1) {
+				for (choice in setting.presets) {
+					val marker = if (choice.value == setting.value) " *" else "  "
+					val label = if (choice.label == choice.value) "" else "  -- " + choice.label
+					println("     " + marker + " " + choice.value + label)
+				}
+			}
+		}
+		println()
+		println("To change one:   agehacli config " + descriptor.name + " <key> <value>")
+		println("To reset one:    agehacli config " + descriptor.name + " <key> default")
+		return
+	}
+
+	// `default` rather than an empty argument, because a shell makes an empty argument awkward to
+	// pass and impossible to see in a scrollback.
+	val newValue = value?.takeUnless { it == "default" }
+	if (!stack.registry.applySourceSetting(sourceName, key, newValue)) {
+		error("Could not change '" + key + "' for " + descriptor.name + ".")
+	}
+	val now = stack.registry.sourceSettings(sourceName).firstOrNull { it.key == key }
+	if (newValue == null) {
+		println("Reset " + key + " to the parser default" + (now?.let { ": " + it.value } ?: "") + ".")
+	} else {
+		println("Set " + key + " to " + newValue + " for " + descriptor.name + ".")
+	}
+	// The domain is worth reading back: a typo lands silently otherwise, and the next thing the
+	// user does is wonder why the source still does not work.
+	if (now != null && now.kind == app.ageha.core.model.SourceSetting.Kind.DOMAIN) {
+		println("The source now reads " + now.value + ".")
+	}
 }
 
 private fun listSources(stack: SourceStack, filter: String?) {
@@ -699,11 +768,34 @@ private suspend fun fetchImage(stack: SourceStack, client: MangaSourceClient, ur
 			.url(url)
 			.apply { client.imageRequestHeaders().forEach { (name, value) -> header(name, value) } }
 			.build()
-		stack.httpClient.newCall(request).execute().use { response ->
-			"HTTP " + response.code + ", " + (response.header("Content-Type") ?: "no content type") +
-				", " + response.body.bytes().size + " bytes"
+		// The image client, which is what the reader uses: the base client has no parser dispatch,
+		// so fetching through it would report a source healthy whose pages the reader cannot
+		// decode. That is the failure this command exists to catch.
+		//
+		// A transport failure is reported, not thrown. A source whose CDN has gone -- a dead host,
+		// a timeout, a refused connection -- is the ordinary case this line is here to reveal, and
+		// answering it with a forty-frame stack trace buries the one line that matters under
+		// OkHttp's internals. The reader shows the same thing as a message on the page.
+		runCatching {
+			stack.imageHttpClient.newCall(request).execute().use { response ->
+				"HTTP " + response.code + ", " + (response.header("Content-Type") ?: "no content type") +
+					", " + response.body.bytes().size + " bytes"
+			}
+		}.getOrElse { failure ->
+			when (failure) {
+				is CancellationException -> throw failure
+				is IOException -> failure.describeTransport()
+				else -> throw failure
+			}
 		}
 	}
+
+/** A one-line account of why an image never arrived, in the terms the reader uses. */
+private fun IOException.describeTransport(): String = when (this) {
+	is UnknownHostException -> "could not be reached -- no such host (" + message + ")"
+	is SocketTimeoutException -> "timed out"
+	else -> (this::class.simpleName ?: "failed") + ": " + (message ?: "no detail")
+}
 
 /**
  * Search, then take the [index]-th result.
@@ -807,6 +899,9 @@ private fun printUsage() {
 		  library                       what is in the local database
 		  parsers [check|rollback]      show the loaded parsers build, or update it
 		  sources [filter]              list sources in the loaded parsers build
+		  config  <SOURCE>              what that source's parser lets you change
+		  config  <SOURCE> <key> <value>
+		                                change it; 'default' as the value clears the override
 		  defaults [--apply]            the default source set; --apply enables the missing ones
 		  search  <SOURCE> <query>      search one source
 		  details <SOURCE> <query> [n]  details and chapters for search result n (default 0)

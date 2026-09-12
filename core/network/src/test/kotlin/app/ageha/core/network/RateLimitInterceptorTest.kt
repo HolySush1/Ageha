@@ -81,7 +81,54 @@ class RateLimitInterceptorTest {
 		assertEquals(1, chain.calls)
 	}
 
+	/**
+	 * A reader opening a chapter legitimately wants twenty images at once, and the general floor
+	 * serialised exactly that -- 250ms a page, with a thread held asleep for each one, on the only
+	 * path where the delay is directly visible.
+	 */
+	@Test
+	@DisplayName("page images get the lower floor, not the one meant for parser calls")
+	fun imagesUseTheImageInterval() {
+		val clock = FakeClock()
+		val interceptor = RateLimitInterceptor(
+			minIntervalMillis = 1_000L,
+			imageIntervalMillis = 10L,
+			sleeper = clock::advance,
+			clock = clock::now,
+		)
+
+		repeat(3) {
+			interceptor.intercept(FakeChain(imageRequest("https://cdn.example.org/1.jpg"), code = 200))
+		}
+
+		assertEquals(20L, clock.slept, "images should wait the image interval, not the general one")
+	}
+
+	@Test
+	@DisplayName("a parser's own call still gets the general floor")
+	fun parserCallsKeepTheGeneralInterval() {
+		val clock = FakeClock()
+		val interceptor = RateLimitInterceptor(
+			minIntervalMillis = 1_000L,
+			imageIntervalMillis = 10L,
+			sleeper = clock::advance,
+			clock = clock::now,
+		)
+
+		repeat(2) {
+			interceptor.intercept(FakeChain(request("https://example.org/api"), code = 200))
+		}
+
+		assertEquals(1_000L, clock.slept, "an untagged request is not an image request")
+	}
+
 	private fun request(url: String) = Request.Builder().url(url).build()
+
+	/** As Ageha's image requests arrive: carrying the marker naming the source they belong to. */
+	private fun imageRequest(url: String) = Request.Builder()
+		.url(url)
+		.header(HttpHeaders.SOURCE_NAME, "TESTSOURCE")
+		.build()
 
 	private class FakeClock {
 		private var current = 0L

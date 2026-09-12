@@ -477,6 +477,48 @@ One `OkHttpClient` instance, shared. Per `FINDINGS.md` §2 this is not negotiabl
 - Proxy support from settings.
 - **We do not copy `kotatsu-dl`'s permissive-SSL trust-all block.** It exists for a CLI debugging tool. Shipping it in a desktop app would silently disable certificate validation for every user.
 
+### 6a. Two clients, and the order of the stack
+
+Both of these shipped wrong through 0.3.6 and each cost whole sources. They are written down
+because nothing about either fails at compile time, and neither is visible from the call site.
+
+**A request Ageha makes on a source's behalf must be tagged, and must use the source stack's own
+client.** The bullet above is satisfied for free on parser calls — the library's
+`OkHttpWebClient.addTags` tags them. It is *not* satisfied for the requests Ageha builds itself:
+cover and page images, and a downloading chapter's pages. Those were fetched untagged, through the
+base client, which carries no parser dispatch at all — so the eight sources that reassemble
+scrambled tiles, MANGA Plus which XOR-decrypts page bytes, and Kagane which needs an `Origin` on
+its CDN all arrived unprocessed and looked dead rather than unwired. `ParserBridge.imageHttpClient`
+is the client to use, and `imageRequestHeaders()` carries `X-Ageha-Source`, which
+`SourceTagInterceptor` turns into the tag on the child side of the wall — a header rather than a
+tag because `:core:image` may not name a `MangaSource` (CLAUDE.md 5).
+
+**`CommonHeadersInterceptor` must run *inside* the parser dispatch, not outside it.** OkHttp runs
+application interceptors first-added-outermost and `newBuilder()` appends, so the natural wiring
+puts Ageha's gap-filling above the parser. That inverts precedence, because upstream's
+`MangaParserWrapper` merges parser headers with `mergeWith(..., replace = false)`, which *skips*
+any name already present: a default filled in above the parser does not lose to the parser, the
+parser loses to it. 52 parser classes declare a `Referer`, `User-Agent` or `Accept-Language`, and
+every one of them was discarded. `AgehaMangaLoaderContext.httpClient` lifts the interceptor out of
+the inherited list and re-adds it below the dispatch. `SourceRequestPipelineTest` asserts the
+resulting order:
+
+`RateLimit → SourceTag → ParserDispatch → SourceReferer → CommonHeaders → CloudflareClearance`
+
+### 6b. Per-source settings
+
+`SourceConfigStore` backs `MangaSourceConfig`, the one-method interface each parser reads its own
+configuration through. It is persisted to `<dataDir>/source-settings.properties` as
+`<SOURCE>/<key>=<value>`, and reached from outside the wall through
+`MangaSourceRegistry.sourceSettings` / `applySourceSetting`, which carry `SourceSetting`.
+
+This matters more than it looks. 258 sources in the bundled build declare a `ConfigKey.Domain`
+listing the mirrors their site is reachable at, and manga sites move between them constantly — so
+when the domain a parser defaults to stops answering, the mirror list is the difference between a
+dead source and a working one. Until 0.3.7 the store was consulted on every request and *nothing
+ever wrote to it*, so every source ran on its parser's defaults for the life of the installation.
+`agehacli config <SOURCE>` shows and changes them.
+
 ---
 
 ## 7. What the milestones actually produce

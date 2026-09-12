@@ -129,7 +129,7 @@ internal class ParserMangaSourceClient(
 
 	override fun imageRequestHeaders(): Map<String, String> {
 		val p = parser
-		return imageHeaders(p.getRequestHeaders(), p.domain)
+		return imageHeaders(p.getRequestHeaders(), p.domain, descriptor.name)
 	}
 
 	private suspend fun ensureTagsLoaded(parser: MangaParser) {
@@ -200,11 +200,19 @@ internal class ParserMangaSourceClient(
  * 403 and the reader showed nothing.
  *
  * A parser that sets its own Referer keeps it; it knows something about its site that this does not.
+ *
+ * The map also carries [HttpHeaders.SOURCE_NAME], which is not a header any site will see: it names the
+ * source so [SourceTagInterceptor] can tag the request and [ParserDispatchInterceptor] can hand it
+ * to the parser's own `intercept`. That is what lets a source descramble or decrypt its page
+ * images -- see [SourceTagInterceptor] for what breaks without it.
  */
-internal fun imageHeaders(parserHeaders: Headers, domain: String): Map<String, String> {
+internal fun imageHeaders(parserHeaders: Headers, domain: String, sourceName: String): Map<String, String> {
 	val headers = parserHeaders.toMultimap().mapValuesTo(LinkedHashMap()) { (_, values) -> values.first() }
 	if (headers.keys.none { it.equals(HttpHeaders.REFERER, ignoreCase = true) }) {
 		sourceReferer(domain)?.let { headers[HttpHeaders.REFERER] = it }
+	}
+	if (sourceName.isNotBlank()) {
+		headers[HttpHeaders.SOURCE_NAME] = sourceName
 	}
 	return headers
 }
@@ -213,7 +221,7 @@ internal fun imageHeaders(parserHeaders: Headers, domain: String): Map<String, S
  * `https://<domain>/`, in ASCII. OkHttp rejects a header value outside it, and a source's domain
  * can be internationalised. Nothing rather than a malformed Referer if the domain will not convert.
  */
-private fun sourceReferer(domain: String): String? =
+internal fun sourceReferer(domain: String): String? =
 	runCatching { IDN.toASCII(domain) }.getOrNull()
 		?.takeIf { it.isNotBlank() }
 		?.let { "https://$it/" }

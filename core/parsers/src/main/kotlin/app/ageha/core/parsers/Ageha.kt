@@ -70,6 +70,15 @@ object Ageha {
 			registry = BridgedSourceRegistry(bridge),
 			installation = installation,
 			httpClient = httpClient,
+			// Read defensively, falling back to the base client rather than refusing to launch.
+			// `imageHttpClient` is an abstract member, so a bridge jar older than this application
+			// would raise AbstractMethodError right here -- and while withCurrentBridge below is
+			// meant to make that impossible, "images lose their parser interception" is a far
+			// better outcome for someone starting the app than "the app does not start". The
+			// fallback is exactly what every release before this one did.
+			//
+			// runCatching, and this is the one place its catching of Error is the point.
+			imageHttpClient = runCatching { bridge.imageHttpClient }.getOrDefault(httpClient),
 			bridge = bridge,
 			loader = loader,
 			cookieJar = cookieJar,
@@ -160,6 +169,11 @@ private class BridgedSourceRegistry(
 		bridge.resolveLinkAs(url, sourceName)
 
 	override fun warmLinkIndex() = bridge.warmLinkIndex()
+
+	override fun sourceSettings(name: String) = bridge.sourceSettings(name)
+
+	override fun applySourceSetting(name: String, key: String, value: String?) =
+		bridge.applySourceSetting(name, key, value)
 }
 
 /** A constructed source stack, and the handles a host needs to shut it down cleanly. */
@@ -168,6 +182,20 @@ class SourceStack internal constructor(
 	val installation: ParsersInstallation,
 	/** Shared with every loaded build, and with the update service. Closed here and nowhere else. */
 	val httpClient: OkHttpClient,
+	/**
+	 * The client for requests Ageha makes *on a source's behalf*: cover and page images, and a
+	 * downloading chapter's pages.
+	 *
+	 * Use this and not [httpClient] for anything fetched from a source. It is the loaded build's
+	 * own client, so it carries that build's parser dispatch and its Cloudflare clearance, and
+	 * that is what lets a source descramble or decrypt its page images -- see
+	 * `ParserBridge.imageHttpClient`. [httpClient] is right for everything that is not source
+	 * traffic: the update service, sync, the app update check.
+	 *
+	 * Derived from [httpClient], so it shares the cache, the connection pool and the dispatcher.
+	 * Closing [httpClient] releases both; there is nothing separate to shut down here.
+	 */
+	val imageHttpClient: OkHttpClient,
 	private val bridge: ParserBridge,
 	private val loader: ParsersClassLoader,
 	/**

@@ -21,32 +21,49 @@ class ImageHeadersTest {
 	@Test
 	@DisplayName("a parser that sets no Referer gets its source's domain, not the image host")
 	fun refererIsTheSource() {
-		assertEquals("https://comick.live/", imageHeaders(parserHeaders, "comick.live").header("Referer"))
+		assertEquals("https://comick.live/", imageHeaders(parserHeaders, "comick.live", "COMICK").header("Referer"))
 	}
 
 	@Test
 	@DisplayName("a Referer the parser set itself is kept, and not doubled")
 	fun parserRefererWins() {
 		val own = Headers.headersOf("User-Agent", "Mozilla/5.0 test", "Referer", "https://cdn.example/reader/")
-		assertEquals("https://cdn.example/reader/", imageHeaders(own, "example.org").header("Referer"))
+		assertEquals("https://cdn.example/reader/", imageHeaders(own, "example.org", "EXAMPLE").header("Referer"))
 	}
 
 	@Test
 	@DisplayName("the parser's own headers still go out")
 	fun parserHeadersKept() {
-		assertEquals("Mozilla/5.0 test", imageHeaders(parserHeaders, "comick.live").header("User-Agent"))
+		assertEquals("Mozilla/5.0 test", imageHeaders(parserHeaders, "comick.live", "COMICK").header("User-Agent"))
 	}
 
 	@Test
 	@DisplayName("an internationalised domain is sent as ASCII, which is all a header can carry")
 	fun idnDomainIsAscii() {
-		assertEquals("https://xn--bcher-kva.de/", imageHeaders(parserHeaders, "bücher.de").header("Referer"))
+		assertEquals("https://xn--bcher-kva.de/", imageHeaders(parserHeaders, "bücher.de", "BUECHER").header("Referer"))
 	}
 
 	@Test
 	@DisplayName("a blank domain adds no Referer rather than a malformed one")
 	fun blankDomainAddsNothing() {
-		assertNull(imageHeaders(parserHeaders, "").header("Referer"))
+		assertNull(imageHeaders(parserHeaders, "", "NODOMAIN").header("Referer"))
+	}
+
+	/**
+	 * The marker is how an image request reaches its parser's `intercept`, which is the only place
+	 * a descrambling or decrypting source gets to touch the bytes. Without it MANGA Plus pages
+	 * arrive still XOR-encrypted and eight other sources arrive as scrambled tiles.
+	 */
+	@Test
+	@DisplayName("the source is named, so the request can be dispatched to its parser")
+	fun sourceIsNamed() {
+		assertEquals("COMICK", imageHeaders(parserHeaders, "comick.live", "COMICK").header("X-Ageha-Source"))
+	}
+
+	@Test
+	@DisplayName("a blank source name adds no marker rather than an empty one")
+	fun blankSourceAddsNoMarker() {
+		assertNull(imageHeaders(parserHeaders, "comick.live", "").header("X-Ageha-Source"))
 	}
 
 	/** Header names are case-insensitive; a name sent twice fails the test rather than picking one. */

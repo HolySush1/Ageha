@@ -4,6 +4,7 @@ import app.ageha.core.js.InterceptedHttpRequest
 import app.ageha.core.js.JsRuntime
 import app.ageha.core.model.BrowserActionRequiredException
 import app.ageha.core.network.AgehaHttpClient
+import app.ageha.core.network.CommonHeadersInterceptor
 import app.ageha.core.network.PersistentCookieJar
 import app.ageha.core.network.UserAgents
 import okhttp3.CookieJar
@@ -57,6 +58,14 @@ class AgehaMangaLoaderContext(
 	 */
 	private val parserForSource: (MangaSource) -> MangaParser?,
 	/**
+	 * Resolves a source *name* to this build's own `MangaSource`, for requests Ageha issues on a
+	 * source's behalf rather than through a parser. Supplied by the facade, for the same reason as
+	 * [parserForSource].
+	 *
+	 * @see SourceTagInterceptor
+	 */
+	private val sourceForName: (String) -> MangaSource?,
+	/**
 	 * The shared HTTP client, owned by the parent and injected -- never built here.
 	 *
 	 * This is not a style preference. An OkHttp Cache is a DiskLruCache over one directory, and
@@ -77,14 +86,44 @@ class AgehaMangaLoaderContext(
 	 */
 	override val httpClient: OkHttpClient = baseHttpClient
 		.newBuilder()
-		// Added last so it runs innermost of the application interceptors: the parser should see
-		// headers the common interceptors have already set.
-		.addInterceptor(ParserDispatchInterceptor(parserForSource))
-		// Inside even the parser's interceptor, so it sees the request as it will actually go out
-		// -- the user agent is what a clearance is bound to -- and answers before the parser can
-		// swallow a Cloudflare page and take a fallback that returns nothing. A no-op without the
-		// browser component.
-		.addInterceptor(CloudflareClearanceInterceptor(jsRuntime, cookieJar))
+		.apply {
+			// ---- the order below is the whole point of this block ----------------------------
+			//
+			// OkHttp runs application interceptors first-added-outermost, and `newBuilder()`
+			// appends to the list it inherited. So simply adding ours put them *below* the base
+			// client's CommonHeadersInterceptor -- and that inversion silently discarded a header
+			// from every parser that sets one.
+			//
+			// The mechanism: CommonHeadersInterceptor fills in Referer, User-Agent and
+			// Accept-Language wherever they are absent. Running above the parser, it filled them
+			// in *first*; then `MangaParserWrapper.intercept` merged the parser's own
+			// `getRequestHeaders()` with `OkHttpUtils.mergeWith(..., replace = false)`, which
+			// skips every name already present. Ageha's generic defaults therefore beat the
+			// source-specific headers 52 parser classes declare -- MadthemeParser, GroupleParser,
+			// MangaboxParser, NatsuParser and ManhuaguiParser among them, several of which are
+			// base classes serving dozens of sources each.
+			//
+			// The Android app has it the other way round: parser headers first, Ageha's defaults
+			// into the gaps that remain. So CommonHeadersInterceptor is lifted out of the
+			// inherited list and re-added below the parser, which is what the rest of this file
+			// already assumed was happening.
+			val common = interceptors().filterIsInstance<CommonHeadersInterceptor>()
+			interceptors().removeAll(common)
+
+			// Above the dispatch, so an image request Ageha built carries a tag by the time the
+			// dispatch looks for one.
+			addInterceptor(SourceTagInterceptor(sourceForName))
+			addInterceptor(ParserDispatchInterceptor(parserForSource))
+			// Below the dispatch, so a Referer the parser set deliberately is already in place and
+			// is left alone.
+			addInterceptor(SourceRefererInterceptor(parserForSource))
+			common.forEach { addInterceptor(it) }
+			// Inside everything else, so it sees the request as it will actually go out -- the
+			// user agent is what a clearance is bound to -- and answers before the parser can
+			// swallow a Cloudflare page and take a fallback that returns nothing. A no-op without
+			// the browser component.
+			addInterceptor(CloudflareClearanceInterceptor(jsRuntime, cookieJar))
+		}
 		.build()
 
 	override fun getConfig(source: MangaSource): MangaSourceConfig = configStore.configFor(source)

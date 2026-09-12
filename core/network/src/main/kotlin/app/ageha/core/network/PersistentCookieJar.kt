@@ -26,6 +26,7 @@ import kotlin.concurrent.write
  */
 class PersistentCookieJar(
 	private val storageFile: File,
+	private val clock: () -> Long = System::currentTimeMillis,
 ) : CookieJar {
 
 	private val lock = ReentrantReadWriteLock()
@@ -35,12 +36,15 @@ class PersistentCookieJar(
 
 	private var dirty = false
 
+	/** When the jar last reached disk. Read by the write coalescing in [persistSoon]. */
+	private var lastPersistAt = 0L
+
 	init {
 		load()
 	}
 
 	override fun loadForRequest(url: HttpUrl): List<Cookie> {
-		val now = System.currentTimeMillis()
+		val now = clock()
 		val expired = mutableListOf<CookieKey>()
 		val matching = lock.read {
 			cookies.entries.mapNotNull { (key, cookie) ->
@@ -66,13 +70,22 @@ class PersistentCookieJar(
 
 	override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
 		if (cookies.isEmpty()) return
+		var touchedDisk = false
 		lock.write {
 			for (cookie in cookies) {
-				this.cookies[CookieKey.of(cookie)] = cookie
+				val key = CookieKey.of(cookie)
+				// Only a cookie that belongs on disk, or one displacing a cookie that was already
+				// there, can change the file. A site re-issuing the same session cookie on every
+				// response -- which plenty do -- used to mark the jar dirty and trigger a full
+				// re-serialise for a list that had not changed.
+				if (cookie.persistent || this.cookies[key]?.persistent == true) {
+					touchedDisk = true
+				}
+				this.cookies[key] = cookie
 			}
-			dirty = true
+			if (touchedDisk) dirty = true
 		}
-		persist()
+		if (touchedDisk) persistSoon()
 	}
 
 	/**
@@ -93,10 +106,18 @@ class PersistentCookieJar(
 		return converted.size
 	}
 
-	/** Drop everything for one host. Used by "clear cookies for this source" in settings. */
+	/**
+	 * Drop everything for one host. Used by "clear cookies for this source" in settings.
+	 *
+	 * Matches the whole domain family, not just the exact string. A cookie is stored under the
+	 * domain that issued it, so a site whose login lives on `www.` and whose clearance lives on the
+	 * bare domain writes two different domains -- and an equality check cleared one of them and
+	 * left the user still signed in, or still carrying the clearance they asked to be rid of.
+	 * "Clear cookies for this source" has to mean every cookie the source could receive back.
+	 */
 	fun clearForHost(host: String) {
 		lock.write {
-			cookies.entries.removeIf { it.key.domain.equals(host, ignoreCase = true) }
+			cookies.entries.removeIf { it.key.domain.isSameSiteAs(host) }
 			dirty = true
 		}
 		persist()
@@ -110,7 +131,23 @@ class PersistentCookieJar(
 		persist()
 	}
 
-	/** Flush to disk. Called after every write, and worth calling again before exit. */
+	/**
+	 * Flush to disk, but no more often than [PERSIST_INTERVAL_MS].
+	 *
+	 * The jar used to write itself out synchronously on every response carrying a `Set-Cookie`,
+	 * on the thread that was in the middle of an HTTP call. That is a full JSON re-serialise plus
+	 * a file write and a rename, and the reader hits it once per page image on any source that
+	 * re-issues a cookie -- so a chapter of forty pages meant forty rewrites of the same jar.
+	 *
+	 * The cost of coalescing is that a hard kill can lose up to [PERSIST_INTERVAL_MS] of cookies.
+	 * Ordinary exit cannot: `SourceStack.close` calls [persist], which always writes.
+	 */
+	private fun persistSoon() {
+		val due = lock.read { clock() - lastPersistAt >= PERSIST_INTERVAL_MS }
+		if (due) persist()
+	}
+
+	/** Flush to disk now, if anything has changed. Worth calling before exit. */
 	fun persist() {
 		val snapshot = lock.read {
 			if (!dirty) return
@@ -126,7 +163,10 @@ class PersistentCookieJar(
 				storageFile.delete()
 				tmp.renameTo(storageFile)
 			}
-			lock.write { dirty = false }
+			lock.write {
+				dirty = false
+				lastPersistAt = clock()
+			}
 		}
 	}
 
@@ -202,7 +242,28 @@ class PersistentCookieJar(
 
 	private companion object {
 		val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+		/**
+		 * How long a write waits for company. Short enough that a crash costs nothing anyone
+		 * would notice, long enough that a chapter's worth of page requests is one write.
+		 */
+		const val PERSIST_INTERVAL_MS = 2_000L
 	}
+}
+
+/**
+ * Whether a stored cookie's domain belongs to [host]'s site, in either direction.
+ *
+ * Both directions, because either can be the wider one: a cookie stored for `example.test` is sent
+ * to `www.example.test`, and a cookie stored for `www.example.test` is one the user means when they
+ * say "this source". Suffix matching is deliberately naive about the public suffix list -- it is
+ * used only to *delete* cookies the user asked to be rid of, where over-reach costs a re-login and
+ * under-reach costs the thing they were trying to fix.
+ */
+private fun String.isSameSiteAs(host: String): Boolean {
+	val a = lowercase()
+	val b = host.lowercase()
+	return a == b || a.endsWith(".$b") || b.endsWith(".$a")
 }
 
 /**

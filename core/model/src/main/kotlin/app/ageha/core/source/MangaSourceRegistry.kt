@@ -1,6 +1,7 @@
 package app.ageha.core.source
 
 import app.ageha.core.model.SourceDescriptor
+import app.ageha.core.model.SourceSetting
 
 /**
  * The set of manga sources the currently loaded parsers build provides.
@@ -62,4 +63,24 @@ interface MangaSourceRegistry {
 	 * build.
 	 */
 	fun warmLinkIndex() = Unit
+
+	/**
+	 * Every option [name]'s own parser declares, with the value currently in force.
+	 *
+	 * The one that matters is the mirror domain. When a site moves -- which manga sites do
+	 * constantly -- the domain a parser defaults to stops answering and the source is dead until it
+	 * is pointed somewhere else, so this is the difference between a broken source and a fixable
+	 * one.
+	 *
+	 * A body here as well, so the test doubles implementing this interface need not all learn
+	 * about settings. The one real implementation overrides it and asks the bridge.
+	 */
+	fun sourceSettings(name: String): List<SourceSetting> = emptyList()
+
+	/**
+	 * Set one of [name]'s options, or clear it back to the parser's default with a null [value].
+	 *
+	 * @return whether it was applied, so a caller can report a failure rather than assume success.
+	 */
+	fun applySourceSetting(name: String, key: String, value: String?): Boolean = false
 }
