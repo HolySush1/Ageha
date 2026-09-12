@@ -721,6 +721,12 @@ fun AgehaShell(
 							exploreViewModel.setShowAdult(it)
 							onPreferencesChange(preferences.copy(showAdultSources = it))
 						},
+						showChecksImmediately = preferences.showChecksImmediately,
+						// Nothing to notify: the browser runtime reads this from the store at the
+						// moment a check arrives, so saving it is all that switching it means.
+						onShowChecksImmediately = {
+							onPreferencesChange(preferences.copy(showChecksImmediately = it))
+						},
 					)
 				}
 

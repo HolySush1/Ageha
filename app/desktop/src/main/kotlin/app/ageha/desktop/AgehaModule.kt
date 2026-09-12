@@ -80,7 +80,20 @@ val agehaModule = module {
 	 * cost rather than by preference: an installed browser must not start being used for plain
 	 * scripts, or the common case begins paying the rare case's startup. See CompositeJsRuntime.
 	 */
-	single<JsRuntime> { CompositeJsRuntime(script = RhinoJsRuntime(), browser = JcefJsRuntime(get())) }
+	single<JsRuntime> {
+		// The store is resolved here and the *lambda* reads it, so a bot check opened ten minutes
+		// from now honours the switch as it stands then. Preferences are saved the moment they
+		// change, so a read is always current; and a read costs one small JSON file next to
+		// starting Chromium, which is what it is about to do.
+		val preferences: PreferencesStore = get()
+		CompositeJsRuntime(
+			script = RhinoJsRuntime(),
+			browser = JcefJsRuntime(
+				get(),
+				showChecksImmediately = { preferences.load().showChecksImmediately },
+			),
+		)
+	}
 
 	// One source stack for the process. It owns the OkHttp client, the cookie jar and the
 	// classloader holding the parsers build, and it is the only thing allowed to close them --

@@ -84,7 +84,18 @@ class JcefJsRuntime(
 	 */
 	private val viewportWidth: Int = 1280,
 	private val viewportHeight: Int = 800,
+	/**
+	 * Whether a check is shown the moment it is detected, rather than attempted out of sight first.
+	 *
+	 * A supplier rather than a value because it mirrors a user setting, and this object is built
+	 * once at startup: read as a value it would take a restart to change, which for a switch whose
+	 * whole subject is "ask me first" is the wrong way round.
+	 *
+	 * Defaults to showing. A caller that says nothing -- the CLI does -- gets the window.
+	 */
+	private val showChecksImmediately: () -> Boolean = { true },
 ) : JsRuntime {
+
 
 	private val lock = Mutex()
 
@@ -175,10 +186,18 @@ class JcefJsRuntime(
 	 *
 	 * Upstream's `tryResolveCaptcha`, adapted: load the page, watch it with upstream's own
 	 * [CF_STATE_JS] until it has shown the real page three polls running, then hand back the
-	 * cookies. Most Cloudflare checks clear by themselves in a real browser within a few seconds,
-	 * so the window starts where no one can see it and comes on screen only once it has been stuck
-	 * for [REVEAL_AFTER_MILLIS] -- by which point the check is one that wants a person, usually a
-	 * box to tick. Closing the window gives up.
+	 * cookies. Closing the window gives up.
+	 *
+	 * ## When the window appears
+	 *
+	 * By default, at once -- see `showChecksImmediately`. A bot check is a site asking whether a
+	 * person is there, and answering it out of sight is the app answering for them.
+	 *
+	 * The older behaviour is still reachable through that setting: because most Cloudflare checks
+	 * do clear by themselves in a real browser, the window could start where no one could see it
+	 * and come on screen only once it had been stuck for [REVEAL_AFTER_MILLIS], by which point the
+	 * check is one that wants a person and usually has a box to tick. That is quieter, and it is
+	 * quiet about the wrong thing.
 	 */
 	override suspend fun openInteractive(url: String, userAgent: String?): List<BrowserCookie>? =
 		withBrowser(
@@ -187,7 +206,7 @@ class JcefJsRuntime(
 			CHECK_TIMEOUT_MILLIS + GRACE_MILLIS,
 			interactive = true,
 		) { session ->
-			session.passCheck(userAgent, CHECK_TIMEOUT_MILLIS)
+			session.passCheck(userAgent, CHECK_TIMEOUT_MILLIS, showChecksImmediately())
 		}
 
 	override suspend fun close() {
@@ -676,13 +695,23 @@ private class BrowserSession(
 	 * honoured for the user agent that earned it -- and the cookies are about to be presented by
 	 * OkHttp, not by this browser.
 	 */
-	suspend fun passCheck(userAgent: String?, timeoutMillis: Long): List<BrowserCookie>? {
+	suspend fun passCheck(
+		userAgent: String?,
+		timeoutMillis: Long,
+		/** Whether to put the window on screen straight away rather than trying it out of sight. */
+		showImmediately: Boolean,
+	): List<BrowserCookie>? {
 		awaitCreated()
 		val started = System.currentTimeMillis()
 		userAgent?.let { presentAs(it) }
 		trace("loading $url for a check")
 		browser.loadURL(url)
-		var shown = false
+		// Shown at once unless the user has asked for the older, quieter behaviour. Revealed before
+		// the page has finished arriving, deliberately: a window that appears the instant a check
+		// is detected is the app saying "a site is asking for you" -- one that appears six seconds
+		// later, only on failure, is the app saying "I tried to handle this without you".
+		var shown = showImmediately
+		if (shown) reveal()
 		return withTimeoutOrNull(timeoutMillis) {
 			var passes = 0
 			var refusals = 0

@@ -135,6 +135,9 @@ fun SettingsScreen(
 	showAdultSources: Boolean,
 	onHideBrokenSources: (Boolean) -> Unit,
 	onShowAdultSources: (Boolean) -> Unit,
+	/** Whether a site's bot check is shown at once rather than attempted out of sight first. */
+	showChecksImmediately: Boolean = true,
+	onShowChecksImmediately: (Boolean) -> Unit = {},
 	/**
 	 * Opens a CBZ from disk.
 	 *
@@ -257,6 +260,7 @@ fun SettingsScreen(
 					hideBrokenSources, showAdultSources,
 					onHideBrokenSources, onShowAdultSources,
 					onInstallBrowser, browserProgress,
+					showChecksImmediately, onShowChecksImmediately,
 				)
 
 				SettingsSection.DOWNLOADS -> DownloadsPanel(
@@ -588,6 +592,8 @@ private fun SourcesPanel(
 	onInstallBrowser: (() -> Unit)?,
 	/** What that install is doing, while it runs. Null when nothing is running. */
 	browserProgress: String?,
+	showChecksImmediately: Boolean,
+	onShowChecksImmediately: (Boolean) -> Unit,
 ) {
 	PanelHeading(
 		"Sources",
@@ -677,7 +683,13 @@ private fun SourcesPanel(
 	}
 
 	HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-	JavaScriptStatus(jsRuntime, onInstallBrowser, browserProgress)
+	JavaScriptStatus(
+		jsRuntime,
+		onInstallBrowser,
+		browserProgress,
+		showChecksImmediately,
+		onShowChecksImmediately,
+	)
 }
 
 /**
@@ -922,6 +934,8 @@ private fun JavaScriptStatus(
 	jsRuntime: JsRuntime,
 	onInstallBrowser: (() -> Unit)?,
 	browserProgress: String?,
+	showChecksImmediately: Boolean,
+	onShowChecksImmediately: (Boolean) -> Unit,
 ) {
 	Text("JavaScript", style = MaterialTheme.typography.titleMedium)
 	val hasPlain = JsCapability.PLAIN_SCRIPT in jsRuntime.capabilities
@@ -973,7 +987,33 @@ private fun JavaScriptStatus(
 				"part of the installer because the other ~1,340 sources never start it.",
 		)
 	}
+
+	// Shown whether or not the component is installed. A setting that appears only once something
+	// else is true is a setting nobody finds, and this one describes what will happen the first
+	// time a site asks -- which is exactly when it is too late to go looking for it.
+	SettingsRows(
+		listOf(
+			{
+				SettingRow(
+					"Show bot checks straight away",
+					"rather than trying to pass them out of sight first",
+				) {
+					AgehaSwitch(
+						checked = showChecksImmediately,
+						onCheckedChange = onShowChecksImmediately,
+					)
+				}
+			},
+		),
+	)
+	Explain(
+		"A bot check is a site asking whether a person is there, so Ageha shows you the window and " +
+			"lets you answer it. Turn this off and it spends six seconds trying to pass the check " +
+			"in a window you cannot see, showing it only if that fails. Either way, many checks " +
+			"clear on their own -- so a window that appears and closes untouched is not a fault.",
+	)
 }
+
 
 /**
  * About: what this is, what updates it, and what it is built out of.

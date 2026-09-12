@@ -111,6 +111,21 @@ data class Preferences(
 	/** The picker's language filter, as an upstream tag. Null means every language. */
 	val sourceLanguage: String? = null,
 	/**
+	 * Whether a site's bot check is put in front of the user at once, rather than tried quietly.
+	 *
+	 * On by default, and deliberately. The alternative spends six seconds attempting the check in a
+	 * window nobody can see, which is the app answering "are you a person?" on the user's behalf --
+	 * at precisely the moment a site has asked for a person. If a check is going to be passed in
+	 * Ageha's name, the person whose name it is should be watching it happen.
+	 *
+	 * An honest consequence, worth stating because it looks like a bug: most Cloudflare managed
+	 * challenges really do clear themselves in a real browser, so a window will sometimes appear,
+	 * clear and close without being touched. That was always happening; this only stops hiding it.
+	 *
+	 * Off restores the older behaviour -- hidden for six seconds, shown only if it is still stuck.
+	 */
+	val showChecksImmediately: Boolean = true,
+	/**
 	 * The reader mode a manga gets when it has never been given one of its own.
 	 *
 	 * The handoff's `opts.mode`, and it is a *default* rather than a global: the reader's own chip

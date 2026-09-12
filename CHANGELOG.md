@@ -28,6 +28,18 @@ this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 - `agehacli resolve <url>` now also lists the other sources serving the same domain, and takes an
   optional source name to ask the question as that source.
 
+### Changed
+
+- **Bot checks are shown to you, not attempted behind your back.** When a site served a check,
+  Ageha spent six seconds trying to pass it in a window nobody could see and only showed it if that
+  failed -- which is the app answering "are you a person?" on your behalf, at the one moment a site
+  has asked for a person. The window now opens immediately, in front of you. **Show bot checks
+  straight away** in Settings -> Sources turns it off for anyone who preferred the quiet version.
+
+  Worth knowing, because it looks like a fault and is not: many checks really do clear by
+  themselves in a real browser, so a window will sometimes appear, clear and close without being
+  touched. That was always happening -- it is no longer hidden.
+
 ## [0.3.5] - 2026-09-11
 
 ### Fixed
