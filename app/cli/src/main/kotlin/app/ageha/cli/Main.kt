@@ -34,10 +34,16 @@ import app.ageha.core.parsers.UpdateOutcome
 import app.ageha.core.source.MangaSourceClient
 import app.ageha.core.parsers.SourceStack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Response
+import okhttp3.Callback
+import okhttp3.Call
 import java.io.File
 import java.io.PrintStream
 import kotlinx.coroutines.CancellationException
@@ -71,8 +77,14 @@ fun main(args: Array<String>) {
 	// It exists mainly so the browser tiers can be exercised without launching the UI: `pages
 	// ALLMANGA <url> --browser` is the end-to-end check that the whole path works, from
 	// MangaLoaderContext.interceptWebViewRequests down to a real page load.
-	val wantsBrowser = args.contains("--browser")
-	if (wantsBrowser) {
+	val wantsBrowser = args.contains("--browser") || args.contains("--browser-lazy")
+	// `--browser-lazy` wires the browser tier but does *not* initialise Chromium first, which is
+	// the desktop app's path and the one `--browser` never exercised: the app starts Chromium from
+	// inside the first source call that needs it, tens of seconds into a running Compose window,
+	// where `--browser` had already initialised CEF before anything else happened. A failure that
+	// lives only in that difference is invisible to every command above.
+	val eagerBrowser = args.contains("--browser") && !args.contains("--browser-lazy")
+	if (eagerBrowser) {
 		// CEF delivers its callbacks on the AWT event thread, whose default handler prints the
 		// exception and nothing else -- no stack, no cause. A handler that fails silently there
 		// looks exactly like a site that returned nothing, which is the most expensive kind of
@@ -86,7 +98,7 @@ fun main(args: Array<String>) {
 		installDir = File(AgehaPaths.dataDir, "browser"),
 		cacheDir = File(AgehaPaths.cacheDir, "browser"),
 	)
-	if (wantsBrowser) {
+	if (eagerBrowser) {
 		runBlocking {
 			// Progress on stderr, so that piping the command's output somewhere is not polluted
 			// by a download that only happens once.
@@ -136,6 +148,13 @@ fun main(args: Array<String>) {
 					seed = flag(args, "--seed")?.toLongOrNull() ?: System.currentTimeMillis(),
 				)
 				"search" -> requireArgs(args, 3) { search(stack, args[1], args[2]) }
+
+				// The source's own front page, with no filter -- which is what the app shows the moment
+				// someone opens a source, and a different code path from `search` on a good number of
+				// sources. ComicK is the case that found this: its search goes through a browser and its
+				// front page goes through an API, so a CLI that could only search proved nothing about
+				// the screen people actually land on.
+				"browse" -> requireArgs(args, 2) { browse(stack, args[1], flag(args, "--order")) }
 				"details" -> requireArgs(args, 3) {
 					details(stack, args[1], args[2], args.getOrNull(3)?.toIntOrNull() ?: 0)
 				}
@@ -193,6 +212,20 @@ fun main(args: Array<String>) {
 				// A second argument asks the question as that source rather than as the one the
 				// library picks, which is what the Add site dialog does once a language is chosen.
 				"resolve" -> requireArgs(args, 2) { resolve(stack, args[1], args.getOrNull(2)) }
+
+				// Every page image of a chapter, fetched the way the reader fetches them: all at once,
+				// through the image client. `pages` asks for exactly one, which is why it reported ComicK
+				// healthy while a reader opening the chapter saw pages fail -- one request tells you
+				// nothing about what a host does when it gets forty.
+				"chapter" -> requireArgs(args, 3) {
+					chapterImages(
+						stack = stack,
+						sourceName = args[1],
+						query = args[2],
+						index = args.getOrNull(3)?.toIntOrNull() ?: 0,
+						chapterIndex = flag(args, "--chapter")?.toIntOrNull() ?: 0,
+					)
+				}
 
 				"pages" -> requireArgs(args, 3) {
 					pages(
@@ -299,6 +332,44 @@ private fun sourceConfig(stack: SourceStack, sourceName: String, key: String?, v
 	// user does is wonder why the source still does not work.
 	if (now != null && now.kind == app.ageha.core.model.SourceSetting.Kind.DOMAIN) {
 		println("The source now reads " + now.value + ".")
+	}
+}
+
+/**
+ * One page of a source's own listing, with no filter -- the screen the app opens on.
+ *
+ * Separate from [search] because for many sources they are not the same code at all. A source
+ * whose search needs a browser and whose listing does not will pass one and fail the other, and
+ * until this existed only the search half could be checked from here.
+ */
+private suspend fun browse(stack: SourceStack, sourceName: String, orderName: String?) {
+	val client = stack.registry.clientFor(sourceName)
+	val order = orderName
+		?.let { requested ->
+			client.availableSortOrders.firstOrNull { it.name.equals(requested, ignoreCase = true) }
+				?: error(
+					"'" + requested + "' is not one of " + sourceName + "'s sort orders: " +
+						client.availableSortOrders.joinToString { it.name },
+				)
+		}
+		?: preferredOrder(client, AgehaSortOrder.UPDATED)
+
+	println("Browsing " + client.descriptor.title + " (" + client.domain + ") by " + order.name)
+	println()
+	val listing = client.list(offset = 0, order = order, filter = AgehaFilter.EMPTY)
+	if (listing.isEmpty()) {
+		// Not an exception. An empty first page is how a source that is being refused most often
+		// presents itself -- the parser catches the refusal and returns nothing -- and saying so is
+		// more use than a stack trace would be.
+		println("No items. The source answered, and had nothing to say.")
+		return
+	}
+	println("" + listing.size + " item(s) on the first page:")
+	listing.take(10).forEachIndexed { index, manga ->
+		println("  " + (index + 1) + ". " + manga.title)
+	}
+	if (listing.size > 10) {
+		println("  ... " + (listing.size - 10) + " more")
 	}
 }
 
@@ -762,6 +833,109 @@ private suspend fun pages(
 	urls.firstOrNull()?.let { println("First image: " + fetchImage(stack, client, it)) }
 }
 
+/**
+ * Fetch every page image of one chapter, concurrently, as the reader does.
+ *
+ * The gap this closes: `pages` fetches the *first* image and stops, so it answers "can this source
+ * serve an image at all" and nothing about what happens when a reader opens the chapter and asks
+ * for forty of them inside a second. A host that is happy to serve one and refuses the burst looks
+ * perfectly healthy to every other command here, and looks broken to the person reading.
+ *
+ * Reports a status per page and a summary by kind, so a refusal, a throttle and a timeout are
+ * told apart rather than counted together.
+ */
+private suspend fun chapterImages(
+	stack: SourceStack,
+	sourceName: String,
+	query: String,
+	index: Int,
+	chapterIndex: Int,
+) {
+	val client = stack.registry.clientFor(sourceName)
+	val manga = pick(client, query, index)
+	val details = client.details(manga)
+	val chapters = details.chapters.orEmpty()
+	val chapter = chapters.getOrNull(chapterIndex)
+		?: error(
+			"'" + details.title + "' has " + chapters.size + " chapter(s) on " +
+				client.descriptor.title + "; no index " + chapterIndex,
+		)
+
+	val pages = client.pages(chapter)
+	val headers = client.imageRequestHeaders()
+	println(details.title + " -- chapter " + (chapter.number ?: 0f))
+	println("" + pages.size + " pages, fetching all of them at once")
+	println()
+
+	val started = System.currentTimeMillis()
+	// Concurrently and unthrottled by us, which is the point: whatever pacing happens is the
+	// pacing the reader gets, from RateLimitInterceptor and OkHttp's own per-host limit.
+	val outcomes = coroutineScope {
+		pages.mapIndexed { position, page ->
+			async(Dispatchers.IO) {
+				val url = runCatching { client.pageUrl(page) }.getOrNull()
+					?: return@async (position + 1) to "no url"
+				(position + 1) to runCatching { fetchImageStatus(stack, url, headers) }
+					.getOrElse { failure ->
+						if (failure is CancellationException) throw failure
+						(failure as? IOException)?.describeTransport() ?: ("failed: " + failure)
+					}
+			}
+		}.map { it.await() }
+	}
+	val took = (System.currentTimeMillis() - started) / 1000.0
+
+	outcomes.filterNot { it.second.startsWith("HTTP 200") }
+		.forEach { (page, outcome) -> println("  page " + page + ": " + outcome) }
+	val byKind = outcomes.groupingBy { it.second.substringBefore(",").substringBefore(" from") }
+		.eachCount()
+		.entries
+		.sortedByDescending { it.value }
+	println()
+	println("in " + took + "s: " + byKind.joinToString { it.key + " x" + it.value })
+	val ok = outcomes.count { it.second.startsWith("HTTP 200") }
+	println("" + ok + " of " + pages.size + " page images arrived.")
+}
+
+/**
+ * [fetchImage], as a status line, for callers that fetch many.
+ *
+ * Enqueued rather than executed, and that distinction is the whole reason this function exists
+ * separately. A synchronous `execute` bypasses OkHttp's Dispatcher and therefore its
+ * `maxRequestsPerHost` cap, so a test written that way fires every page at the host at once --
+ * harsher than anything the reader does. Coil enqueues (`coil3.network.okhttp` calls
+ * `Call.enqueue`), so the reader's images are capped by the Dispatcher, and a command that means
+ * to reproduce the reader has to be capped the same way or it measures a burst nobody sends.
+ */
+private suspend fun fetchImageStatus(
+	stack: SourceStack,
+	url: String,
+	headers: Map<String, String>,
+): String {
+	val request = Request.Builder()
+		.url(url)
+		.apply { headers.forEach { (name, value) -> header(name, value) } }
+		.build()
+	val call = stack.imageHttpClient.newCall(request)
+	return suspendCancellableCoroutine { continuation ->
+		continuation.invokeOnCancellation { call.cancel() }
+		call.enqueue(
+			object : Callback {
+				override fun onFailure(call: Call, e: IOException) {
+					continuation.resumeWith(Result.success(e.describeTransport()))
+				}
+
+				override fun onResponse(call: Call, response: Response) {
+					val line = response.use {
+						"HTTP " + it.code + ", " + it.body.bytes().size + " bytes"
+					}
+					continuation.resumeWith(Result.success(line))
+				}
+			},
+		)
+	}
+}
+
 private suspend fun fetchImage(stack: SourceStack, client: MangaSourceClient, url: String): String =
 	withContext(Dispatchers.IO) {
 		val request = Request.Builder()
@@ -903,9 +1077,12 @@ private fun printUsage() {
 		  config  <SOURCE> <key> <value>
 		                                change it; 'default' as the value clears the override
 		  defaults [--apply]            the default source set; --apply enables the missing ones
+		  browse  <SOURCE> [--order O]  the source's own front page, with no filter
 		  search  <SOURCE> <query>      search one source
 		  details <SOURCE> <query> [n]  details and chapters for search result n (default 0)
 		  pages   <SOURCE> <query> [n]  page image urls for the first chapter of result n
+		  chapter <SOURCE> <query> [n] [--chapter c]
+		                                fetch every page image at once, as the reader does
 		  smoke   [--sample n] [--seed s]
 		                                exercise a random sample of sources end to end
 		  resolve <link>                which source reads a pasted site or manga link
