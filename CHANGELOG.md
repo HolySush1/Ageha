@@ -4,6 +4,60 @@ All notable changes to Ageha are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.3.7] - 2026-09-12
+
+### Fixed
+
+- **Sources that descramble or decrypt their own page images showed nothing usable.** Page and
+  cover images were fetched without naming the source they belonged to, and through the wrong HTTP
+  client — one with no parser dispatch on it — so each source's own interceptor was never handed
+  the image. That interceptor is where a good deal of real work happens: **MANGA Plus** decrypts
+  page bytes with a key carried in the image's own url, and **ExHentai**, **MangaReader.to**,
+  **Comix**, **Mangago**, **PhiliaScans**, **Cứu Truyện**, **MimiHentai** and **YuriGarden**
+  reassemble pages that arrive as shuffled tiles. Ageha implemented the descrambler faithfully and
+  then never called it, so those sources read as dead sites rather than as a missing wire.
+  **Kagane** was affected differently, needing an `Origin` its CDN insists on. Covers, reader pages
+  and downloads all reach the source's parser now.
+- **Every header a source set for itself was being thrown away.** Ageha fills in `Referer`,
+  `User-Agent` and `Accept-Language` where a request carries none — but it was doing so *before*
+  the source's parser was consulted, and the parsers library merges a parser's own headers only
+  into names that are still empty. So Ageha's generic defaults won every collision and the
+  source-specific headers declared by 52 parsers were discarded, several of those shared by dozens
+  of sites each (Madtheme, Grouple, Mangabox, Natsu, Manhuagui and more). The order now matches the
+  Android app: the source's headers first, Ageha's only into what is left over.
+- **A request for a source's own API carried the wrong `Referer`.** It named whatever host the
+  request went to, which for a site serving its API or its images from a separate host is the one
+  answer that gets refused. It now names the source's own domain, as the Android app sends it —
+  the same repair 0.3.5 made for image requests, applied to the requests parsers make themselves.
+- **"Clear cookies for this source" left some of them behind.** It matched the domain exactly, so a
+  site whose sign-in lives on `www.` and whose bot-check clearance lives on the bare domain kept
+  half its cookies, which reads as the button not working. It clears the whole domain family now.
+
+### Added
+
+- **Per-source settings, and a way to reach them.** Each source's parser declares its own options,
+  and the one that matters most is the list of mirror domains its site is reachable at — 258 of
+  Ageha's sources carry one. Ageha had the whole mechanism and no way in: the settings store was
+  consulted on every request and nothing ever wrote to it, so every source ran on its parser's
+  defaults forever and a site that moved was simply a dead source. Choices are saved to disk and
+  survive a restart. `agehacli config <SOURCE>` lists what a source offers and
+  `agehacli config <SOURCE> <key> <value>` changes it, with `default` as the value clearing it.
+
+  The in-app picker is not built yet, so for now this remedy is reachable from the command line
+  rather than from Settings.
+
+### Changed
+
+- Page images are throttled less aggressively than parser calls. The single floor was there to stop
+  Ageha looking like a scraper, and it also serialised the one thing a reader legitimately does
+  twenty at a time — a quarter-second per page, each on a thread held asleep. Parser calls keep the
+  old floor.
+- Cookies reach disk at most once every couple of seconds rather than on every response that sets
+  one. A forty-page chapter on a site that re-issues a cookie per request meant forty full rewrites
+  of the jar, each on the thread that was waiting for an image.
+- `agehacli pages` reports a page image it could not fetch — a dead host, a timeout — in one line,
+  instead of ending the command in a stack trace.
+
 ## [0.3.6] - 2026-09-12
 
 ### Fixed
